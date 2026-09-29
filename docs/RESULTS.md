@@ -1,5 +1,56 @@
 # Results
 
+## dmguard 1.1.0: re-evaluation after the external review (current)
+
+An external reviewer ran 1.0.0 and found four defects: cross-column convention transfer, lossy timestamps, a confident error on a mirror calendar pattern, and success reported despite invalid cells. All four were reproduced and fixed. See [`SPEC_v3_REVIEW_FIXES.md`](SPEC_v3_REVIEW_FIXES.md), which was committed before these numbers were produced. Raw outputs are in `bench/results/`: `raw_TEST.jsonl`, `summary_TEST.json`, `adversarial_777.json` and `perf_t4.json`.
+
+**Read first:**
+* The TEST split is **no longer unseen**: 1.0.0's results on it were known before 1.1.0 was designed. Its 1.1.0 numbers are a re-run.
+* The fresh adversarial set (seed 777, 840 ambiguous synthetic columns) was generated and run **once**, after the spec was committed.
+
+### Ambiguous cases: correct / silently wrong / flagged for a person
+
+| Method | Real data, TEST (n = 1,246) | Fresh misleading patterns (n = 840, synthetic) |
+|---|---|---|
+| pandas default / `dayfirst=True` | 50.0% / **50.0%** / 0% | 50.0% / **50.0%** / 0% |
+| DuckDB auto-detect | 50.0% / **50.0%** / 0% | 50.0% / **50.0%** / 0% |
+| Range rule + ask | 0% / 0% / 100% | 0% / 0% / 100% |
+| dmguard 1.0.0 (frozen) | 72.4% / 0% / 27.6% | 54.5% / **11.4%** / 34.0% |
+| **dmguard 1.1.0 default** | **0.3% / 0% / 99.7%** | **28.3% / 0% / 71.7%** |
+| dmguard 1.1.0 `--accept-likely` | 72.4% / 0% / 27.6% | 54.5% / **11.4%** / 34.0% |
+
+Additional detail:
+* **Silent-wrong for 1.1.0 default:** 0/1246 on TEST (Wilson 95% 0.0–0.3%; cluster bootstrap 0.0–0.0%) and 0/840 on the adversarial set.
+* **Where 1.0.0 goes wrong on the adversarial set:** 94 of its 96 errors are in the "daily run each year" family (e.g. 1–12 January every year), which is the reviewer's case. The other 2 are short daily runs.
+* **"Likely" suggestions** (applied only with `--accept-likely`) were right in 902/902 real TEST cases where one was made. On the adversarial set they were right in 220 of 316 (70%), because it contains mirror twins of both kinds by construction.
+* **DEV:** 1.1.0 default 0/360 correct and 0 wrong; with `--accept-likely` 260 correct and 0 wrong (same as 1.0.0).
+* **Unambiguous TEST cases:** 1,962/1,962 correct for 1.0.0 and for 1.1.0 (both modes).
+
+### Criteria
+
+| ID | Criterion | Result | Verdict |
+|---|---|---|---|
+| R1 | 1.1.0 default silent-wrong on ambiguous TEST ≤ 5% | 0.0% | PASS |
+| R2 | 1.1.0 default silent-wrong on fresh adversarial set ≤ 1% | 0.0% | PASS |
+| R3 | Unambiguous TEST accuracy ≥ 99.9% | 100% | PASS |
+| R4 | Lossless conversion and invalid-cell regression tests | 5/5 pass (`tests/test_review_regressions.py`) | PASS |
+| R5 | 100,000-row column < 2 s | 1.30 s worst case | PASS |
+| T2 (original, not lowered) | Auto-correct ≥ 50% of ambiguous TEST cases | 0.3% (default); 72.4% only with `--accept-likely` | **FAIL** for the default |
+
+### What changed in the claim
+
+Every automatic answer 1.0.0 gave on real data came from monthly series dated on the 1st. Those have a mirror twin ("1–12 January every year"), so calendar regularity only *prefers* them; it does not prove them. The review showed the twin really does occur in data (US-format January runs), and 1.0.0 misread it.
+
+1.1.0 therefore no longer resolves such columns by itself. It reports `AMBIGUOUS (likely X)` with both patterns explained, and the user or pipeline decides (`--accept-likely` or `--assume`). It still proves the order when the losing reading is not a regular pattern (weekly data, irregular events with enough rows), or when weekdays break the mirror. An example of the latter, on real data: 60 monthly S&P 500 closes dated on the first *trading* day, proven by weekdays alone (`demo/sp500_first_trading_day_uk.csv`).
+
+The measured benefit of the default is now: **no silent errors** (versus 50% for pandas and DuckDB), plus an explained suggestion where the data leans one way. The measured benefit is **not** high automatic coverage.
+
+---
+
+## dmguard 1.0.0: original pre-registered evaluation (historical, superseded)
+
+The numbers below are for the frozen 1.0.0 method (called `dmguard_v1_0_0` in the current raw files). They remain accurate for 1.0.0. The review showed that its automatic answers on monthly data were preferences rather than proof; see above.
+
 All numbers are produced by `bench/run_eval.py` (raw per-case outcomes in `bench/results/raw_{DEV,TEST}.jsonl`, summaries in `bench/results/summary_{DEV,TEST}.json`). Method: dmguard 1.0.0 as frozen in commit `26bfe0e` (spec v2). Environment: Python 3.11.15, pandas 3.0.6, duckdb 1.5.6, 4-vCPU Intel Xeon VM.
 
 **Benchmark nature: semi-synthetic.** The dates, their order, duplicates and gaps are real, taken from 37 public files pinned to commits. The DD/MM/YYYY and MM/DD/YYYY renderings and the row windows are generated, and every case is rendered both ways. This measures a *technical* property: how often each method loads the right dates. It does **not** measure user preference, adoption, or real-world prevalence.

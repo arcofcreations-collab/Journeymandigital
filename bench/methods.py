@@ -93,9 +93,28 @@ def range_rule(case):
 
 
 def dmguard_method(case, threshold_bits=DEFAULT_THRESHOLD_BITS):
+    """dmguard (current version), default settings."""
     res = resolve_column(case.strings, threshold_bits=threshold_bits)
     if res.resolved:
         return "parsed", parse_with_order(case.strings, res.verdict)
+    return "abstain", None
+
+
+def dmguard_accept_likely(case):
+    """dmguard with --accept-likely: also applies preferences between two regular patterns."""
+    res = resolve_column(case.strings, accept_likely=True)
+    if res.resolved:
+        return "parsed", parse_with_order(case.strings, res.verdict)
+    return "abstain", None
+
+
+def dmguard_v1_0_0(case):
+    """The frozen 1.0.0 resolver (commit 26bfe0e method; vendored unchanged)."""
+    from legacy import dmguard_1_0_0_core as legacy
+
+    res = legacy.resolve_column(case.strings)
+    if res.resolved:
+        return "parsed", legacy.parse_with_order(case.strings, res.verdict)
     return "abstain", None
 
 
@@ -104,7 +123,9 @@ METHODS = {
     "pandas_dayfirst": pandas_dayfirst,
     "duckdb_sniffer": duckdb_sniffer,
     "range_rule_ask": range_rule,
+    "dmguard_v1_0_0": dmguard_v1_0_0,
     "dmguard": dmguard_method,
+    "dmguard_accept_likely": dmguard_accept_likely,
 }
 
 

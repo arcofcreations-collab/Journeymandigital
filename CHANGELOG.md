@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 (2026-09-29)
+
+Fixes the four defects found in an external review of 1.0.0.
+
+* **No silent cross-column transfer.** A column's proven order is applied to another column only with `--assume-same-convention`; otherwise it is shown as a hint.
+* **Lossless conversion.** `fix` keeps each value's exact time precision, including every fractional-second digit.
+* **Mirror-pattern check.** When the losing order is itself a regular calendar pattern (e.g. "1st of every month" vs "1-12 January every year"), the column is `AMBIGUOUS` with a `likely` order, applied only with `--accept-likely`. Weekday evidence can still prove the order.
+* **Invalid cells need attention.** Values that are not valid dates are listed by line number and left unchanged, and the exit code becomes 2. Columns that are mostly dates are no longer skipped.
+* New adversarial tests (misleading calendar patterns) and review regression tests; 38 tests.
+* Re-evaluation: 0 silent errors on real TEST data and on a fresh adversarial set. Automatic answers on the real monthly data now require `--accept-likely` (see `docs/RESULTS.md`).
+
 ## 1.0.0 (2026-09-29)
 
 First release.

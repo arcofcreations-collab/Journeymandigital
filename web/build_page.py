@@ -12,6 +12,8 @@ DEMO = os.path.join(HERE, "..", "demo")
 SAMPLES = [
     ("UK-style monthly prices", "cpi_uk_export.csv",
      "US consumer price index 2015-2019, exported day-first (60 rows)"),
+    ("First trading day, 2000-2004", "sp500_first_trading_day_uk.csv",
+     "S&P 500 close on the first trading day of each month, day-first (60 rows): proven by weekdays"),
     ("US-style jobs panel, shuffled", "unemployment_panel_us_shuffled.csv",
      "Unemployment by industry, 14 series x 24 months, month-first, rows shuffled (336 rows)"),
     ("Two linked date columns", "orders_start_end.csv",
@@ -20,6 +22,8 @@ SAMPLES = [
      "12 values dated on the 1st: genuinely ambiguous"),
     ("Eight days in January", "daily_temps_short.csv",
      "8 consecutive daily values early in a month: too little evidence"),
+    ("Timestamps + a bad cell", "sensor_log_uk.csv",
+     "Fractional seconds kept exactly; an invalid cell is flagged"),
 ]
 
 

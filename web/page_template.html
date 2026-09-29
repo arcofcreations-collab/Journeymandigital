@@ -173,7 +173,7 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
       <div class="stack">
         <span class="eyebrow">A safety check for dates in shared data</span>
         <h1>Same file. Two readings. One is wrong, and nothing warns you.</h1>
-        <p class="lede">dmguard works out whether numeric dates are day-first or month-first by reading the calendar pattern of the whole column. When the data can't prove it, dmguard says so instead of guessing.</p>
+        <p class="lede">dmguard works out whether numeric dates are day-first or month-first by reading the calendar pattern of the whole column. When the data can't prove it, dmguard says so, gives its best suggestion and the reason, and lets you decide.</p>
       </div>
       <div class="stack">
         <div class="bigdate" aria-label="01/02/2019">01/02/2019</div>
@@ -191,7 +191,7 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
       <div class="clash" aria-label="What popular tools did with two real files">
         <div class="row"><span class="who">pandas 3.0.6</span><span>UK-style CPI file: read <span class="mono">01/02/2015</span> as <span class="x">2 January</span>, with no warning</span></div>
         <div class="row"><span class="who">DuckDB 1.5.6</span><span>US-style jobs file: read <span class="mono">07/01/2005</span> as <span class="x">7 January</span>, with no warning</span></div>
-        <div class="row"><span class="who">dmguard</span><span><span class="ok">Right on both</span>, and it explains why</span></div>
+        <div class="row"><span class="who">dmguard 1.1</span><span><span class="ok">No silent answer on either.</span> It flags both files, suggests the right order for each and explains why. On the S&amp;P sample below it proves the order outright.</span></div>
       </div>
     </div>
   </section>
@@ -247,7 +247,7 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
     <div class="stack col">
       <span class="eyebrow">Test it here</span>
       <h2>Try it on real files or your own dates</h2>
-      <p>Pick a sample, paste a column of dates (one per line), paste a whole CSV, or open a CSV file. Everything runs in your browser; nothing is uploaded. This page runs a JavaScript version of dmguard that gave the same verdict as the Python tool on all 5,946 test columns.</p>
+      <p>Pick a sample, paste a column of dates (one per line), paste a whole CSV, or open a CSV file. Everything runs in your browser; nothing is uploaded. This page runs a JavaScript version of dmguard 1.1 that gave the same answers as the Python tool on all 5,947 test columns.</p>
     </div>
     <div class="instrument">
       <div class="samples" role="group" aria-label="Sample files" id="samples"></div>
@@ -260,6 +260,10 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
             <label class="file" for="file">Open a CSV file…</label>
             <input type="file" id="file" accept=".csv,.tsv,.txt,text/csv,text/plain">
             <span id="status" aria-live="polite"></span>
+          </div>
+          <div class="controls">
+            <label><input type="checkbox" id="opt-likely"> Apply likely answers (a preference, not proof)</label>
+            <label><input type="checkbox" id="opt-same"> Every column in this file uses one convention</label>
           </div>
         </div>
         <div class="results" id="results" aria-live="polite"></div>
@@ -277,35 +281,48 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
       <li><h3>Rule out impossible dates</h3><p>If any value would be a 13th month or a 31 April under one reading, that reading is out. Neighbouring date columns in the same file can settle it too.</p></li>
       <li><h3>Measure the calendar pattern</h3><p>For each reading, count the bits needed to describe the dates: whether the rows run in order, whether the steps repeat ("+1 month", "+1 day"), and which weekdays appear. Real data is compact under the right reading and scrambled under the wrong one.</p></li>
       <li><h3>Test that it isn't chance</h3><p>The difference must be statistically clear, or the column must be more regular than 39 scrambled copies of itself in which day and month are randomly swapped.</p></li>
-      <li><h3>Answer, or refuse</h3><p>dmguard reports DMY or MDY with its reasons, or AMBIGUOUS with exit code 2 so an automated pipeline stops rather than loading wrong dates.</p></li>
+      <li><h3>Check for a mirror pattern</h3><p>"The 1st of every month" read the other way is "1–12 January every year", and both are regular calendars. When the losing reading is also a regular pattern, simplicity is only a preference. Then only weekday evidence can decide, because weekday patterns don't mirror.</p></li>
+      <li><h3>Answer, suggest, or refuse</h3><p>dmguard reports DMY or MDY with its reasons. Otherwise it reports AMBIGUOUS (with a "likely" order when there is one) and exits with code 2, so an automated pipeline stops rather than loading wrong dates.</p></li>
+      <li><h3>Convert without loss</h3><p><span class="mono">dmguard fix</span> writes ISO 8601 dates, keeping every digit of the original time. Cells that aren't valid dates stay unchanged and are listed with their line numbers.</p></li>
     </ol>
   </section>
 
   <section id="evidence" class="stack-lg">
     <div class="stack col">
-      <span class="eyebrow">Evidence</span>
-      <h2>Zero silent errors on 1,246 ambiguous test cases</h2>
-      <p>The test used 22 held-out date columns from public datasets (exchange rates, COVID-19 counts, consumer prices, stock prices, weather, employment). The dates and their order are real; we wrote each column both ways and cut shorter extracts. The method was frozen before this test ran, and the test ran once.</p>
+      <span class="eyebrow">Evidence, including what an outside review found</span>
+      <h2>No silent errors, including on patterns built to fool it</h2>
+      <p>Version 1.0 was tested on 22 date columns from public datasets (exchange rates, COVID-19 counts, consumer prices, stock prices, weather, employment). The dates and their order are real; we wrote each column both ways and cut shorter extracts. It answered 72.4% of the ambiguous cases with no wrong answers.</p>
+      <p>An independent reviewer then found four real defects:</p>
+      <ul class="plain">
+        <li>it copied one column's convention onto another column;</li>
+        <li>it dropped fractional seconds;</li>
+        <li>it reported success despite invalid cells;</li>
+        <li>it confidently misread US-format "1–12 January" data as "the 1st of every month".</li>
+      </ul>
+      <p>The last one mattered most: every automatic answer in the 1.0 test came from exactly that kind of mirror pattern. Version 1.1 fixes all four and was re-tested, including on a fresh set of 840 deliberately misleading columns.</p>
     </div>
     <div class="scroll">
       <table class="results-t">
-        <thead><tr><th>Fully ambiguous cases (n = 1,246)</th><th class="num">Correct</th><th class="num">Silently wrong</th><th class="num">Asked a person</th></tr></thead>
+        <thead><tr><th>Ambiguous cases</th><th class="num">Real data (n = 1,246):<br>correct / silently wrong</th><th class="num">Misleading patterns (n = 840):<br>correct / silently wrong</th></tr></thead>
         <tbody>
-          <tr><td>pandas (default or day-first)</td><td class="num">50.0%</td><td class="num"><span class="bar" style="width:50px;background:var(--bad)"></span>50.0%</td><td class="num">0%</td></tr>
-          <tr><td>DuckDB auto-detect</td><td class="num">50.0%</td><td class="num"><span class="bar" style="width:50px;background:var(--bad)"></span>50.0%</td><td class="num">0%</td></tr>
-          <tr><td>"Only decide if a value is over 12, else ask"</td><td class="num">0%</td><td class="num">0%</td><td class="num">100%</td></tr>
-          <tr class="us"><td>dmguard</td><td class="num">72.4%</td><td class="num">0.0%</td><td class="num">27.6%</td></tr>
+          <tr><td>pandas (default or day-first)</td><td class="num">50.0% / <span class="x">50.0%</span></td><td class="num">50.0% / <span class="x">50.0%</span></td></tr>
+          <tr><td>DuckDB auto-detect</td><td class="num">50.0% / <span class="x">50.0%</span></td><td class="num">50.0% / <span class="x">50.0%</span></td></tr>
+          <tr><td>"Only decide if a value is over 12, else ask"</td><td class="num">0% / 0%</td><td class="num">0% / 0%</td></tr>
+          <tr><td>dmguard 1.0</td><td class="num">72.4% / 0%</td><td class="num">54.5% / <span class="x">11.4%</span></td></tr>
+          <tr class="us"><td>dmguard 1.1 (default)</td><td class="num">0.3% / 0%</td><td class="num">28.3% / 0%</td></tr>
+          <tr><td>dmguard 1.1 with "apply likely answers"</td><td class="num">72.4% / 0%</td><td class="num">54.5% / <span class="x">11.4%</span></td></tr>
         </tbody>
       </table>
     </div>
-    <p class="note col">On the 1,962 test cases whose dates were not ambiguous, dmguard was 100% correct. A 100,000-row column takes at most 1.3 seconds. All four pass criteria set before the test were met. Full tables and confidence intervals are in <a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/main/docs/RESULTS.md" rel="noopener">RESULTS.md</a>.</p>
+    <p class="note col">Everything not answered was flagged for a person, never loaded wrong. On the 1,962 real cases whose dates were not ambiguous, every version was 100% correct. A 100,000-row column takes at most 1.3 seconds. Full tables are in <a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/main/docs/RESULTS.md" rel="noopener">RESULTS.md</a>, and the review fixes are in <a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/main/docs/SPEC_v3_REVIEW_FIXES.md" rel="noopener">SPEC_v3_REVIEW_FIXES.md</a>.</p>
     <div class="limits stack col">
-      <h3>What this does not show</h3>
+      <h3>What this means, plainly</h3>
       <ul class="plain">
-        <li>All of the automatic answers on the held-out data came from monthly series dated on the 1st. Short runs of daily or hourly data were always left as AMBIGUOUS: no help there, but no harm either.</li>
-        <li>A simple shortcut, "the field that never changes is the day", resolved more of these cases (91%) but silently got 8.7% wrong. dmguard's advantage is that it doesn't make silent mistakes, not that it answers more often.</li>
-        <li>The formats and extracts in the test were generated, and no people have used the tool yet. How often these files occur in practice has not been measured.</li>
-        <li>Novelty: no close equivalent was found in the documented search as of 29 September 2026. Some papers and commercial tools could not be read in full.</li>
+        <li>By default, dmguard 1.1 almost never answers on its own for real monthly data. It flags the column and suggests an order, and on the real data its suggestion was right in all 902 cases where it made one. On patterns built to mislead it, the suggestions were right 70% of the time. That is why they are only suggestions.</li>
+        <li>It proves the order outright when the pattern has no mirror image, for example weekly data or monthly data dated on the first trading day (weekdays only), given enough rows.</li>
+        <li>One goal set before the first test, answering at least half of the ambiguous real cases automatically, is <b>not met</b> by 1.1's default. Safety was chosen over coverage.</li>
+        <li>The real-data test was no longer unseen when 1.1 was re-tested, and the misleading-pattern set is synthetic. No people have used the tool yet.</li>
+        <li>Novelty: no close equivalent was found in the documented search as of 29 September 2026. Date-format detection itself, including compression-based methods, already exists; what's new here is using calendar structure to choose the order, together with the mirror-pattern check and refusing to guess.</li>
       </ul>
     </div>
   </section>
@@ -400,7 +417,8 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
 
   // ---- analysis (same file-level rule as the Python CLI)
   function analyse(cols) {
-    var out = cols.map(function (c) { return { name: c.name, values: c.values, res: dmguard.resolveColumn(c.values) }; });
+    var likelyOpt = $("opt-likely").checked, sameOpt = $("opt-same").checked;
+    var out = cols.map(function (c) { return { name: c.name, values: c.values, res: dmguard.resolveColumn(c.values, { acceptLikely: likelyOpt }) }; });
     var settled = {};
     out.forEach(function (o) {
       if (o.res.method === "validity") {
@@ -412,9 +430,13 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
       if (o.res.verdict !== "AMBIGUOUS") return;
       var s = settled[o.res.layout + o.res.separator];
       if (s && Object.keys(s).length === 1) {
-        var order = Object.keys(s)[0];
-        o.res.verdict = order; o.res.method = "file-consistency";
-        o.res.reasons.push("adopted " + order + " from column(s) " + s[order].map(function (n) { return "'" + n + "'"; }).join(", ") + " in the same file, whose values rule out the other order");
+        var order = Object.keys(s)[0], donors = s[order].map(function (n) { return "'" + n + "'"; }).join(", ");
+        if (sameOpt) {
+          o.res.verdict = order; o.res.method = "file-consistency";
+          o.res.reasons.push("adopted " + order + " from column(s) " + donors + ", whose values rule out the other order, because you said the file uses one convention");
+        } else {
+          o.res.reasons.push("hint: column(s) " + donors + " in this file are provably " + order + ". If every column uses the same convention, tick the option above; columns from different systems can differ");
+        }
       }
     });
     return out.filter(function (o) { return o.res.verdict !== "NOT_DATE" && o.res.verdict !== "EMPTY"; });
@@ -464,8 +486,10 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
       validity: "Some values are impossible dates the other way round.",
       identical: "Both readings give the same dates.",
       structure: "Decided by the calendar pattern (" + bits.toFixed(1) + " bits of evidence).",
-      "file-consistency": "Same order as another date column in this file.",
-      abstained: "The data doesn't prove either order, so dmguard refuses to guess."
+      "file-consistency": "Same order as another date column in this file (your assumption).",
+      "likely-accepted": "Likely order, applied because you chose to apply likely answers.",
+      abstained: "The data doesn't prove either order, so dmguard refuses to guess.",
+      competing: "Two regular calendar patterns fit. dmguard suggests one but won't apply it without you."
     }[m] || "";
   }
   function render(results) {
@@ -477,12 +501,13 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
     box.innerHTML = "";
     results.forEach(function (o, idx) {
       var r = o.res, cls = verdictClass(r.verdict);
-      var head = r.verdict === "AMBIGUOUS" ? "Can't tell" : r.verdict === "INCONSISTENT" ? "Mixed or invalid" : (NAMES[r.verdict] || r.verdict) + " (" + PATTERNS[r.verdict] + ")";
+      var head = r.verdict === "AMBIGUOUS" ? (r.likely ? "Can't prove it: likely " + NAMES[r.likely].toLowerCase() : "Can't tell") : r.verdict === "INCONSISTENT" ? "Mixed or invalid" : (NAMES[r.verdict] || r.verdict) + " (" + PATTERNS[r.verdict] + ")";
       var html = '<div class="col-result">';
       html += '<div class="col-head"><span class="col-name">' + esc(o.name) + " · " + r.nValues + " values" + (r.nMissing ? ", " + r.nMissing + " blank" : "") + '</span><span class="chip ' + cls + '">' + esc(r.verdict) + "</span></div>";
       html += '<div class="verdict ' + cls + '">' + esc(head) + "</div>";
       if (r.method) html += "<p>" + esc(methodText(r.method, r.evidenceBits)) + "</p>";
-      if (r.verdict === "AMBIGUOUS") html += '<div class="amb-box">Check the source\'s convention before using this column. On the command line, <span class="mono">dmguard fix --assume DMY</span> (or <span class="mono">MDY</span>) records your decision.</div>';
+      if (r.verdict === "AMBIGUOUS") html += '<div class="amb-box">Check the source\'s convention before using this column. On the command line, <span class="mono">dmguard fix --assume DMY</span> (or <span class="mono">MDY</span>) records your decision' + (r.likely ? ', and <span class="mono">--accept-likely</span> applies the suggestion' : '') + '.</div>';
+      if (r.nUnparsed) html += '<div class="amb-box"><b>' + r.nUnparsed + ' cell(s) are not valid dates</b> and would be left unchanged: ' + r.unparsedExamples.map(function (e) { return "line " + (e.row + 2) + ": " + esc(JSON.stringify(e.value)); }).join(", ") + (r.nUnparsed > r.unparsedExamples.length ? ", …" : "") + '</div>';
       if (r.reasons.length) html += '<ul class="why">' + r.reasons.map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") + "</ul>";
       if (r.examples && r.examples.length && r.candidates) {
         html += '<div class="scroll"><table class="ex"><thead><tr><th>Value</th>' + r.candidates.map(function (c) { return '<th class="' + verdictClass(c) + '">as ' + c + "</th>"; }).join("") + "</tr></thead><tbody>";
@@ -490,6 +515,11 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
           html += "<tr><td>" + esc(e.value) + "</td>" + r.candidates.map(function (c) { return "<td>" + (e.readings[c] ? esc(e.readings[c]) : '<span class="x">impossible</span>') + "</td>"; }).join("") + "</tr>";
         });
         html += "</tbody></table></div>";
+      }
+      if (["DMY", "MDY", "YMD", "YDM"].indexOf(r.verdict) >= 0) {
+        var iso = dmguard.isoWithOrder(o.values, r.verdict), pv = [];
+        for (var q = 0; q < o.values.length && pv.length < 4; q++) if (iso[q] && iso[q] !== o.values[q].trim()) pv.push("<tr><td>" + esc(o.values[q]) + "</td><td>" + esc(iso[q]) + "</td></tr>");
+        if (pv.length) html += '<div class="scroll"><table class="ex"><thead><tr><th>Value</th><th>Converted (ISO 8601, lossless)</th></tr></thead><tbody>' + pv.join("") + "</tbody></table></div>";
       }
       if (r.candidates && r.invalidCounts && r.candidates.every(function (c) { return r.invalidCounts[c] === 0; })) {
         html += '<figure><svg class="tl" id="tl' + idx + '" viewBox="0 0 520 190" role="img" aria-label="Both readings on a timeline"></svg><figcaption>Every distinct date in this column, under each reading.</figcaption></figure>';
@@ -500,7 +530,7 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
       if (svg) {
         var rd = {};
         r.candidates.forEach(function (c) { rd[c] = dmguard.parseWithOrder(o.values, c); });
-        timeline(svg, rd, r.method === "structure" || r.method === "file-consistency" ? r.verdict : null, spanLabels(rd));
+        timeline(svg, rd, ["structure", "file-consistency", "likely-accepted"].indexOf(r.method) >= 0 ? r.verdict : null, spanLabels(rd));
       }
     });
   }
@@ -527,6 +557,7 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
     });
     sBox.appendChild(b);
   });
+  ["opt-likely", "opt-same"].forEach(function (id) { $(id).addEventListener("change", run); });
   $("run").addEventListener("click", function () {
     Array.prototype.forEach.call(sBox.children, function (c) { c.setAttribute("aria-pressed", "false"); });
     run();
@@ -553,7 +584,7 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
   var cpi = SAMPLES[0];
   var cpiCol = toColumns(cpi.text)[0].values;
   var hr = { DMY: dmguard.parseWithOrder(cpiCol, "DMY"), MDY: dmguard.parseWithOrder(cpiCol, "MDY") };
-  timeline($("hero-tl"), hr, "DMY", spanLabels(hr));
+  timeline($("hero-tl"), hr, null, spanLabels(hr));
 
   // open in a working state
   sBox.children[0].click();

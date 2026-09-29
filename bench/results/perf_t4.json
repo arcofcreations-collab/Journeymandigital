@@ -1,25 +1,25 @@
 {
  "worst_case_forced_surrogate_test": {
   "rows": 100000,
-  "seconds_best_of_3": 1.257,
+  "seconds_best_of_3": 1.303,
   "verdict": "AMBIGUOUS",
   "method": "abstained"
  },
  "default_on_unsorted_random": {
   "rows": 100000,
-  "seconds_best_of_3": 0.582,
+  "seconds_best_of_3": 0.601,
   "verdict": "AMBIGUOUS",
   "method": "abstained"
  },
  "sorted_panel_structure": {
   "rows": 100000,
-  "seconds_best_of_3": 0.489,
-  "verdict": "MDY",
-  "method": "structure"
+  "seconds_best_of_3": 1.151,
+  "verdict": "AMBIGUOUS",
+  "method": "competing"
  },
  "unambiguous_validity": {
   "rows": 100000,
-  "seconds_best_of_3": 0.213,
+  "seconds_best_of_3": 0.232,
   "verdict": "MDY",
   "method": "validity"
  }

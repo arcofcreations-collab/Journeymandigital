@@ -38,17 +38,26 @@ bd = [d for d in (date(2001, 1, 1) + timedelta(days=i) for i in range(4000)) if 
 for n in (30, 300, 3000):
     cols.append([rng.choice(bd).strftime("%m/%d/%Y 09:%M:00".replace("%M", "30")) for _ in range(n)])
 
+from dmguard.core import iso_with_order  # noqa: E402
+
+cols.append(["13/04/2021 12:30:00.123456", "14/04/2021 08:00:00,5", "15/04/2021 07:05",
+             "16/04/2021 1:05 PM", "17/04/2021 23:59:59.123456789", "BAD", ""])
 py = []
 for c in cols:
     r = resolve_column(c)
-    py.append([r.verdict, r.method, r.evidence_bits])
+    ra = resolve_column(c, accept_likely=True)
+    iso = iso_with_order(c, ra.verdict) if ra.resolved else None
+    py.append([r.verdict, r.method, r.evidence_bits, r.likely, r.n_unparsed, ra.verdict, ra.method, iso])
 proc = subprocess.run(["node", os.path.join(HERE, "parity_node.js")], input=json.dumps(cols),
                       capture_output=True, text=True, check=True)
 js = json.loads(proc.stdout)
 
-mism = [(i, p, j) for i, (p, j) in enumerate(zip(py, js))
-        if p[0] != j[0] or p[1] != j[1] or abs(p[2] - j[2]) > 1e-6 * max(1.0, abs(p[2]))]
-summary = {"columns": len(cols), "verdict_or_method_mismatches": sum(p[0] != j[0] or p[1] != j[1] for _, p, j in mism),
+def same(p, j):
+    return (p[:2] == j[:2] and abs(p[2] - j[2]) <= 1e-6 * max(1.0, abs(p[2])) and p[3:] == j[3:])
+
+
+mism = [(i, p, j) for i, (p, j) in enumerate(zip(py, js)) if not same(p, j)]
+summary = {"columns": len(cols), "verdict_or_method_mismatches": sum(p[:2] != j[:2] or p[3:] != j[3:] for _, p, j in mism),
            "evidence_bit_mismatches": len(mism)}
 print(json.dumps(summary))
 for i, p, j in mism[:10]:

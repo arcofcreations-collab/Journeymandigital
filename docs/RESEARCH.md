@@ -136,6 +136,14 @@ Findings:
 * **Alteryx, Trifacta, Google Sheets, Tableau** (help pages and forum snippets) rely on explicit formats or locale settings. An Alteryx community answer says there is "no real way of distinguishing" dd/mm from mm/dd.
 * **MDL / compression.** The MDL principle is general. No source found applies it to calendar structure to choose the component order of dates.
 
+### Update after the external review (1.1.0)
+
+The reviewer noted that automated date-format detection, including minimum-description-length / entropy approaches, already has published research. I agree, and the claim is narrowed accordingly.
+
+* **Not new:** detecting date formats automatically; using compression or entropy to choose between formats; checking value ranges.
+* **Claimed contribution:** using the column's *calendar structure* (row-order steps with separately coded direction, the sorted sampling grid in calendar units, weekdays of distinct dates) to choose the day/month order of fully ambiguous columns. It adds a randomisation test against day-month-scrambled copies, a **mirror-pattern check** (monthly ↔ 1–12 January), and explicit abstention with a labelled "likely" suggestion.
+* **Still unconfirmed:** whether Liang 2025's entropy method uses sequence or calendar structure (full text inaccessible from this environment).
+
 ### Novelty conclusion
 
 > **No close equivalent was found in the documented search as of 2026-09-29.** dmguard chooses between day-first and month-first for fully ambiguous columns by comparing the compressibility of the column's *calendar structure*: row-order steps with separately coded direction, the sorted grid in calendar units, and weekdays of distinct dates. It uses a paired z-test / randomisation test against day-month-scrambled copies of the column, and abstains explicitly otherwise.

@@ -1,5 +1,5 @@
 /*
- * dmguard (JavaScript port of dmguard/core.py, v1.0.0).
+ * dmguard (JavaScript port of dmguard/core.py, v1.1.0).
  *
  * Decides whether a column of numeric dates is day-first or month-first from
  * the column's calendar structure, abstaining when the evidence is weak.
@@ -18,8 +18,11 @@
   var N_SURROGATES = 39;
   var SURROGATE_SEED = 20260929;
   var SURROGATE_MAX_ROWS = 2000;
+  var COMPETING_SHARE = 0.3;
+  var REGULAR_STEP_ENTROPY = 2.0;
+  var MIN_DATE_SHARE = 0.5;
   var MISSING = { "": 1, "na": 1, "n/a": 1, "nan": 1, "null": 1, "none": 1, "nat": 1, "-": 1, "--": 1, "?": 1 };
-  var DATE_RE = /^\s*(\d{1,4})([\/.\-])(\d{1,2})\2(\d{1,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?\s*([AaPp][Mm])?)?\s*$/;
+  var DATE_RE = /^\s*(\d{1,4})([\/.\-])(\d{1,2})\2(\d{1,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?\s*([AaPp][Mm])?)?\s*$/;
   var YEAR_LAST = ["DMY", "MDY"];
   var YEAR_FIRST = ["YMD", "YDM"];
   var LN2 = Math.log(2);
@@ -54,17 +57,18 @@
   function parseRaw(text) {
     var m = DATE_RE.exec(text);
     if (!m) return null;
-    var secs = 0;
-    if (m[5] !== undefined) {
+    var secs = 0, hasTime = m[5] !== undefined;
+    if (hasTime) {
       var h = +m[5], mi = +m[6], s = m[7] !== undefined ? +m[7] : 0;
-      if (m[8]) {
+      if (m[9]) {
         if (h < 1 || h > 12) return null;
-        h = h % 12 + (m[8].toLowerCase() === "pm" ? 12 : 0);
+        h = h % 12 + (m[9].toLowerCase() === "pm" ? 12 : 0);
       }
       if (h > 23 || mi > 59 || s > 59) return null;
       secs = h * 3600 + mi * 60 + s;
     }
-    return { a: +m[1], b: +m[3], c: +m[4], aLen: m[1].length, cLen: m[4].length, sep: m[2], secs: secs };
+    return { a: +m[1], b: +m[3], c: +m[4], aLen: m[1].length, cLen: m[4].length, sep: m[2], secs: secs,
+      hasTime: hasTime, hasSecs: m[7] !== undefined, frac: m[8] || "" };
   }
   function expandYear(y, digits) { return digits === 2 ? (y >= 69 ? 1900 + y : 2000 + y) : y; }
   function layoutOf(r) {
@@ -80,6 +84,20 @@
     if (order === "MDY") return mkDate(expandYear(r.c, r.cLen), r.a, r.b, r.secs);
     if (order === "YMD") return mkDate(r.a, r.b, r.c, r.secs);
     return mkDate(r.a, r.c, r.b, r.secs); // YDM
+  }
+  function pad(n, w) { n = String(n); while (n.length < w) n = "0" + n; return n; }
+  function isoText(r, order) { // lossless: keeps exactly the time precision written
+    var d = toDate(r, order);
+    if (!d) return null;
+    var out = pad(d.y, 4) + "-" + pad(d.m, 2) + "-" + pad(d.d, 2);
+    if (r.hasTime) {
+      out += " " + pad(Math.floor(r.secs / 3600), 2) + ":" + pad(Math.floor(r.secs % 3600 / 60), 2);
+      if (r.hasSecs) {
+        out += ":" + pad(r.secs % 60, 2);
+        if (r.frac) out += "." + r.frac;
+      }
+    }
+    return out;
   }
   function isMissing(v) { return v === null || v === undefined || MISSING[String(v).trim().toLowerCase()] === 1; }
 
@@ -188,7 +206,10 @@
     var top = mostCommon(grid.counts, 3), gridN = 0;
     grid.counts.forEach(function (c) { gridN += c; });
     var nwd = sum(wd.counts), distinctWd = wd.counts.filter(function (c) { return c > 0; }).length;
+    var ent = 0;
+    grid.counts.forEach(function (c) { ent -= c / gridN * Math.log2(c / gridN); });
     var st = {
+      stepEntropy: gridN ? ent : 0,
       order: order,
       orderBits: sum(ord.items), gridBits: sum(grid.items),
       arrangementBits: arrangementBits(values), weekdayBits: sum(wd.items),
@@ -329,9 +350,10 @@
       var v1 = rs.map(function (r) { return toDate(r, o1); });
       var v2 = rs.map(function (r) { return toDate(r, o2); });
       var keys = rs.map(function (r) { return canonicalKey(r, layout); });
-      return Math.min(readingStats(o1, v1, keys).totalBits, readingStats(o2, v2, keys).totalBits);
+      var s1 = readingStats(o1, v1, keys), s2 = readingStats(o2, v2, keys);
+      return [s1.totalBits, s2.totalBits, WEEKDAY_WEIGHT * (s2.weekdayBits - s1.weekdayBits)];
     }
-    var nul = [];
+    var nul = [], nulWd = [];
     for (var i = 0; i < k; i++) {
       var sr = raws.map(function (r) {
         var ck = canonicalKey(r, layout);
@@ -343,13 +365,19 @@
         }
         return r;
       });
-      nul.push(bestBits(sr));
+      var t = bestBits(sr);
+      nul.push(Math.min(t[0], t[1])); nulWd.push(Math.abs(t[2]));
     }
-    return { observed: bestBits(raws), nul: nul };
+    var o = bestBits(raws);
+    return { b1: o[0], b2: o[1], nul: nul, wd: o[2], nulWd: nulWd };
   }
 
   // ---------------------------------------------------------------- explain
   function pct(x) { return Math.round(x * 100) + "%"; }
+  function stepsText(s) {
+    var more = s.nStepSizes > s.stepSizes.length ? " (+" + (s.nStepSizes - s.stepSizes.length) + " more)" : "";
+    return s.stepSizes.map(function (x) { return "'" + x + "'"; }).join(", ") + more;
+  }
   function explain(best, other) {
     var r = [];
     if (best.usesFileOrder && best.forwardShare - other.forwardShare >= 0.05) {
@@ -382,19 +410,25 @@
     var threshold = opts.thresholdBits !== undefined ? opts.thresholdBits : DEFAULT_THRESHOLD_BITS;
     var minZ = opts.minZ !== undefined ? opts.minZ : MIN_Z;
     var nSur = opts.nSurrogates !== undefined ? opts.nSurrogates : N_SURROGATES;
-    var raws = [], rawText = [], nMissing = 0, nUnparsed = 0;
+    var acceptLikely = !!opts.acceptLikely;
+    var raws = [], rawText = [], nMissing = 0, nUnparsed = 0, unparsedExamples = [];
     for (var i = 0; i < values.length; i++) {
       var v = values[i];
       if (isMissing(v)) { nMissing++; continue; }
       var r = parseRaw(String(v));
-      if (!r || !layoutOf(r)) { nUnparsed++; continue; }
+      if (!r || !layoutOf(r)) {
+        nUnparsed++;
+        if (unparsedExamples.length < 5) unparsedExamples.push({ row: i, value: String(v) });
+        continue;
+      }
       raws.push(r); rawText.push(String(v).trim());
     }
     var res = { verdict: "AMBIGUOUS", method: "", evidenceBits: 0, evidenceZ: 0, components: {},
-      nValues: raws.length, nMissing: nMissing, nUnparsed: nUnparsed, examples: [], reasons: [], stats: {} };
+      nValues: raws.length, nMissing: nMissing, nUnparsed: nUnparsed, unparsedExamples: unparsedExamples,
+      examples: [], reasons: [], notes: [], likely: null, stats: {} };
     var total = raws.length + nUnparsed;
     if (total === 0) { res.verdict = "EMPTY"; return res; }
-    if (raws.length / total < 0.95) { res.verdict = "NOT_DATE"; return res; }
+    if (raws.length / total < MIN_DATE_SHARE) { res.verdict = "NOT_DATE"; return res; }
     var layouts = {}, seps = {};
     raws.forEach(function (r) { var l = layoutOf(r); layouts[l] = (layouts[l] || 0) + 1; seps[r.sep] = (seps[r.sep] || 0) + 1; });
     if (Object.keys(layouts).length !== 1 || Object.keys(seps).length !== 1) {
@@ -406,6 +440,7 @@
     res.layout = layout; res.separator = raws[0].sep;
     var cands = layout === "Y-last" ? YEAR_LAST : YEAR_FIRST;
     res.candidates = cands;
+    if (layout === "Y-last" && raws.some(function (r) { return r.cLen === 2; })) res.notes.push("two-digit years were read as 1969-2068");
     var parsed = {}, invalid = {};
     cands.forEach(function (o) {
       parsed[o] = raws.map(function (r) { return toDate(r, o); });
@@ -451,23 +486,50 @@
     res.evidenceBits = Math.abs(tot); res.evidenceZ = Math.abs(ev.z);
     res.components = { sequenceBits: ev.seq, sequenceZ: ev.z, weekdayBits: ev.wd };
     var conflict = ev.seq * ev.wd < 0 && Math.min(Math.abs(ev.seq), Math.abs(ev.wd)) >= threshold;
-    var why = null;
+    var why = null, competing = false, prefix = [];
     if (res.evidenceBits < threshold) {
       why = "it favours " + best.order + " by only " + res.evidenceBits.toFixed(1) + " bits (< " + threshold + ")";
     } else if (conflict) {
       why = "row order/grid and weekday pattern point in opposite directions (" + ev.seq.toFixed(1) + " vs " + ev.wd.toFixed(1) + " bits)";
-    } else if (!(Math.abs(ev.z) >= minZ && ev.seq * tot > 0)) {
+    } else {
       var sb = surrogateBestBits(raws, layout, o1, o2, nSur);
-      var mn = Math.min.apply(null, sb.nul);
-      res.components.structureBits = sb.observed; res.components.surrogateMinBits = mn; res.components.surrogates = sb.nul.length;
-      if (!(sb.observed < mn)) {
+      var bBest = best === ev.s1 ? sb.b1 : sb.b2, bOther = best === ev.s1 ? sb.b2 : sb.b1;
+      var wdBest = best === ev.s1 ? sb.wd : -sb.wd;
+      var floor = Math.min.apply(null, sb.nul), maxWd = Math.max.apply(null, sb.nulWd);
+      var retained = floor > bBest ? (floor - bOther) / (floor - bBest) : 1;
+      res.components.bestBits = bBest; res.components.otherBits = bOther; res.components.surrogateMinBits = floor;
+      res.components.surrogates = sb.nul.length; res.components.retainedStructure = retained;
+      res.components.otherStepEntropy = oth.stepEntropy; res.components.weekdayTowardsBest = wdBest;
+      res.components.surrogateMaxWeekday = maxWd;
+      var selfEvident = Math.abs(ev.z) >= minZ && ev.seq * tot > 0;
+      if (!(selfEvident || bBest < floor)) {
         why = "the column is no more regular than " + sb.nul.length + " scrambled copies of itself (" +
-          sb.observed.toFixed(1) + " vs best scrambled " + mn.toFixed(1) + " bits), so the " +
+          bBest.toFixed(1) + " vs best scrambled " + floor.toFixed(1) + " bits), so the " +
           res.evidenceBits.toFixed(1) + "-bit lean towards " + best.order + " may be chance";
+      } else if (retained >= COMPETING_SHARE || oth.stepEntropy <= REGULAR_STEP_ENTROPY) {
+        if (wdBest >= threshold && wdBest > maxWd) {
+          prefix = ["row order and sampling grid are regular under both orders (" + best.order + ": " + stepsText(best) +
+            "; " + oth.order + ": " + stepsText(oth) + "), so the decision rests on weekdays (" + wdBest.toFixed(1) +
+            " bits, more than any of " + sb.nulWd.length + " scrambled copies)"];
+        } else {
+          competing = true;
+          why = "both orders form regular calendar patterns: under " + best.order + " the sorted dates step by " +
+            stepsText(best) + "; under " + oth.order + " by " + stepsText(oth) + ". " + best.order + " is simpler by " +
+            res.evidenceBits.toFixed(1) + " bits, which is a preference, not proof";
+        }
       }
     }
     if (why === null) {
-      res.verdict = best.order; res.method = "structure"; res.reasons = explain(best, oth);
+      res.verdict = best.order; res.method = "structure"; res.reasons = prefix.concat(explain(best, oth));
+    } else if (competing) {
+      res.likely = best.order;
+      if (acceptLikely) {
+        res.verdict = best.order; res.method = "likely-accepted";
+        res.reasons.push(why + "; " + best.order + " applied because likely answers were accepted");
+      } else {
+        res.verdict = "AMBIGUOUS"; res.method = "competing";
+        res.reasons.push(why + "; likely " + best.order + ", but not applied without confirmation");
+      }
     } else {
       res.verdict = "AMBIGUOUS"; res.method = "abstained";
       res.reasons.push("calendar structure is not conclusive: " + why + "; refusing to guess");
@@ -483,8 +545,16 @@
     });
   }
 
+  function isoWithOrder(values, order) {
+    return values.map(function (v) {
+      if (isMissing(v)) return null;
+      var r = parseRaw(String(v));
+      return r ? isoText(r, order) : null;
+    });
+  }
+
   var api = {
-    VERSION: "1.0.0", DEFAULT_THRESHOLD_BITS: DEFAULT_THRESHOLD_BITS,
+    VERSION: "1.1.0", isoWithOrder: isoWithOrder, DEFAULT_THRESHOLD_BITS: DEFAULT_THRESHOLD_BITS,
     resolveColumn: resolveColumn, parseWithOrder: parseWithOrder, isoDate: isoDate,
     _pyTupleHash: pyTupleHash, _MT: MT
   };

@@ -1,0 +1,241 @@
+{
+ "seed": 777,
+ "per_family": 60,
+ "n_cases": 840,
+ "n_ambiguous": 840,
+ "overall": {
+  "pandas_default": {
+   "silent_wrong": 420,
+   "correct": 420
+  },
+  "pandas_dayfirst": {
+   "correct": 420,
+   "silent_wrong": 420
+  },
+  "duckdb_sniffer": {
+   "correct": 420,
+   "silent_wrong": 420
+  },
+  "range_rule_ask": {
+   "abstain": 840
+  },
+  "dmguard_v1_0_0": {
+   "correct": 458,
+   "silent_wrong": 96,
+   "abstain": 286
+  },
+  "dmguard": {
+   "correct": 238,
+   "abstain": 602
+  },
+  "dmguard_accept_likely": {
+   "correct": 458,
+   "silent_wrong": 96,
+   "abstain": 286
+  }
+ },
+ "by_family": {
+  "business_days": {
+   "n": 120,
+   "pandas_default": {
+    "silent_wrong": 60,
+    "correct": 60
+   },
+   "pandas_dayfirst": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "duckdb_sniffer": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "range_rule_ask": {
+    "abstain": 120
+   },
+   "dmguard_v1_0_0": {
+    "correct": 120
+   },
+   "dmguard": {
+    "correct": 118,
+    "abstain": 2
+   },
+   "dmguard_accept_likely": {
+    "correct": 120
+   }
+  },
+  "daily_run_each_year": {
+   "n": 120,
+   "pandas_default": {
+    "silent_wrong": 60,
+    "correct": 60
+   },
+   "pandas_dayfirst": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "duckdb_sniffer": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "range_rule_ask": {
+    "abstain": 120
+   },
+   "dmguard_v1_0_0": {
+    "silent_wrong": 94,
+    "abstain": 26
+   },
+   "dmguard": {
+    "abstain": 120
+   },
+   "dmguard_accept_likely": {
+    "silent_wrong": 94,
+    "abstain": 26
+   }
+  },
+  "daily_short": {
+   "n": 120,
+   "pandas_default": {
+    "silent_wrong": 60,
+    "correct": 60
+   },
+   "pandas_dayfirst": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "duckdb_sniffer": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "range_rule_ask": {
+    "abstain": 120
+   },
+   "dmguard_v1_0_0": {
+    "abstain": 118,
+    "silent_wrong": 2
+   },
+   "dmguard": {
+    "abstain": 120
+   },
+   "dmguard_accept_likely": {
+    "abstain": 118,
+    "silent_wrong": 2
+   }
+  },
+  "irregular": {
+   "n": 120,
+   "pandas_default": {
+    "silent_wrong": 60,
+    "correct": 60
+   },
+   "pandas_dayfirst": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "duckdb_sniffer": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "range_rule_ask": {
+    "abstain": 120
+   },
+   "dmguard_v1_0_0": {
+    "abstain": 120
+   },
+   "dmguard": {
+    "abstain": 120
+   },
+   "dmguard_accept_likely": {
+    "abstain": 120
+   }
+  },
+  "monthly_on_day_k": {
+   "n": 120,
+   "pandas_default": {
+    "silent_wrong": 60,
+    "correct": 60
+   },
+   "pandas_dayfirst": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "duckdb_sniffer": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "range_rule_ask": {
+    "abstain": 120
+   },
+   "dmguard_v1_0_0": {
+    "correct": 110,
+    "abstain": 10
+   },
+   "dmguard": {
+    "abstain": 120
+   },
+   "dmguard_accept_likely": {
+    "correct": 110,
+    "abstain": 10
+   }
+  },
+  "quarterly": {
+   "n": 120,
+   "pandas_default": {
+    "silent_wrong": 60,
+    "correct": 60
+   },
+   "pandas_dayfirst": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "duckdb_sniffer": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "range_rule_ask": {
+    "abstain": 120
+   },
+   "dmguard_v1_0_0": {
+    "correct": 110,
+    "abstain": 10
+   },
+   "dmguard": {
+    "abstain": 118,
+    "correct": 2
+   },
+   "dmguard_accept_likely": {
+    "correct": 110,
+    "abstain": 10
+   }
+  },
+  "weekly": {
+   "n": 120,
+   "pandas_default": {
+    "silent_wrong": 60,
+    "correct": 60
+   },
+   "pandas_dayfirst": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "duckdb_sniffer": {
+    "correct": 60,
+    "silent_wrong": 60
+   },
+   "range_rule_ask": {
+    "abstain": 120
+   },
+   "dmguard_v1_0_0": {
+    "correct": 118,
+    "abstain": 2
+   },
+   "dmguard": {
+    "correct": 118,
+    "abstain": 2
+   },
+   "dmguard_accept_likely": {
+    "correct": 118,
+    "abstain": 2
+   }
+  }
+ }
+}
