@@ -1,5 +1,7 @@
 # dmguard: is `03/04/2021` the 3rd of April or March 4th? Ask the calendar, not the locale.
 
+[![tests](https://github.com/arcofcreations-collab/Journeymandigital/actions/workflows/tests.yml/badge.svg)](https://github.com/arcofcreations-collab/Journeymandigital/actions/workflows/tests.yml) ![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue) ![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen) ![license MIT](https://img.shields.io/badge/license-MIT-lightgrey)
+
 `dmguard` is a small command-line tool and Python library. It decides whether a column of numeric dates is **day-first or month-first** when the values alone cannot tell, and it **refuses to guess** when the data doesn't support a decision.
 
 It was built during an AI capability test ("invent something new and useful, then build it"). The research, frozen specification, evaluation and an honest log are in [`docs/`](docs).
@@ -36,13 +38,14 @@ The novelty search found no tool, paper, patent or repository that uses temporal
 Requires Python ≥ 3.9. **No third-party dependencies.**
 
 ```bash
-git clone https://github.com/arcofcreations-collab/Journeymandigital.git && cd Journeymandigital
-pip install .                      # or skip installing and use: python3 -m dmguard ...
+pip install "git+https://github.com/arcofcreations-collab/Journeymandigital@v1.0.0"
 dmguard check your_file.csv        # report each date column's order and why
 dmguard fix your_file.csv -o clean.csv   # also write resolved columns as ISO 8601
 dmguard fix your_file.csv -o clean.csv --assume DMY   # your decision for columns the data can't settle
 dmguard check your_file.csv --json # machine-readable
 ```
+
+Or work from a clone (no install needed): `git clone https://github.com/arcofcreations-collab/Journeymandigital.git && cd Journeymandigital && python3 -m dmguard check your_file.csv`.
 
 Exit codes: `0` all date columns resolved · `2` at least one date column ambiguous or inconsistent (so pipelines stop) · `1` input error.
 

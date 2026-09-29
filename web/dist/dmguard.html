@@ -298,7 +298,7 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
         </tbody>
       </table>
     </div>
-    <p class="note col">On the 1,962 test cases whose dates were not ambiguous, dmguard was 100% correct. A 100,000-row column takes at most 1.3 seconds. All four pass criteria set before the test were met. Full tables and confidence intervals are in <a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/claude/ai-capability-test-invention-a53mgb/docs/RESULTS.md" rel="noopener">RESULTS.md</a>.</p>
+    <p class="note col">On the 1,962 test cases whose dates were not ambiguous, dmguard was 100% correct. A 100,000-row column takes at most 1.3 seconds. All four pass criteria set before the test were met. Full tables and confidence intervals are in <a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/main/docs/RESULTS.md" rel="noopener">RESULTS.md</a>.</p>
     <div class="limits stack col">
       <h3>What this does not show</h3>
       <ul class="plain">
@@ -319,7 +319,7 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
     <div class="get">
       <div class="stack">
         <h3>Install and use</h3>
-        <div class="cmd"><pre id="c1">pip install "git+https://github.com/arcofcreations-collab/Journeymandigital@claude/ai-capability-test-invention-a53mgb"</pre><button class="btn" type="button" data-copy="c1">Copy</button></div>
+        <div class="cmd"><pre id="c1">pip install "git+https://github.com/arcofcreations-collab/Journeymandigital@v1.0.0"</pre><button class="btn" type="button" data-copy="c1">Copy</button></div>
         <div class="cmd"><pre id="c2">dmguard check your_file.csv</pre><button class="btn" type="button" data-copy="c2">Copy</button></div>
         <div class="cmd"><pre id="c3">dmguard fix your_file.csv -o clean.csv</pre><button class="btn" type="button" data-copy="c3">Copy</button></div>
         <p class="note"><span class="mono">check</span> reports each date column and why. <span class="mono">fix</span> writes a copy with dates in ISO 8601 (<span class="mono">2019-02-01</span>). Add <span class="mono">--assume DMY</span> or <span class="mono">--assume MDY</span> to record your own decision for columns the data can't settle.</p>
@@ -327,10 +327,11 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: var(--
       <div class="stack">
         <h3>Check the claims</h3>
         <ul class="plain">
-          <li><a href="https://github.com/arcofcreations-collab/Journeymandigital/tree/claude/ai-capability-test-invention-a53mgb" rel="noopener">Source code on GitHub</a> (branch <span class="mono">claude/ai-capability-test-invention-a53mgb</span>)</li>
-          <li><a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/claude/ai-capability-test-invention-a53mgb/README.md" rel="noopener">README</a>: install, demo walkthrough, and how to reproduce the benchmark</li>
-          <li><a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/claude/ai-capability-test-invention-a53mgb/docs/RESEARCH.md" rel="noopener">Research and novelty search</a>, with the rejected ideas</li>
-          <li><a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/claude/ai-capability-test-invention-a53mgb/docs/ACTIVITY_LOG.md" rel="noopener">Activity log</a>, including the mistakes made and fixed</li>
+          <li><a href="https://github.com/arcofcreations-collab/Journeymandigital" rel="noopener">Source code on GitHub</a> (release <span class="mono">v1.0.0</span>)</li>
+          <li><a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/main/README.md" rel="noopener">README</a>: install, demo walkthrough, and how to reproduce the benchmark</li>
+          <li><a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/main/docs/RESEARCH.md" rel="noopener">Research and novelty search</a>, with the rejected ideas</li>
+          <li><a href="https://github.com/arcofcreations-collab/Journeymandigital/blob/main/docs/ACTIVITY_LOG.md" rel="noopener">Activity log</a>, including the mistakes made and fixed</li>
+          <li><a href="https://github.com/arcofcreations-collab/Journeymandigital/issues" rel="noopener">Report a problem or suggest an improvement</a></li>
         </ul>
         <p class="note">To reproduce the benchmark, clone the repository and run <span class="mono">python3 bench/fetch_data.py</span> then <span class="mono">python3 bench/run_eval.py TEST</span>. It takes about a minute.</p>
       </div>
