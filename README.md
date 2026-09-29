@@ -38,7 +38,7 @@ The novelty search found no tool, paper, patent or repository that uses temporal
 Requires Python ≥ 3.9. **No third-party dependencies.**
 
 ```bash
-pip install "git+https://github.com/arcofcreations-collab/Journeymandigital@v1.0.0"
+pip install "git+https://github.com/arcofcreations-collab/Journeymandigital@main"
 dmguard check your_file.csv        # report each date column's order and why
 dmguard fix your_file.csv -o clean.csv   # also write resolved columns as ISO 8601
 dmguard fix your_file.csv -o clean.csv --assume DMY   # your decision for columns the data can't settle
