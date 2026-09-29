@@ -27,6 +27,7 @@ __all__ = [
     "DEFAULT_THRESHOLD_BITS",
     "resolve_column",
     "parse_with_order",
+    "iso_with_order",
 ]
 
 # Minimum evidence (bits) before a structural verdict is issued. Chosen on the
@@ -48,12 +49,27 @@ N_SURROGATES = 39
 SURROGATE_SEED = 20260929
 SURROGATE_MAX_ROWS = 2000
 
+# When the losing order keeps at least this share of the winning order's
+# calendar structure, the two are treated as competing patterns. Fixed a
+# priori on the conservative side (see docs/SPEC_v3_REVIEW_FIXES.md).
+COMPETING_SHARE = 0.3
+
+# ... or when the losing order's sorted dates use step sizes with at most this
+# much entropy (about four equally common step sizes): a regular sampling
+# scheme in its own right. Independent of the surrogate reference, which is
+# unreliable for columns with few distinct values.
+REGULAR_STEP_ENTROPY = 2.0
+
+# A column is treated as a date column when at least this share of its
+# non-blank values are numeric dates; the rest are reported as problems.
+MIN_DATE_SHARE = 0.5
+
 MISSING = {"", "na", "n/a", "nan", "null", "none", "nat", "-", "--", "?"}
 
 _DATE_RE = re.compile(
     r"""^\s*
     (?P<a>\d{1,4})(?P<sep>[/.\-])(?P<b>\d{1,2})(?P=sep)(?P<c>\d{1,4})
-    (?:[ T](?P<H>\d{1,2}):(?P<M>\d{2})(?::(?P<S>\d{2})(?:[.,]\d+)?)?\s*(?P<ampm>[AaPp][Mm])?)?
+    (?:[ T](?P<H>\d{1,2}):(?P<M>\d{2})(?::(?P<S>\d{2})(?:[.,](?P<F>\d+))?)?\s*(?P<ampm>[AaPp][Mm])?)?
     \s*$""",
     re.VERBOSE,
 )
@@ -71,6 +87,9 @@ class _Raw:
     c_len: int
     sep: str
     seconds: int  # seconds since midnight, 0 when no time given
+    has_time: bool = False
+    has_secs: bool = False
+    frac: str = ""  # fractional-second digits exactly as written
 
 
 def _parse_raw(text: str) -> Optional[_Raw]:
@@ -78,7 +97,8 @@ def _parse_raw(text: str) -> Optional[_Raw]:
     if not m:
         return None
     seconds = 0
-    if m.group("H") is not None:
+    has_time = m.group("H") is not None
+    if has_time:
         h, mi, s = int(m.group("H")), int(m.group("M")), int(m.group("S") or 0)
         ampm = m.group("ampm")
         if ampm:
@@ -91,6 +111,7 @@ def _parse_raw(text: str) -> Optional[_Raw]:
     return _Raw(
         int(m.group("a")), int(m.group("b")), int(m.group("c")),
         len(m.group("a")), len(m.group("c")), m.group("sep"), seconds,
+        has_time, m.group("S") is not None, m.group("F") or "",
     )
 
 
@@ -133,6 +154,22 @@ def _to_datetime(raw: _Raw, order: str) -> Optional[datetime]:
     except ValueError:
         return None
     return base + timedelta(seconds=raw.seconds)
+
+
+def _iso_text(raw: _Raw, order: str) -> Optional[str]:
+    """Lossless ISO 8601 text: the date plus exactly the time precision given
+    (minutes, seconds, and every fractional digit as written)."""
+    d = _to_datetime(raw, order)
+    if d is None:
+        return None
+    out = d.date().isoformat()
+    if raw.has_time:
+        out += f" {raw.seconds // 3600:02d}:{raw.seconds % 3600 // 60:02d}"
+        if raw.has_secs:
+            out += f":{raw.seconds % 60:02d}"
+            if raw.frac:
+                out += "." + raw.frac
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -258,6 +295,7 @@ class ReadingStats:
     distinct_weekdays: int
     step_sizes: list = field(default_factory=list)  # most common sorted steps, described
     n_step_sizes: int = 0
+    step_entropy: float = 0.0  # entropy (bits) of the step sizes between sorted distinct dates
     order_items: list = field(default_factory=list, repr=False)
     grid_items: list = field(default_factory=list, repr=False)
     weekday_items: list = field(default_factory=list, repr=False)
@@ -329,12 +367,18 @@ def _reading_stats(order: str, values: Sequence[datetime], keys: Sequence) -> Re
         distinct_weekdays=len(wd_counts),
         step_sizes=[_describe_step(sym) for sym, _ in grid_counts.most_common(3)],
         n_step_sizes=len(grid_counts),
+        step_entropy=_entropy(grid_counts),
         order_items=order_items,
         grid_items=grid_items,
         weekday_items=wd_items,
         grid_by_key=grid_by_key,
         weekday_by_key=wd_by_key,
     )
+
+
+def _entropy(counts: Counter) -> float:
+    n = sum(counts.values())
+    return -sum(c / n * math.log2(c / n) for c in counts.values()) if n else 0.0
 
 
 def _var_sum(items: list) -> float:
@@ -382,7 +426,7 @@ class ColumnResult:
 
     verdict: one of DMY, MDY, YMD, YDM, AMBIGUOUS, NOT_DATE, INCONSISTENT, EMPTY
     method:  'validity' | 'identical' | 'structure' | 'file-consistency' |
-             'abstained' | '' (non-date outcomes)
+             'likely-accepted' | 'abstained' | 'competing' | '' (non-date outcomes)
     """
 
     verdict: str
@@ -400,6 +444,14 @@ class ColumnResult:
     stats: dict = field(default_factory=dict)  # order -> ReadingStats
     examples: list = field(default_factory=list)  # (raw, {order: iso})
     reasons: list = field(default_factory=list)
+    likely: Optional[str] = None  # preferred order when two regular patterns compete
+    unparsed_examples: list = field(default_factory=list)  # (row index, value)
+    notes: list = field(default_factory=list)
+
+    @property
+    def clean(self) -> bool:
+        """Resolved and every non-blank value is a valid date."""
+        return self.resolved and self.n_unparsed == 0
 
     @property
     def resolved(self) -> bool:
@@ -420,6 +472,9 @@ class ColumnResult:
             "n_unparsed": self.n_unparsed,
             "invalid_counts": self.invalid_counts,
             "reasons": self.reasons,
+            "likely": self.likely,
+            "notes": self.notes,
+            "unparsed_examples": [{"row": i, "value": v} for i, v in self.unparsed_examples],
             "examples": [
                 {"value": raw, "readings": readings} for raw, readings in self.examples
             ],
@@ -447,6 +502,11 @@ def _show(d: datetime) -> str:
 
 def _is_missing(v) -> bool:
     return v is None or str(v).strip().lower() in MISSING
+
+
+def _steps_text(s: ReadingStats) -> str:
+    more = f" (+{s.n_step_sizes - len(s.step_sizes)} more)" if s.n_step_sizes > len(s.step_sizes) else ""
+    return ", ".join(f"'{x}'" for x in s.step_sizes) + more
 
 
 def _explain(best: ReadingStats, other: ReadingStats) -> list:
@@ -493,13 +553,17 @@ def _signed_evidence(v1, v2, keys, o1, o2):
 def _surrogate_best_bits(raws, layout, o1, o2, k, cap=SURROGATE_MAX_ROWS):
     """Structure test by randomisation.
 
-    Returns (observed, null): the code length of the better reading of the
-    column, and the same quantity for k surrogate columns. Each surrogate
+    Returns (b1, b2, null, wd, null_wd): the code length of each reading of
+    the column, the code length of the better reading of each of k surrogate
+    columns, and the signed weekday evidence of the column (positive favours
+    o1) with the absolute weekday evidence of each surrogate. Each surrogate
     transposes a random half of the distinct values (day and month swapped),
     which destroys calendar structure under *both* readings while keeping
     the column's size, value set, duplicates and row order. If the column
     has no calendar structure it is exchangeable with its surrogates, so
-    ``observed < min(null)`` happens with probability <= 1/(k+1).
+    ``min(b1, b2) < min(null)`` happens with probability <= 1/(k+1). The same
+    comparison for the *losing* reading tells whether it, too, forms a
+    regular calendar pattern (a competing explanation).
 
     Long columns are compared on a fixed random subsample of ``cap`` rows.
     Coins are seeded and depend only on the unordered (day, month) pair, so
@@ -509,14 +573,14 @@ def _surrogate_best_bits(raws, layout, o1, o2, k, cap=SURROGATE_MAX_ROWS):
         rng = random.Random(SURROGATE_SEED)
         raws = [raws[i] for i in sorted(rng.sample(range(len(raws)), cap))]
 
-    def best_bits(rs):
+    def bits(rs):
         v1 = [_to_datetime(r, o1) for r in rs]
         v2 = [_to_datetime(r, o2) for r in rs]
         keys = [_canonical_key(r, layout) for r in rs]
         s1, s2 = _reading_stats(o1, v1, keys), _reading_stats(o2, v2, keys)
-        return min(s1.total_bits, s2.total_bits)
+        return s1.total_bits, s2.total_bits, WEEKDAY_WEIGHT * (s2.weekday_bits - s1.weekday_bits)
 
-    null = []
+    null, null_wd = [], []
     for i in range(k):
         sraws = []
         for r in raws:
@@ -528,28 +592,40 @@ def _surrogate_best_bits(raws, layout, o1, o2, k, cap=SURROGATE_MAX_ROWS):
                 else:
                     r = _Raw(r.a, r.c, r.b, r.a_len, r.c_len, r.sep, r.seconds)
             sraws.append(r)
-        null.append(best_bits(sraws))
-    return best_bits(raws), null
+        t1, t2, wd = bits(sraws)
+        null.append(min(t1, t2))
+        null_wd.append(abs(wd))
+    b1, b2, wd = bits(raws)
+    return b1, b2, null, wd, null_wd
 
 
 def resolve_column(
     values: Iterable,
     threshold_bits: float = DEFAULT_THRESHOLD_BITS,
-    min_date_share: float = 0.95,
+    min_date_share: float = MIN_DATE_SHARE,
     min_z: float = MIN_Z,
     n_surrogates: int = N_SURROGATES,
+    accept_likely: bool = False,
 ) -> ColumnResult:
-    """Decide the component order of a column of numeric date strings."""
+    """Decide the component order of a column of numeric date strings.
+
+    ``accept_likely=True`` applies the preferred order when both orders form
+    regular calendar patterns (method 'likely-accepted'); by default such a
+    column is reported AMBIGUOUS with ``likely`` set.
+    """
     raws: list[_Raw] = []
     raw_text: list[str] = []
     n_missing = n_unparsed = 0
-    for v in values:
+    unparsed_examples: list = []
+    for i, v in enumerate(values):
         if _is_missing(v):
             n_missing += 1
             continue
         r = _parse_raw(str(v))
         if r is None or _layout(r) is None:
             n_unparsed += 1
+            if len(unparsed_examples) < 5:
+                unparsed_examples.append((i, str(v)))
             continue
         raws.append(r)
         raw_text.append(str(v).strip())
@@ -583,8 +659,10 @@ def resolve_column(
     res = ColumnResult(
         "AMBIGUOUS", "", layout=layout, separator=sep, n_values=len(raws),
         n_missing=n_missing, n_unparsed=n_unparsed, candidates=candidates,
-        invalid_counts=invalid,
+        invalid_counts=invalid, unparsed_examples=unparsed_examples,
     )
+    if layout == "Y-last" and any(r.c_len == 2 for r in raws):
+        res.notes.append("two-digit years were read as 1969-2068")
     # Show values whose readings differ first: they are the informative ones.
     seen = set()
     ex_idx = [i for i, r in enumerate(raws) if r.a != (r.b if layout == "Y-last" else r.c)]
@@ -629,27 +707,75 @@ def resolve_column(
     conflict = seq * wd < 0 and min(abs(seq), abs(wd)) >= threshold_bits
 
     why = None
+    competing = False
+    prefix: list = []
     if res.evidence_bits < threshold_bits:
         why = f"it favours {best.order} by only {res.evidence_bits:.1f} bits (< {threshold_bits:g})"
     elif conflict:
         why = ("row order/grid and weekday pattern point in opposite directions "
                f"({seq:+.1f} vs {wd:+.1f} bits)")
-    elif not (abs(z) >= min_z and seq * total > 0):
-        # Not self-evidently significant: is there calendar structure at all?
-        observed, null = _surrogate_best_bits(raws, layout, o1, o2, n_surrogates)
-        res.components.update(structure_bits=observed, surrogate_min_bits=min(null),
-                              surrogates=len(null))
-        if not observed < min(null):
+    else:
+        # Is there calendar structure at all, and is the losing order *also* a
+        # regular calendar pattern? Two regular patterns (e.g. "the 1st of every
+        # month" vs "1-12 January every year") are a preference, not proof.
+        b1, b2, null, wd_obs, null_wd = _surrogate_best_bits(raws, layout, o1, o2, n_surrogates)
+        b_best, b_other = (b1, b2) if best is s1 else (b2, b1)
+        wd_best = wd_obs if best is s1 else -wd_obs  # weekday evidence towards best
+        floor = min(null)
+        # Share of the winner's structure (relative to scrambled copies) that the
+        # losing order keeps. A mirror-image pattern ("1st of each month" vs
+        # "1-12 January") keeps most of it.
+        retained = (floor - b_other) / (floor - b_best) if floor > b_best else 1.0
+        res.components.update(best_bits=b_best, other_bits=b_other, surrogate_min_bits=floor,
+                              surrogates=len(null), retained_structure=retained,
+                              other_step_entropy=other.step_entropy,
+                              weekday_towards_best=wd_best, surrogate_max_weekday=max(null_wd))
+        self_evident = abs(z) >= min_z and seq * total > 0
+        if not (self_evident or b_best < floor):
             why = (f"the column is no more regular than {len(null)} scrambled copies of itself "
-                   f"({observed:.1f} vs best scrambled {min(null):.1f} bits), so the "
+                   f"({b_best:.1f} vs best scrambled {floor:.1f} bits), so the "
                    f"{res.evidence_bits:.1f}-bit lean towards {best.order} may be chance")
+        elif retained >= COMPETING_SHARE or other.step_entropy <= REGULAR_STEP_ENTROPY:
+            # Row order and grid have a mirror twin, so they only express a
+            # preference. Weekdays are not mirrored: a weekday pattern that no
+            # scrambled copy matches would be a coincidence under the other order.
+            if wd_best >= threshold_bits and wd_best > max(null_wd):
+                prefix = [
+                    f"row order and sampling grid are regular under both orders "
+                    f"({best.order}: {_steps_text(best)}; {other.order}: {_steps_text(other)}), "
+                    f"so the decision rests on weekdays ({wd_best:.1f} bits, more than any of "
+                    f"{len(null_wd)} scrambled copies)"]
+            else:
+                competing = True
+                why = (f"both orders form regular calendar patterns: under {best.order} the sorted "
+                       f"dates step by {_steps_text(best)}; under {other.order} by "
+                       f"{_steps_text(other)}. {best.order} is simpler by "
+                       f"{res.evidence_bits:.1f} bits, which is a preference, not proof")
     if why is None:
         res.verdict, res.method = best.order, "structure"
-        res.reasons = _explain(best, other)
+        res.reasons = prefix + _explain(best, other)
+    elif competing:
+        res.likely = best.order
+        if accept_likely:
+            res.verdict, res.method = best.order, "likely-accepted"
+            res.reasons.append(f"{why}; {best.order} applied because likely answers were accepted")
+        else:
+            res.verdict, res.method = "AMBIGUOUS", "competing"
+            res.reasons.append(f"{why}; likely {best.order}, but not applied without confirmation")
     else:
         res.verdict, res.method = "AMBIGUOUS", "abstained"
         res.reasons.append(f"calendar structure is not conclusive: {why}; refusing to guess")
     return res
+
+
+def iso_with_order(values: Iterable, order: str) -> list:
+    """Lossless ISO 8601 text for each value under a known order (None if
+    missing, unparseable or impossible)."""
+    out = []
+    for v in values:
+        r = None if _is_missing(v) else _parse_raw(str(v))
+        out.append(_iso_text(r, order) if r else None)
+    return out
 
 
 def parse_with_order(values: Iterable, order: str) -> list:
@@ -660,5 +786,8 @@ def parse_with_order(values: Iterable, order: str) -> list:
             out.append(None)
             continue
         r = _parse_raw(str(v))
-        out.append(_to_datetime(r, order) if r else None)
+        d = _to_datetime(r, order) if r else None
+        if d is not None and r.frac:
+            d = d.replace(microsecond=int(r.frac[:6].ljust(6, "0")))
+        out.append(d)
     return out

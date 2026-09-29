@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dmguard"
-version = "1.0.0"
+version = "1.1.0"
 description = "Resolve day-first vs month-first numeric dates from a column's calendar structure, abstaining when unsure"
 readme = "README.md"
 requires-python = ">=3.9"

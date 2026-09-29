@@ -37,9 +37,13 @@ def test_weekly_mondays_resolved_by_structure(order):
 
 @pytest.mark.parametrize("order", ["DMY", "MDY"])
 def test_multi_year_monthly_first_of_month(order):
+    # "1st of each month" has a mirror twin ("1-12 January each year"): the
+    # data prefers the monthly reading but cannot prove it (v1.1 behaviour).
     dates = [date(2018 + i // 12, i % 12 + 1, 1) for i in range(36)]
     r = resolve_column(render(dates, order))
-    assert r.verdict == order
+    assert (r.verdict, r.method, r.likely) == ("AMBIGUOUS", "competing", order)
+    r = resolve_column(render(dates, order), accept_likely=True)
+    assert (r.verdict, r.method) == (order, "likely-accepted")
 
 
 def test_single_year_monthly_is_genuinely_ambiguous_and_abstains():

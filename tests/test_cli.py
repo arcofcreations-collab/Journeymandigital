@@ -48,9 +48,14 @@ def test_file_consistency(tmp_path, capsys):
     rows = [["Start", "End"]] + [[f"01/{m:02d}/2020", f"{27 if m != 2 else 26}/{m:02d}/2020"]
                                  for m in range(1, 13)]
     write(p, rows)
-    assert main(["check", str(p), "--json"]) == 0
+    # by default the other column is only a hint
+    assert main(["check", str(p), "--json"]) == 2
     data = json.loads(capsys.readouterr().out)
     assert data["columns"]["End"]["method"] == "validity"
+    assert data["columns"]["Start"]["verdict"] == "AMBIGUOUS"
+    # adopting it is an explicit assumption
+    assert main(["check", str(p), "--json", "--assume-same-convention"]) == 0
+    data = json.loads(capsys.readouterr().out)
     assert data["columns"]["Start"]["verdict"] == "DMY"
     assert data["columns"]["Start"]["method"] == "file-consistency"
 
