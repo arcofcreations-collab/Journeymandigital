@@ -31,9 +31,11 @@
 | 09:33–09:40 | Wrote README, RESULTS, final novelty section, LICENSE, pinned `requirements-bench.txt`; corrected this log. The demo script had suppressed pandas warnings while printing "no warning"; it now records warnings (none are emitted, verified separately). |
 | ≈09:40 | Reproducibility check in a clean venv (`pip install .`, `dmguard --version`, API example) found a real bug: piping output into `head` crashed with BrokenPipeError. Fixed in the CLI; added a regression test (24 tests), confirmed to fail on the old code and pass on the new. Resolver logic untouched, so TEST outcomes are unaffected. |
 
+| after 09:45 | The user asked for a shareable page covering why the problem matters, who benefits, how it helps people, and where to test it. Removed duplicate and dead code from `core.py` (TEST outcomes re-verified identical). Ported the resolver to JavaScript (`web/dmguard.js`), including CPython's tuple hash and Mersenne Twister for the surrogate test. Parity check: 5,946 columns, 0 verdict mismatches, 0 evidence-bit mismatches. Verified `pip install git+…@branch` from GitHub works. Built and published the page with a live checker and real samples. |
+
 ## Human interventions
 
-* The user set the goal (master prompt) and interrupted once, at ≈09:10, to ask "what's the value on the invention". There was no other human input, manual data labelling, or manual step inside the product or the evaluation.
+* The user set the goal (master prompt) and interrupted once, at ≈09:10, to ask "what's the value on the invention". After the build, the user asked for a shareable explanatory page. There was no other human input, manual data labelling, or manual step inside the product or the evaluation.
 * All data labels come from the source datasets' own unambiguous date encodings.
 
 ## Costs

@@ -4,6 +4,8 @@
 
 It was built during an AI capability test ("invent something new and useful, then build it"). The research, frozen specification, evaluation and an honest log are in [`docs/`](docs).
 
+**Shareable overview page with a live in-browser checker:** https://claude.ai/artifact/JU1tQWUaknZ16xJiUpwBq1. It is private until the owner shares it. The page source is `web/page_template.html` (build it with `python3 web/build_page.py`). It runs `web/dmguard.js`, a JavaScript port whose verdicts match the Python tool on all 5,946 benchmark, demo and stress-test columns (`python3 web/parity_check.py`).
+
 ## The problem
 
 When every date in a column has a day of 12 or less (`01/02/2020, 01/03/2020, …`), each value reads validly both ways. Common tools then **silently** pick one order:
@@ -112,6 +114,7 @@ python3 bench/posthoc_value_prior.py    # exploratory, not pre-registered
 | `tests/` | Unit and CLI tests, including symmetry and invalid-input cases |
 | `bench/` | Pinned sources, case generator, baselines, evaluation, tuning, performance |
 | `demo/` | Demo data builder, walkthrough script, recorded output |
+| `web/` | JavaScript port, parity check against Python, source of the shareable page |
 | `docs/RESEARCH.md` | Need evidence, 3 candidates, rejection log, dated novelty searches, comparison table |
 | `docs/SPEC_v1_FROZEN.md`, `docs/SPEC_v2_METHOD_UPDATE.md` | Pre-registered hypothesis and criteria; method changes before TEST, with reasons |
 | `docs/RESULTS.md` | Results, breakdowns, post-hoc comparison, limitations |

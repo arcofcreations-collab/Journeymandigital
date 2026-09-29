@@ -1,6 +1,6 @@
 {
  "split": "TEST",
- "generated_utc": "2026-09-29T09:30:16Z",
+ "generated_utc": "2026-09-29T09:57:18Z",
  "environment": {
   "python": "3.11.15",
   "pandas": "3.0.6",
@@ -16,11 +16,11 @@
   "degenerate": 260
  },
  "seconds_per_method": {
-  "pandas_default": 3.23,
-  "pandas_dayfirst": 2.21,
-  "duckdb_sniffer": 39.45,
-  "range_rule_ask": 2.72,
-  "dmguard": 13.24
+  "pandas_default": 3.47,
+  "pandas_dayfirst": 2.52,
+  "duckdb_sniffer": 42.94,
+  "range_rule_ask": 3.0,
+  "dmguard": 14.01
  },
  "by_class": {
   "ambiguous": {
