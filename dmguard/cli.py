@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from . import __version__
@@ -52,6 +53,19 @@ def _print_report(report, path, out=None):
 
 
 def main(argv=None) -> int:
+    try:
+        return _main(argv)
+    except BrokenPipeError:
+        # Output piped into e.g. `head`: stop quietly like standard Unix tools.
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
+        return EXIT_OK
+
+
+def _main(argv=None) -> int:
     p = argparse.ArgumentParser(
         prog="dmguard",
         description="Detect whether numeric dates are day-first or month-first, "

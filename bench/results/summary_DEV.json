@@ -1,12 +1,12 @@
 {
  "split": "DEV",
- "generated_utc": "2026-09-29T08:55:12Z",
+ "generated_utc": "2026-09-29T09:26:29Z",
  "environment": {
   "python": "3.11.15",
   "pandas": "3.0.6",
   "duckdb": "1.5.6",
   "dmguard": "1.0.0",
-  "dmguard_threshold_bits": 12.0,
+  "dmguard_threshold_bits": 2.0,
   "machine": "x86_64"
  },
  "n_cases": 2302,
@@ -15,11 +15,11 @@
   "ambiguous": 360
  },
  "seconds_per_method": {
-  "pandas_default": 2.31,
-  "pandas_dayfirst": 1.71,
-  "duckdb_sniffer": 28.24,
-  "range_rule_ask": 1.52,
-  "dmguard": 1.1
+  "pandas_default": 2.29,
+  "pandas_dayfirst": 1.4,
+  "duckdb_sniffer": 26.67,
+  "range_rule_ask": 1.42,
+  "dmguard": 3.67
  },
  "by_class": {
   "ambiguous": {
@@ -163,11 +163,11 @@
    },
    "dmguard": {
     "correct": {
-     "k": 280,
-     "rate": 0.7777777777777778,
+     "k": 260,
+     "rate": 0.7222222222222222,
      "wilson95": [
-      0.7320252839013244,
-      0.817664471200896
+      0.6737921637197266,
+      0.7659596403620497
      ]
     },
     "silent_wrong": {
@@ -179,11 +179,11 @@
      ]
     },
     "abstain": {
-     "k": 80,
-     "rate": 0.2222222222222222,
+     "k": 100,
+     "rate": 0.2777777777777778,
      "wilson95": [
-      0.18233552879910409,
-      0.2679747160986756
+      0.2340403596379504,
+      0.32620783628027333
      ]
     },
     "error": {
@@ -589,7 +589,7 @@
   "dmguard": {
    "correct": [
     0.0,
-    0.8493975903614458
+    0.7944664031620553
    ],
    "silent_wrong": [
     0.0,
@@ -791,9 +791,9 @@
      "error": 0
     },
     "dmguard": {
-     "correct": 24,
+     "correct": 4,
      "silent_wrong": 0,
-     "abstain": 64,
+     "abstain": 84,
      "error": 0
     }
    },
@@ -859,9 +859,9 @@
      "error": 0
     },
     "dmguard": {
-     "correct": 142,
+     "correct": 132,
      "silent_wrong": 0,
-     "abstain": 40,
+     "abstain": 50,
      "error": 0
     }
    },
@@ -892,9 +892,9 @@
      "error": 0
     },
     "dmguard": {
-     "correct": 138,
+     "correct": 128,
      "silent_wrong": 0,
-     "abstain": 40,
+     "abstain": 50,
      "error": 0
     }
    }
@@ -960,9 +960,9 @@
      "error": 0
     },
     "dmguard": {
-     "correct": 142,
+     "correct": 134,
      "silent_wrong": 0,
-     "abstain": 20,
+     "abstain": 28,
      "error": 0
     }
    },
@@ -1059,9 +1059,9 @@
      "error": 0
     },
     "dmguard": {
-     "correct": 138,
+     "correct": 126,
      "silent_wrong": 0,
-     "abstain": 24,
+     "abstain": 36,
      "error": 0
     }
    },

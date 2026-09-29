@@ -113,3 +113,37 @@ PyPI checks: `dateinfer` 0.2.0, `pydateinfer` 0.3.0, `date-guesser` 2.1.4, `date
 | B. WCAG 1.4.12 clipping detector | Rejected 08:39 | TestParty and TestMu AI already market automated clipping/overlap detection under spacing overrides |
 | C. Name-validator auditor | Rejected 08:39 | FormFair (GitHub) already audits name-validation constraints with real-name fixtures |
 | A. Temporal-structure date-order resolver | Selected 08:46 | No equivalent found in documented search; buildable and testable offline with real public time series |
+
+---
+
+## 3. Final targeted novelty search (after the build, 2026-09-29 ≈09:31 UTC)
+
+Terminology from the build: minimum description length / compression, frequency inference, first-of-month swap detection, commercial data-prep tools.
+
+Queries (web-search API):
+
+1. `minimum description length compression infer date format day month order column`
+2. `"infer_freq" dayfirst ambiguous dates choose interpretation regular frequency pandas`
+3. `detect swapped day and month dates using regular monthly interval "first of the month" data cleaning tool automatic`
+4. `Trifacta OR Alteryx OR Tableau OR "Google Sheets" automatic date format detection ambiguous dd/mm mm/dd how decided`
+5. `"Automating Date Format Detection" Liang entropy "day" "month" field distribution ambiguous resolved accuracy corpus columns Tableau Prep`
+6. `arxiv 2501.05640 minimum entropy date format "tokens" algorithm description`
+
+Findings:
+
+* **Liang 2025 (arXiv 2501.05640).** Snippets give more detail. A CKY parser runs over a *random sample of 32 non-null values* per column, producing a probability distribution over parse trees, with rule probabilities learned from a training set. The most likely tree is then applied to the whole column. The corpus is about 62,000 columns from Tableau Public, and the two algorithms agree ~98% of the time, with differences "mostly for ambiguous data". Random sampling discards row order, and nothing indicates use of intervals, sorted grids or weekdays, so the *mechanism* differs. However, learned priors over field values (e.g. that a constant "01" field is usually the day) could resolve first-of-month series, the class where dmguard's held-out gains are concentrated. I could not run or read the full paper. A post-hoc stand-in heuristic ("constant field = day") was therefore tested; see RESULTS.md. It resolves more monthly columns than dmguard but silently transposes 8.7% of ambiguous TEST cases, where dmguard transposes 0%.
+* **pandas `infer_freq`** infers a frequency only after parsing; `dayfirst` is a non-strict hint. They are not combined anywhere found.
+* **Alteryx, Trifacta, Google Sheets, Tableau** (help pages and forum snippets) rely on explicit formats or locale settings. An Alteryx community answer says there is "no real way of distinguishing" dd/mm from mm/dd.
+* **MDL / compression.** The MDL principle is general. No source found applies it to calendar structure to choose the component order of dates.
+
+### Novelty conclusion
+
+> **No close equivalent was found in the documented search as of 2026-09-29.** dmguard chooses between day-first and month-first for fully ambiguous columns by comparing the compressibility of the column's *calendar structure*: row-order steps with separately coded direction, the sorted grid in calendar units, and weekdays of distinct dates. It uses a paired z-test / randomisation test against day-month-scrambled copies of the column, and abstains explicitly otherwise.
+>
+> **Limitations of this conclusion:**
+> * the full texts of Liang 2025 and of patents could not be read (egress blocked);
+> * closed commercial tools could not be inspected;
+> * the search was English-only and used one web-search API plus GitHub and PyPI;
+> * a learned value-prior approach such as Liang's may achieve **overlapping practical results on first-of-month series** without the mechanism. dmguard's measured distinction there is zero silent errors plus abstention, not higher coverage.
+>
+> This is not a patentability opinion.

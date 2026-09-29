@@ -72,3 +72,20 @@ def test_bad_inputs(tmp_path, capsys):
     write(nodates, [["a", "b"], ["x", "1"]])
     assert main(["check", str(nodates)]) == 0
     assert "no numeric date columns" in capsys.readouterr().out
+
+
+def test_output_piped_into_head_does_not_crash(tmp_path):
+    import subprocess
+    import sys
+
+    # Enough columns that the report exceeds the OS pipe buffer (64 KiB),
+    # so writing continues after `head` has exited.
+    p = tmp_path / "a.csv"
+    base = weekly_rows("DMY")
+    write(p, [[f"d{i}" for i in range(300)]] + [[r[0]] * 300 for r in base])
+    proc = subprocess.run(
+        f'"{sys.executable}" -m dmguard check "{p}" | head -1',
+        shell=True, capture_output=True, text=True,
+    )
+    assert "Traceback" not in proc.stderr
+    assert proc.stdout.startswith("dmguard")

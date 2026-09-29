@@ -1,23 +1,42 @@
-# Activity log (chronological, UTC)
+# Activity log (chronological, UTC, 2026-09-29)
 
-Times are wall-clock timestamps taken from the container clock (`date -u`). Active-vs-waiting time is not separately measurable in this environment and is reported as unavailable.
+**Timestamp sources.** Times marked **[git]** or **[file]** come from commit and file-modification times in the container. Times marked **≈** are interpolated between those anchors (±3 min). An earlier draft of this log used my own estimates for several entries ("~10:00", "~10:18"), which ran ahead of the real clock. It was rewritten against the anchors at 09:33. Active execution time versus waiting time **could not be measured separately** in this environment and is reported as unavailable.
 
 | Time (UTC) | Event |
 |---|---|
-| 2026-09-29 08:37 | Run started. Capability inspection: empty git repo (branch `claude/ai-capability-test-invention-a53mgb`), Linux x86_64, 4 vCPU, 15 GB RAM, Python 3.11.15, Node 22.22.2, Go, Rust, Java, Chromium/Playwright preinstalled; outbound HTTPS via proxy (web search/fetch available); PyPI/npm reachable. No authorised paid LLM/API key for the product; no spending limit supplied -> no paid services used. Time/token limits supplied: none explicit (context budget ~15M tokens). Model: served as Claude Opus 5.5 (per session environment). |
-| 08:38–08:46 | Web research on 3 candidates (date-order ambiguity; WCAG 1.4.12 clipping detection; name-validator auditing). Found egress limits: arXiv/patent/most docs sites blocked; web-search API, GitHub and PyPI available. |
-| 08:39 | Rejected candidate B (TestParty, TestMu AI already automate 1.4.12 clipping detection) and C (FormFair already audits name-validation constraints). |
-| 08:40–08:46 | Novelty search on candidate A: read source of DashAI date_utils, prism hellmode, freshdata config, dateinfer 0.2.0; search snippets for DuckDB sniffer, Google US8239350, Liang 2025, lubridate/datefixR, Power Query, Sumo Logic. No temporal-structure disambiguation found. Candidate A selected. |
-| 08:47–08:55 | Cloned public dataset repos (github.com/datasets/*, vega/vega-datasets, jbrownlee/Datasets) for the benchmark; wrote docs/RESEARCH.md and froze docs/SPEC_v1_FROZEN.md (hypothesis, baselines, DEV/TEST split, thresholds T1–T4) before writing any code. |
-| 09:00–09:25 | Implemented `dmguard` v1 (stdlib only): core resolver (validity -> calendar-structure MDL -> abstain), CSV layer with file-level consistency and ISO rewrite, CLI (`check`/`fix`, exit code 2 when unresolved). Benchmark harness: pinned sources (`bench/sources.py`, `fetch_data.py`), seeded case generator (`cases.py`), 5 methods (`methods.py`), runner with Wilson + cluster-bootstrap CIs (`run_eval.py`), DEV tuner (`tune_dev.py`). pandas 3.0.6, duckdb 1.5.6, numpy 2.4.6, pytest 8.4.2 installed. |
-| ~09:15 | DEV finding: the weekday code counted repeated rows, which inflated chance evidence on event data (birdstrikes). Changed to count distinct dates only. |
-| ~09:17 | DEV tuning-rule change (v1 -> v2): the v1 rule picked weekday weight 2 / 6 bits, which traded 4 correct for 4 silent errors on DEV. Replaced with utility = correct - 5 x silent_wrong, tie-break to weight 1 and the geometric midpoint of the tied thresholds. TEST not yet run. |
-| ~09:20 | First full DEV run (method v1): dmguard 77.8% correct / 0% silent-wrong / 22.2% abstain on 360 ambiguous DEV cases; pandas and DuckDB 50% silent-wrong; range rule 100% abstain. |
-| ~09:25 | Unit tests (23) exposed a flaw: when rows are not in date order, the file-order code is noise (82 bits toward the wrong reading on shuffled business days). Fix: two-part MDL code, min(file order, sorted grid + arrangement cost). |
-| ~09:30–09:50 | Synthetic null stress test (labelled synthetic: uniformly random dates, days <= 12) exposed a major flaw that DEV cannot show: on unsorted, structureless columns the ungated tool decides confidently and is wrong about half the time. Tried (A) a paired z-gate on the sequence evidence (null safe; DEV coverage 19%), (B) gating only order-free coding (DEV 48%, null still unsafe for small sorted columns), and (C) a surrogate randomisation test on the evidence difference (null safe; DEV 47%). All attempts are recorded; TEST still untouched. |
-| ~09:55 | User interrupted to ask about the invention's value; answered with the DEV-only evidence and the open status. Work-in-progress committed. |
-| ~10:00 | Correction: the interrupted 09:55 command had already applied the structure-existence randomisation test to `core.py`, and that version is what the WIP commit contains. So my chat answer "code on disk = the 47% version" and the WIP commit note "2 tests fail" were wrong: all 23 tests passed on that commit. |
-| ~10:05 | Structure-existence randomisation test (better reading vs 39 scrambled copies): DEV 256/360 correct, 0 wrong; synthetic null safe except dense sorted columns (n=1000 sorted: 5/150 wrong at τ=8). |
-| ~10:10 | Step direction coded separately from step size. Null: n=1000 sorted wrong 0/150; unsorted wrong decisions ≤ 3/150 at every size. DEV unchanged. |
-| ~10:15 | T4 check: worst case (forced surrogate path, 100k rows) took 2.15 s. Cap lowered to 2,000 rows. |
-| ~10:18 | DEV re-tuning (weekday weight fixed at 1, full decision procedure): rule v2 picks τ = 2 bits (72.2% / 0% / 27.8%); synthetic null at τ = 2 is ≤ 2% wrong per trial. Wrote docs/SPEC_v2_METHOD_UPDATE.md. Method frozen and committed before the TEST run. |
+| 08:37 | Run started (`date -u`). Capability inspection: empty git repo on branch `claude/ai-capability-test-invention-a53mgb`, Linux x86_64, 4 vCPU, 15 GB RAM, Python 3.11.15, Node 22, Chromium/Playwright preinstalled. Outbound HTTPS goes through a proxy that allows a web-search API, GitHub and PyPI only. No authorised paid API key; no spending limit supplied, so no paid services used. No explicit time or token limit (context budget ~15M tokens). |
+| 08:38–08:46 | Web research on three candidates: date-order ambiguity, WCAG 1.4.12 clipping detection, name-validator auditing. arXiv, patent, ResearchGate and most documentation sites are blocked (`EGRESS_BLOCKED`). |
+| 08:39 | Rejected B (TestParty and TestMu AI already automate 1.4.12 clipping detection) and C (FormFair already audits name-validation constraints). |
+| 08:40–08:46 | Novelty search on A: read source of DashAI `date_utils.py`, prism `hellmode.py`, freshdata `config.py`, dateinfer 0.2.0; search snippets for DuckDB sniffer, Google US8239350, Liang 2025, lubridate/datefixR, Power Query, Sumo Logic. No temporal-structure disambiguation found. A selected. **[file 08:46 RESEARCH.md]** |
+| 08:47–08:48 | Cloned public dataset repos. Froze `SPEC_v1_FROZEN.md` (hypothesis, baselines, DEV/TEST split, thresholds T1–T4). **[git 08:48 d7ce870]** |
+| 08:50–08:56 | Implemented `dmguard` 1.0 (standard library only): core resolver, CSV layer with file-level consistency and ISO rewrite, CLI. **[file]** |
+| ≈08:56–09:00 | Benchmark harness: pinned sources and fetcher (37 files), seeded case generator, 5 methods, runner with Wilson and cluster-bootstrap CIs, DEV tuner. Installed pandas 3.0.6, duckdb 1.5.6, numpy 2.4.6, pytest 8.4.2. |
+| ≈09:00 | DEV tuning v1 rule. Inspecting DEV errors showed the weekday code counted repeated rows (event data), so it was changed to distinct dates. |
+| ≈09:01 | DEV **selection-rule change v1 → v2**: v1 picked weekday weight 2 at 6 bits, trading 4 correct DEV answers for 4 silent errors. Replaced by utility = correct − 5 × silent-wrong, ties to weight 1 and the geometric-midpoint threshold. |
+| ≈09:02 | First DEV run: 77.8% correct / 0% silent-wrong on 360 ambiguous DEV cases (baselines 50% silent-wrong). |
+| ≈09:03 | 23 unit tests written. They exposed the file-order noise flaw on shuffled rows. Fix: two-part MDL code. |
+| ≈09:04–09:10 | **Synthetic null stress test** (labelled synthetic) exposed coin-flip decisions on unsorted, structureless columns. Tried: (A) paired z-gate (DEV 19%), (B) gate only order-free coding (DEV 48%, null unsafe), (C) surrogate test on the evidence difference (DEV 47%). |
+| ≈09:10 | User interrupted to ask about the invention's value; answered with DEV-only evidence. The interrupted command had already applied (D), the structure-existence randomisation test; I wrongly told the user the code was still at (C). |
+| 09:12 | WIP committed. **[git 2cb9097]** The commit note "2 unit tests fail" is also wrong: with (D) all 23 passed. Both mistakes were corrected here. |
+| ≈09:13–09:16 | (D) measured: DEV 256/360 correct, 0 wrong. Null: unsorted safe; dense sorted columns 5/150 wrong. Coded step direction separately: dense-sorted null 0/150 wrong. |
+| ≈09:17–09:20 | T4 check on the forced surrogate path: 2.15 s at 100k rows, so the subsample cap was lowered from 5,000 to 2,000. |
+| 09:23 | DEV re-tuning with the full procedure: rule v2 selects τ = 2 bits (72.2% / 0% / 27.8%). Synthetic null at τ = 2: ≤ 2% wrong decisions per trial at every size. **[file dev_tuning.json]** |
+| 09:25 | Wrote `SPEC_v2_METHOD_UPDATE.md`; **method v2 frozen and pushed before any TEST run**. **[git 26bfe0e]** |
+| 09:26 | Official DEV run. **[file raw_DEV.jsonl]** |
+| ≈09:27 | **Held-out TEST run (first and only evaluation of the frozen method):** dmguard 902/1246 correct (72.4%), **0 silent-wrong**, 344 abstain; pandas/DuckDB 50% silent-wrong; range rule 100% abstain; unambiguous 1962/1962. T1, T2, T3 pass. |
+| 09:28 | T4 formal measurement: worst case 1.26 s for 100k rows. Pass. **[file perf_t4.json]** |
+| ≈09:28–09:29 | Built demo files from real data and ran the demo. Display-only fixes (date formatting in examples, a clearer step-size explanation). |
+| 09:30 | TEST re-run after the display-only change; outcomes verified **identical** case by case (3468/3468). **[file raw_TEST.jsonl]** |
+| 09:31 | Final targeted novelty search (MDL/compression, infer_freq + dayfirst, first-of-month swap detection, Trifacta/Alteryx/Tableau/Sheets). New detail: Liang 2025 runs a CKY/PCFG parser on 32 randomly sampled values. Post-hoc exploratory comparison with a value-prior heuristic ("constant field = day"): 91.0% correct but **8.7% silent-wrong** on TEST, versus dmguard 72.4% / 0%. **[file posthoc_value_prior_TEST.json]** |
+| 09:33–09:40 | Wrote README, RESULTS, final novelty section, LICENSE, pinned `requirements-bench.txt`; corrected this log. The demo script had suppressed pandas warnings while printing "no warning"; it now records warnings (none are emitted, verified separately). |
+| ≈09:40 | Reproducibility check in a clean venv (`pip install .`, `dmguard --version`, API example) found a real bug: piping output into `head` crashed with BrokenPipeError. Fixed in the CLI; added a regression test (24 tests), confirmed to fail on the old code and pass on the new. Resolver logic untouched, so TEST outcomes are unaffected. |
+
+## Human interventions
+
+* The user set the goal (master prompt) and interrupted once, at ≈09:10, to ask "what's the value on the invention". There was no other human input, manual data labelling, or manual step inside the product or the evaluation.
+* All data labels come from the source datasets' own unambiguous date encodings.
+
+## Costs
+
+* No paid API or service calls were made by the product or the benchmark. Model inference cost for this agent session is **not visible** from inside the environment (unavailable).
+* Compute: one 4-vCPU VM. Full TEST evaluation of all 5 methods takes about 60 s; dmguard's share is about 13 s for 3,468 cases.

@@ -1,0 +1,18 @@
+{
+ "H_const_day": {
+  "silent_wrong": 36,
+  "correct": 324
+ },
+ "dmguard": {
+  "abstain": 100,
+  "correct": 260
+ },
+ "H_const_day_silent_wrong_by_source": {
+  "oil-prices/data/wti-daily.csv:Date": 4,
+  "natural-gas/data/daily.csv:Date": 8,
+  "finance-vix/data/vix-daily.csv:DATE": 4,
+  "jbrownlee/daily-min-temperatures.csv:Date": 8,
+  "vega/data/birdstrikes.csv:Flight Date": 12
+ },
+ "n": 360
+}

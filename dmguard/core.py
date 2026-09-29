@@ -256,6 +256,8 @@ class ReadingStats:
     top_step_share: float
     weekday_share_mon_fri: float
     distinct_weekdays: int
+    step_sizes: list = field(default_factory=list)  # most common sorted steps, described
+    n_step_sizes: int = 0
     order_items: list = field(default_factory=list, repr=False)
     grid_items: list = field(default_factory=list, repr=False)
     weekday_items: list = field(default_factory=list, repr=False)
@@ -325,6 +327,8 @@ def _reading_stats(order: str, values: Sequence[datetime], keys: Sequence) -> Re
         top_step_share=top_share,
         weekday_share_mon_fri=(sum(wd_counts[i] for i in range(5)) / n) if n else 0.0,
         distinct_weekdays=len(wd_counts),
+        step_sizes=[_describe_step(sym) for sym, _ in grid_counts.most_common(3)],
+        n_step_sizes=len(grid_counts),
         order_items=order_items,
         grid_items=grid_items,
         weekday_items=wd_items,
@@ -412,6 +416,8 @@ def _reading_stats(order: str, values: Sequence[datetime], keys: Sequence) -> Re
         top_step_share=top_share,
         weekday_share_mon_fri=(sum(wd_counts[i] for i in range(5)) / n) if n else 0.0,
         distinct_weekdays=len(wd_counts),
+        step_sizes=[_describe_step(sym) for sym, _ in grid_counts.most_common(3)],
+        n_step_sizes=len(grid_counts),
         order_items=order_items,
         grid_items=grid_items,
         weekday_items=wd_items,
@@ -527,6 +533,10 @@ class ColumnResult:
         }
 
 
+def _show(d: datetime) -> str:
+    return d.isoformat(sep=" ") if (d.hour or d.minute or d.second) else d.date().isoformat()
+
+
 def _is_missing(v) -> bool:
     return v is None or str(v).strip().lower() in MISSING
 
@@ -550,6 +560,14 @@ def _explain(best: ReadingStats, other: ReadingStats) -> list:
             f"weekdays: {best.distinct_weekdays} distinct, {best.weekday_share_mon_fri:.0%} Mon-Fri "
             f"under {best.order} vs {other.distinct_weekdays} distinct, "
             f"{other.weekday_share_mon_fri:.0%} Mon-Fri under {other.order}"
+        )
+    if best.n_step_sizes < other.n_step_sizes:
+        def steps(s):
+            more = f", +{s.n_step_sizes - len(s.step_sizes)} more" if s.n_step_sizes > len(s.step_sizes) else ""
+            return ", ".join(f"'{x}'" for x in s.step_sizes) + more
+        reasons.append(
+            f"sorted dates use {best.n_step_sizes} distinct step size(s) under {best.order} "
+            f"({steps(best)}) vs {other.n_step_sizes} under {other.order} ({steps(other)})"
         )
     if not reasons:
         reasons.append("combined calendar regularity (see bit counts)")
@@ -667,7 +685,7 @@ def resolve_column(
             continue
         seen.add(raw_text[i])
         res.examples.append((raw_text[i], {
-            o: (parsed[o][i].isoformat(sep=" ") if parsed[o][i] else None) for o in candidates
+            o: (_show(parsed[o][i]) if parsed[o][i] else None) for o in candidates
         }))
         if len(res.examples) >= 3:
             break

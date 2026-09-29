@@ -1,0 +1,1665 @@
+{
+ "split": "TEST",
+ "generated_utc": "2026-09-29T09:30:16Z",
+ "environment": {
+  "python": "3.11.15",
+  "pandas": "3.0.6",
+  "duckdb": "1.5.6",
+  "dmguard": "1.0.0",
+  "dmguard_threshold_bits": 2.0,
+  "machine": "x86_64"
+ },
+ "n_cases": 3468,
+ "classes": {
+  "unambiguous": 1962,
+  "ambiguous": 1246,
+  "degenerate": 260
+ },
+ "seconds_per_method": {
+  "pandas_default": 3.23,
+  "pandas_dayfirst": 2.21,
+  "duckdb_sniffer": 39.45,
+  "range_rule_ask": 2.72,
+  "dmguard": 13.24
+ },
+ "by_class": {
+  "ambiguous": {
+   "n": 1246,
+   "n_sources": 18,
+   "pandas_default": {
+    "correct": {
+     "k": 623,
+     "rate": 0.5,
+     "wilson95": [
+      0.47227965776095804,
+      0.527720342239042
+     ]
+    },
+    "silent_wrong": {
+     "k": 623,
+     "rate": 0.5,
+     "wilson95": [
+      0.47227965776095804,
+      0.527720342239042
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    }
+   },
+   "pandas_dayfirst": {
+    "correct": {
+     "k": 623,
+     "rate": 0.5,
+     "wilson95": [
+      0.47227965776095804,
+      0.527720342239042
+     ]
+    },
+    "silent_wrong": {
+     "k": 623,
+     "rate": 0.5,
+     "wilson95": [
+      0.47227965776095804,
+      0.527720342239042
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    }
+   },
+   "duckdb_sniffer": {
+    "correct": {
+     "k": 623,
+     "rate": 0.5,
+     "wilson95": [
+      0.47227965776095804,
+      0.527720342239042
+     ]
+    },
+    "silent_wrong": {
+     "k": 623,
+     "rate": 0.5,
+     "wilson95": [
+      0.47227965776095804,
+      0.527720342239042
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    }
+   },
+   "range_rule_ask": {
+    "correct": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    },
+    "abstain": {
+     "k": 1246,
+     "rate": 1.0,
+     "wilson95": [
+      0.9969263305046016,
+      1.0
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    }
+   },
+   "dmguard": {
+    "correct": {
+     "k": 902,
+     "rate": 0.723916532905297,
+     "wilson95": [
+      0.6984334991630902,
+      0.748023075814091
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    },
+    "abstain": {
+     "k": 344,
+     "rate": 0.27608346709470305,
+     "wilson95": [
+      0.251976924185909,
+      0.30156650083690995
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.003073669495398457
+     ]
+    }
+   }
+  },
+  "unambiguous": {
+   "n": 1962,
+   "n_sources": 13,
+   "pandas_default": {
+    "correct": {
+     "k": 1608,
+     "rate": 0.8195718654434251,
+     "wilson95": [
+      0.8019367385953826,
+      0.8359579931062968
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "error": {
+     "k": 354,
+     "rate": 0.18042813455657492,
+     "wilson95": [
+      0.16404200689370324,
+      0.19806326140461744
+     ]
+    }
+   },
+   "pandas_dayfirst": {
+    "correct": {
+     "k": 1608,
+     "rate": 0.8195718654434251,
+     "wilson95": [
+      0.8019367385953826,
+      0.8359579931062968
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "error": {
+     "k": 354,
+     "rate": 0.18042813455657492,
+     "wilson95": [
+      0.16404200689370324,
+      0.19806326140461744
+     ]
+    }
+   },
+   "duckdb_sniffer": {
+    "correct": {
+     "k": 1895,
+     "rate": 0.9658511722731906,
+     "wilson95": [
+      0.9568610455252129,
+      0.9730205888852097
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "error": {
+     "k": 67,
+     "rate": 0.034148827726809376,
+     "wilson95": [
+      0.026979411114790408,
+      0.043138954474787106
+     ]
+    }
+   },
+   "range_rule_ask": {
+    "correct": {
+     "k": 1962,
+     "rate": 1.0,
+     "wilson95": [
+      0.9980458242413834,
+      1.0
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    }
+   },
+   "dmguard": {
+    "correct": {
+     "k": 1962,
+     "rate": 1.0,
+     "wilson95": [
+      0.9980458242413834,
+      1.0
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.001954175758616564
+     ]
+    }
+   }
+  },
+  "degenerate": {
+   "n": 260,
+   "n_sources": 2,
+   "pandas_default": {
+    "correct": {
+     "k": 260,
+     "rate": 1.0,
+     "wilson95": [
+      0.9854397486977035,
+      0.9999999999999999
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    }
+   },
+   "pandas_dayfirst": {
+    "correct": {
+     "k": 260,
+     "rate": 1.0,
+     "wilson95": [
+      0.9854397486977035,
+      0.9999999999999999
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    }
+   },
+   "duckdb_sniffer": {
+    "correct": {
+     "k": 260,
+     "rate": 1.0,
+     "wilson95": [
+      0.9854397486977035,
+      0.9999999999999999
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    }
+   },
+   "range_rule_ask": {
+    "correct": {
+     "k": 260,
+     "rate": 1.0,
+     "wilson95": [
+      0.9854397486977035,
+      0.9999999999999999
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    }
+   },
+   "dmguard": {
+    "correct": {
+     "k": 260,
+     "rate": 1.0,
+     "wilson95": [
+      0.9854397486977035,
+      0.9999999999999999
+     ]
+    },
+    "silent_wrong": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "abstain": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    },
+    "error": {
+     "k": 0,
+     "rate": 0.0,
+     "wilson95": [
+      0.0,
+      0.014560251302296528
+     ]
+    }
+   }
+  }
+ },
+ "cluster_bootstrap95_ambiguous": {
+  "pandas_default": {
+   "correct": [
+    0.5,
+    0.5
+   ],
+   "silent_wrong": [
+    0.5,
+    0.5
+   ]
+  },
+  "pandas_dayfirst": {
+   "correct": [
+    0.5,
+    0.5
+   ],
+   "silent_wrong": [
+    0.5,
+    0.5
+   ]
+  },
+  "duckdb_sniffer": {
+   "correct": [
+    0.5,
+    0.5
+   ],
+   "silent_wrong": [
+    0.5,
+    0.5
+   ]
+  },
+  "range_rule_ask": {
+   "correct": [
+    0.0,
+    0.0
+   ],
+   "silent_wrong": [
+    0.0,
+    0.0
+   ]
+  },
+  "dmguard": {
+   "correct": [
+    0.6124401913875598,
+    0.7721822541966427
+   ],
+   "silent_wrong": [
+    0.0,
+    0.0
+   ]
+  }
+ },
+ "ambiguous_breakdown": {
+  "size": {
+   "12": {
+    "n": 252,
+    "pandas_default": {
+     "correct": 126,
+     "silent_wrong": 126,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 126,
+     "silent_wrong": 126,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 126,
+     "silent_wrong": 126,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 252,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 212,
+     "silent_wrong": 0,
+     "abstain": 40,
+     "error": 0
+    }
+   },
+   "1362": {
+    "n": 2,
+    "pandas_default": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 2,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 2,
+     "silent_wrong": 0,
+     "abstain": 0,
+     "error": 0
+    }
+   },
+   "1708": {
+    "n": 2,
+    "pandas_default": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 2,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 2,
+     "silent_wrong": 0,
+     "abstain": 0,
+     "error": 0
+    }
+   },
+   "17283": {
+    "n": 2,
+    "pandas_default": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 2,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 2,
+     "silent_wrong": 0,
+     "abstain": 0,
+     "error": 0
+    }
+   },
+   "24": {
+    "n": 228,
+    "pandas_default": {
+     "correct": 114,
+     "silent_wrong": 114,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 114,
+     "silent_wrong": 114,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 114,
+     "silent_wrong": 114,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 228,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 224,
+     "silent_wrong": 0,
+     "abstain": 4,
+     "error": 0
+    }
+   },
+   "250": {
+    "n": 224,
+    "pandas_default": {
+     "correct": 112,
+     "silent_wrong": 112,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 112,
+     "silent_wrong": 112,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 112,
+     "silent_wrong": 112,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 224,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 224,
+     "silent_wrong": 0,
+     "abstain": 0,
+     "error": 0
+    }
+   },
+   "560": {
+    "n": 2,
+    "pandas_default": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 2,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 2,
+     "silent_wrong": 0,
+     "abstain": 0,
+     "error": 0
+    }
+   },
+   "6": {
+    "n": 304,
+    "pandas_default": {
+     "correct": 152,
+     "silent_wrong": 152,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 152,
+     "silent_wrong": 152,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 152,
+     "silent_wrong": 152,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 304,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 4,
+     "silent_wrong": 0,
+     "abstain": 300,
+     "error": 0
+    }
+   },
+   "60": {
+    "n": 224,
+    "pandas_default": {
+     "correct": 112,
+     "silent_wrong": 112,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 112,
+     "silent_wrong": 112,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 112,
+     "silent_wrong": 112,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 224,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 224,
+     "silent_wrong": 0,
+     "abstain": 0,
+     "error": 0
+    }
+   },
+   "614": {
+    "n": 2,
+    "pandas_default": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 2,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 2,
+     "silent_wrong": 0,
+     "abstain": 0,
+     "error": 0
+    }
+   },
+   "741": {
+    "n": 2,
+    "pandas_default": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 2,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 2,
+     "silent_wrong": 0,
+     "abstain": 0,
+     "error": 0
+    }
+   },
+   "880": {
+    "n": 2,
+    "pandas_default": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 1,
+     "silent_wrong": 1,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 2,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 2,
+     "silent_wrong": 0,
+     "abstain": 0,
+     "error": 0
+    }
+   }
+  },
+  "shuffled": {
+   "False": {
+    "n": 630,
+    "pandas_default": {
+     "correct": 315,
+     "silent_wrong": 315,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 315,
+     "silent_wrong": 315,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 315,
+     "silent_wrong": 315,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 630,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 458,
+     "silent_wrong": 0,
+     "abstain": 172,
+     "error": 0
+    }
+   },
+   "True": {
+    "n": 616,
+    "pandas_default": {
+     "correct": 308,
+     "silent_wrong": 308,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 308,
+     "silent_wrong": 308,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 308,
+     "silent_wrong": 308,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 616,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 444,
+     "silent_wrong": 0,
+     "abstain": 172,
+     "error": 0
+    }
+   }
+  },
+  "source": {
+   "bond-yields-us-10y/data/monthly.csv:Date": {
+    "n": 162,
+    "pandas_default": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 162,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 130,
+     "silent_wrong": 0,
+     "abstain": 32,
+     "error": 0
+    }
+   },
+   "covid-19/data/countries-aggregated-sample.csv:Date": {
+    "n": 12,
+    "pandas_default": {
+     "correct": 6,
+     "silent_wrong": 6,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 6,
+     "silent_wrong": 6,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 6,
+     "silent_wrong": 6,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 12,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 12,
+     "error": 0
+    }
+   },
+   "covid-19/data/key-countries-pivoted.csv:Date": {
+    "n": 8,
+    "pandas_default": {
+     "correct": 4,
+     "silent_wrong": 4,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 4,
+     "silent_wrong": 4,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 4,
+     "silent_wrong": 4,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 8,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 8,
+     "error": 0
+    }
+   },
+   "covid-19/data/worldwide-aggregate.csv:Date": {
+    "n": 20,
+    "pandas_default": {
+     "correct": 10,
+     "silent_wrong": 10,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 10,
+     "silent_wrong": 10,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 10,
+     "silent_wrong": 10,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 20,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 20,
+     "error": 0
+    }
+   },
+   "cpi-us/data/cpiai.csv:Date": {
+    "n": 162,
+    "pandas_default": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 162,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 126,
+     "silent_wrong": 0,
+     "abstain": 36,
+     "error": 0
+    }
+   },
+   "exchange-rates/data/daily.csv:Date": {
+    "n": 4,
+    "pandas_default": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 4,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 4,
+     "error": 0
+    }
+   },
+   "exchange-rates/data/monthly.csv:Date": {
+    "n": 162,
+    "pandas_default": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 162,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 130,
+     "silent_wrong": 0,
+     "abstain": 32,
+     "error": 0
+    }
+   },
+   "house-prices-us/data/national-month.csv:Date": {
+    "n": 162,
+    "pandas_default": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 162,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 134,
+     "silent_wrong": 0,
+     "abstain": 28,
+     "error": 0
+    }
+   },
+   "jbrownlee/daily-max-temperatures.csv:Date": {
+    "n": 8,
+    "pandas_default": {
+     "correct": 4,
+     "silent_wrong": 4,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 4,
+     "silent_wrong": 4,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 4,
+     "silent_wrong": 4,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 8,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 8,
+     "error": 0
+    }
+   },
+   "jbrownlee/daily-total-female-births.csv:Date": {
+    "n": 12,
+    "pandas_default": {
+     "correct": 6,
+     "silent_wrong": 6,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 6,
+     "silent_wrong": 6,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 6,
+     "silent_wrong": 6,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 12,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 12,
+     "error": 0
+    }
+   },
+   "s-and-p-500/archive/fred_sp500.csv:observation_date": {
+    "n": 4,
+    "pandas_default": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 4,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 4,
+     "error": 0
+    }
+   },
+   "vega/data/co2-concentration.csv:Date": {
+    "n": 162,
+    "pandas_default": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 162,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 126,
+     "silent_wrong": 0,
+     "abstain": 36,
+     "error": 0
+    }
+   },
+   "vega/data/github.csv:time": {
+    "n": 28,
+    "pandas_default": {
+     "correct": 14,
+     "silent_wrong": 14,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 14,
+     "silent_wrong": 14,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 14,
+     "silent_wrong": 14,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 28,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 28,
+     "error": 0
+    }
+   },
+   "vega/data/seattle-weather.csv:date": {
+    "n": 4,
+    "pandas_default": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 4,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 4,
+     "error": 0
+    }
+   },
+   "vega/data/sp500-2000.csv:date": {
+    "n": 4,
+    "pandas_default": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 2,
+     "silent_wrong": 2,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 4,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 4,
+     "error": 0
+    }
+   },
+   "vega/data/stocks.csv:date": {
+    "n": 162,
+    "pandas_default": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 162,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 126,
+     "silent_wrong": 0,
+     "abstain": 36,
+     "error": 0
+    }
+   },
+   "vega/data/unemployment-across-industries.json:date": {
+    "n": 162,
+    "pandas_default": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 81,
+     "silent_wrong": 81,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 162,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 130,
+     "silent_wrong": 0,
+     "abstain": 32,
+     "error": 0
+    }
+   },
+   "vega/data/weather.csv:date": {
+    "n": 8,
+    "pandas_default": {
+     "correct": 4,
+     "silent_wrong": 4,
+     "abstain": 0,
+     "error": 0
+    },
+    "pandas_dayfirst": {
+     "correct": 4,
+     "silent_wrong": 4,
+     "abstain": 0,
+     "error": 0
+    },
+    "duckdb_sniffer": {
+     "correct": 4,
+     "silent_wrong": 4,
+     "abstain": 0,
+     "error": 0
+    },
+    "range_rule_ask": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 8,
+     "error": 0
+    },
+    "dmguard": {
+     "correct": 0,
+     "silent_wrong": 0,
+     "abstain": 8,
+     "error": 0
+    }
+   }
+  }
+ }
+}

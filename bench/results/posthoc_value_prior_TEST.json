@@ -1,0 +1,25 @@
+{
+ "H_const_day": {
+  "silent_wrong": 108,
+  "correct": 1134,
+  "abstain": 4
+ },
+ "dmguard": {
+  "abstain": 344,
+  "correct": 902
+ },
+ "H_const_day_silent_wrong_by_source": {
+  "exchange-rates/data/daily.csv:Date": 4,
+  "covid-19/data/countries-aggregated-sample.csv:Date": 12,
+  "covid-19/data/key-countries-pivoted.csv:Date": 8,
+  "covid-19/data/worldwide-aggregate.csv:Date": 20,
+  "s-and-p-500/archive/fred_sp500.csv:observation_date": 4,
+  "vega/data/seattle-weather.csv:date": 4,
+  "vega/data/weather.csv:date": 8,
+  "vega/data/sp500-2000.csv:date": 4,
+  "vega/data/github.csv:time": 24,
+  "jbrownlee/daily-max-temperatures.csv:Date": 8,
+  "jbrownlee/daily-total-female-births.csv:Date": 12
+ },
+ "n": 1246
+}

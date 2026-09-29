@@ -1,0 +1,26 @@
+{
+ "worst_case_forced_surrogate_test": {
+  "rows": 100000,
+  "seconds_best_of_3": 1.257,
+  "verdict": "AMBIGUOUS",
+  "method": "abstained"
+ },
+ "default_on_unsorted_random": {
+  "rows": 100000,
+  "seconds_best_of_3": 0.582,
+  "verdict": "AMBIGUOUS",
+  "method": "abstained"
+ },
+ "sorted_panel_structure": {
+  "rows": 100000,
+  "seconds_best_of_3": 0.489,
+  "verdict": "MDY",
+  "method": "structure"
+ },
+ "unambiguous_validity": {
+  "rows": 100000,
+  "seconds_best_of_3": 0.213,
+  "verdict": "MDY",
+  "method": "validity"
+ }
+}

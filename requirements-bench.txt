@@ -1,0 +1,5 @@
+# Pinned versions used for the reported benchmark (dmguard itself needs none)
+pandas==3.0.6
+duckdb==1.5.6
+numpy==2.4.6
+pytest==8.4.2

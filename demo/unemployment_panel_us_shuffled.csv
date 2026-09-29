@@ -1,0 +1,337 @@
+date,series,count,rate
+07/01/2005,Business services,804,6.3
+11/01/2005,Construction,564,5.7
+05/01/2005,Finance,288,3.1
+02/01/2006,Transportation and Utilities,260,4.6
+08/01/2006,Wholesale and Retail Trade,977,4.7
+10/01/2005,Government,502,2.4
+11/01/2006,Construction,618,6
+02/01/2005,Business services,916,7.2
+09/01/2005,Government,568,2.7
+04/01/2005,Education and Health,591,3.3
+01/01/2005,Education and Health,613,3.4
+03/01/2005,Leisure and hospitality,967,8.3
+05/01/2006,Mining and Extraction,20,2.8
+03/01/2005,Construction,961,10.3
+09/01/2006,Other,310,5
+03/01/2006,Other,292,4.6
+01/01/2006,Mining and Extraction,26,3.9
+01/01/2006,Transportation and Utilities,287,5
+08/01/2006,Business services,681,5.1
+04/01/2006,Other,266,4.1
+12/01/2005,Self-employed,327,3.1
+08/01/2006,Information,132,3.9
+09/01/2005,Finance,260,2.7
+10/01/2006,Leisure and hospitality,795,6.6
+08/01/2005,Information,156,4.6
+06/01/2006,Education and Health,617,3.3
+01/01/2005,Agriculture,153,13.2
+05/01/2005,Government,453,2.1
+05/01/2005,Education and Health,648,3.6
+10/01/2006,Agriculture,77,5.8
+05/01/2005,Leisure and hospitality,944,7.7
+02/01/2006,Manufacturing,821,4.9
+11/01/2005,Mining and Extraction,18,2.9
+05/01/2005,Manufacturing,743,4.5
+04/01/2005,Manufacturing,793,4.8
+04/01/2006,Business services,644,4.9
+07/01/2005,Construction,509,5.2
+04/01/2005,Mining and Extraction,19,2.9
+05/01/2006,Agriculture,79,6
+06/01/2005,Information,160,5
+10/01/2005,Leisure and hospitality,796,6.8
+03/01/2005,Manufacturing,879,5.3
+08/01/2005,Government,664,3.2
+12/01/2005,Manufacturing,757,4.5
+03/01/2006,Manufacturing,701,4.1
+12/01/2006,Mining and Extraction,25,3.4
+11/01/2006,Government,400,1.9
+02/01/2005,Information,204,6.5
+04/01/2005,Agriculture,84,6.9
+01/01/2005,Business services,958,7.6
+02/01/2006,Self-employed,332,3.1
+12/01/2006,Wholesale and Retail Trade,965,4.5
+09/01/2005,Construction,572,5.7
+04/01/2006,Information,132,4.2
+09/01/2005,Transportation and Utilities,211,3.7
+01/01/2006,Government,457,2.2
+09/01/2005,Leisure and hospitality,842,7.3
+03/01/2005,Transportation and Utilities,267,4.8
+04/01/2006,Transportation and Utilities,272,4.8
+06/01/2005,Transportation and Utilities,247,4.5
+04/01/2005,Self-employed,273,2.4
+10/01/2006,Education and Health,531,2.8
+04/01/2006,Wholesale and Retail Trade,972,4.6
+06/01/2006,Construction,569,5.6
+10/01/2005,Construction,519,5.3
+11/01/2005,Self-employed,319,3
+01/01/2006,Education and Health,593,3.2
+07/01/2006,Self-employed,291,2.6
+01/01/2005,Other,290,4.7
+03/01/2005,Business services,807,6.5
+12/01/2006,Finance,227,2.3
+04/01/2005,Wholesale and Retail Trade,1131,5.4
+11/01/2006,Information,137,3.9
+02/01/2005,Leisure and hospitality,1008,8.8
+09/01/2006,Finance,235,2.4
+07/01/2006,Transportation and Utilities,237,4.2
+09/01/2006,Business services,736,5.6
+04/01/2005,Construction,693,7.4
+03/01/2006,Agriculture,117,9.8
+09/01/2006,Self-employed,299,2.7
+07/01/2005,Manufacturing,883,5.3
+06/01/2006,Information,114,3.4
+09/01/2006,Information,170,4.9
+08/01/2005,Business services,728,5.7
+11/01/2005,Transportation and Utilities,199,3.5
+11/01/2005,Information,172,5.1
+02/01/2006,Agriculture,139,11.8
+12/01/2005,Education and Health,529,2.8
+03/01/2006,Finance,298,3.1
+06/01/2005,Education and Health,667,3.6
+08/01/2005,Wholesale and Retail Trade,1130,5.3
+02/01/2005,Finance,301,3.2
+01/01/2006,Leisure and hospitality,910,8.1
+06/01/2005,Leisure and hospitality,950,7.6
+12/01/2005,Government,393,1.9
+11/01/2005,Manufacturing,823,4.9
+07/01/2006,Information,103,3
+09/01/2005,Wholesale and Retail Trade,1038,4.9
+07/01/2006,Finance,329,3.4
+07/01/2005,Leisure and hospitality,929,7.4
+09/01/2006,Education and Health,576,3
+01/01/2006,Self-employed,341,3.2
+10/01/2006,Wholesale and Retail Trade,972,4.7
+03/01/2006,Education and Health,563,3
+06/01/2005,Finance,307,3.3
+10/01/2006,Transportation and Utilities,206,3.6
+03/01/2005,Government,468,2.2
+07/01/2006,Construction,633,6.1
+09/01/2005,Business services,862,6.7
+10/01/2005,Transportation and Utilities,251,4.4
+02/01/2006,Business services,841,6.5
+01/01/2005,Transportation and Utilities,276,5
+03/01/2006,Business services,824,6.3
+12/01/2006,Information,108,2.9
+12/01/2006,Leisure and hospitality,701,5.9
+12/01/2006,Manufacturing,660,4
+06/01/2005,Other,291,4.6
+03/01/2006,Transportation and Utilities,263,4.7
+11/01/2005,Government,494,2.4
+04/01/2006,Leisure and hospitality,882,7.6
+10/01/2005,Business services,748,5.8
+02/01/2006,Construction,836,8.6
+07/01/2006,Education and Health,659,3.5
+03/01/2006,Construction,820,8.5
+01/01/2006,Wholesale and Retail Trade,1203,5.7
+03/01/2006,Government,461,2.2
+09/01/2006,Leisure and hospitality,810,6.9
+08/01/2006,Education and Health,611,3.2
+04/01/2005,Other,306,4.9
+06/01/2006,Other,265,4.3
+05/01/2006,Construction,647,6.6
+08/01/2006,Transportation and Utilities,217,3.7
+03/01/2005,Agriculture,139,11.8
+11/01/2005,Education and Health,677,3.6
+07/01/2006,Government,659,3.2
+07/01/2005,Government,683,3.3
+10/01/2006,Manufacturing,618,3.7
+06/01/2006,Agriculture,35,2.4
+06/01/2006,Transportation and Utilities,225,3.9
+02/01/2006,Finance,268,2.8
+01/01/2005,Government,555,2.6
+08/01/2005,Other,306,4.8
+12/01/2006,Other,306,5.2
+08/01/2005,Leisure and hospitality,844,6.8
+05/01/2005,Mining and Extraction,16,2.4
+05/01/2005,Self-employed,299,2.7
+05/01/2006,Wholesale and Retail Trade,1025,4.8
+06/01/2005,Construction,559,5.7
+12/01/2006,Education and Health,502,2.6
+06/01/2006,Self-employed,245,2.2
+07/01/2006,Leisure and hospitality,867,6.8
+12/01/2005,Information,128,3.7
+07/01/2005,Self-employed,282,2.5
+03/01/2005,Mining and Extraction,32,5.2
+07/01/2005,Agriculture,69,4.7
+06/01/2005,Business services,743,5.8
+07/01/2006,Agriculture,55,3.6
+12/01/2005,Leisure and hospitality,930,7.9
+12/01/2006,Transportation and Utilities,190,3.2
+01/01/2005,Leisure and hospitality,993,8.7
+02/01/2006,Government,472,2.3
+03/01/2006,Information,116,3.5
+12/01/2005,Transportation and Utilities,202,3.6
+06/01/2005,Agriculture,76,5.2
+10/01/2005,Manufacturing,800,4.8
+01/01/2005,Information,168,5.4
+10/01/2006,Business services,768,5.6
+11/01/2006,Manufacturing,702,4.3
+05/01/2006,Transportation and Utilities,226,4
+12/01/2005,Wholesale and Retail Trade,968,4.5
+02/01/2005,Other,325,5.3
+02/01/2005,Government,472,2.3
+10/01/2005,Self-employed,255,2.3
+08/01/2006,Construction,618,5.9
+06/01/2005,Self-employed,268,2.4
+07/01/2005,Information,142,4.2
+10/01/2005,Other,319,5
+04/01/2005,Government,478,2.3
+02/01/2005,Self-employed,363,3.4
+01/01/2005,Finance,252,2.7
+02/01/2006,Other,281,4.4
+05/01/2006,Finance,289,3
+10/01/2006,Mining and Extraction,15,2.2
+10/01/2006,Government,424,2
+03/01/2006,Mining and Extraction,14,2.1
+12/01/2005,Construction,813,8.2
+02/01/2005,Wholesale and Retail Trade,1301,6.2
+10/01/2005,Education and Health,628,3.4
+08/01/2006,Manufacturing,680,4.1
+11/01/2005,Wholesale and Retail Trade,1013,4.7
+01/01/2006,Finance,233,2.4
+08/01/2006,Other,341,5.3
+05/01/2006,Business services,695,5.3
+03/01/2006,Wholesale and Retail Trade,1022,4.9
+08/01/2005,Self-employed,249,2.3
+12/01/2006,Construction,725,6.9
+09/01/2006,Transportation and Utilities,183,3.1
+07/01/2005,Wholesale and Retail Trade,1194,5.6
+08/01/2005,Education and Health,644,3.5
+07/01/2006,Mining and Extraction,25,3.5
+05/01/2006,Leisure and hospitality,830,7
+04/01/2005,Leisure and hospitality,882,7.7
+05/01/2005,Wholesale and Retail Trade,1145,5.4
+06/01/2005,Wholesale and Retail Trade,1197,5.7
+01/01/2005,Self-employed,346,3.2
+10/01/2006,Finance,211,2.1
+10/01/2005,Mining and Extraction,2,0.3
+11/01/2006,Agriculture,125,9.6
+05/01/2005,Business services,730,5.9
+08/01/2005,Construction,561,5.7
+04/01/2006,Education and Health,558,3
+07/01/2005,Transportation and Utilities,222,3.9
+03/01/2006,Self-employed,300,2.8
+01/01/2006,Information,105,3.3
+08/01/2006,Mining and Extraction,32,4.3
+07/01/2006,Manufacturing,736,4.4
+11/01/2006,Wholesale and Retail Trade,1018,4.8
+06/01/2005,Government,681,3.2
+05/01/2006,Manufacturing,680,4.1
+04/01/2005,Finance,255,2.7
+03/01/2005,Wholesale and Retail Trade,1173,5.6
+04/01/2006,Finance,293,3.1
+01/01/2005,Manufacturing,889,5.3
+12/01/2006,Agriculture,139,10.4
+07/01/2006,Business services,735,5.5
+07/01/2005,Finance,309,3.3
+03/01/2005,Other,308,5
+12/01/2006,Self-employed,287,2.6
+08/01/2005,Manufacturing,767,4.7
+12/01/2005,Finance,204,2.1
+05/01/2006,Self-employed,251,2.3
+04/01/2006,Government,414,2
+05/01/2006,Government,429,2.1
+03/01/2005,Finance,261,2.7
+11/01/2005,Finance,268,2.8
+02/01/2005,Transportation and Utilities,245,4.4
+10/01/2006,Construction,456,4.5
+04/01/2006,Agriculture,81,6.2
+06/01/2006,Leisure and hospitality,942,7.4
+06/01/2006,Government,578,2.8
+09/01/2006,Wholesale and Retail Trade,1008,4.9
+01/01/2006,Business services,825,6.5
+01/01/2006,Agriculture,140,11.5
+12/01/2005,Other,269,4.3
+09/01/2005,Information,168,4.9
+06/01/2006,Manufacturing,635,3.8
+10/01/2005,Finance,255,2.7
+04/01/2006,Manufacturing,745,4.5
+09/01/2005,Manufacturing,775,4.7
+06/01/2006,Business services,753,5.7
+09/01/2005,Education and Health,658,3.5
+10/01/2006,Self-employed,275,2.5
+03/01/2005,Information,177,6
+11/01/2006,Transportation and Utilities,183,3.1
+04/01/2005,Business services,714,5.7
+04/01/2006,Mining and Extraction,17,2.5
+09/01/2006,Government,396,1.9
+12/01/2006,Business services,791,5.9
+11/01/2005,Leisure and hospitality,966,8.1
+11/01/2006,Self-employed,257,2.3
+07/01/2005,Other,274,4.2
+01/01/2006,Manufacturing,778,4.6
+08/01/2006,Agriculture,76,5.3
+11/01/2006,Leisure and hospitality,836,7.1
+09/01/2005,Agriculture,127,9.5
+08/01/2006,Self-employed,306,2.7
+04/01/2005,Information,178,5.9
+02/01/2006,Education and Health,528,2.8
+08/01/2005,Finance,300,3.2
+02/01/2006,Leisure and hospitality,1040,9.1
+05/01/2005,Other,314,5
+10/01/2005,Agriculture,85,6.7
+06/01/2006,Mining and Extraction,31,4.3
+05/01/2005,Transportation and Utilities,223,4.1
+09/01/2006,Agriculture,78,5.9
+08/01/2005,Transportation and Utilities,187,3.3
+10/01/2005,Information,162,4.8
+06/01/2006,Finance,299,3.1
+05/01/2006,Education and Health,543,2.9
+11/01/2006,Education and Health,536,2.8
+05/01/2006,Information,158,4.8
+03/01/2005,Education and Health,614,3.4
+09/01/2005,Other,307,4.9
+03/01/2006,Leisure and hospitality,917,8
+10/01/2005,Wholesale and Retail Trade,1050,4.9
+03/01/2005,Self-employed,312,2.9
+09/01/2005,Mining and Extraction,12,2
+05/01/2006,Other,265,4.2
+02/01/2005,Construction,1150,12.3
+11/01/2006,Finance,229,2.3
+01/01/2005,Wholesale and Retail Trade,1302,6.3
+05/01/2005,Construction,567,6.1
+09/01/2006,Manufacturing,632,3.8
+11/01/2006,Other,306,5
+02/01/2006,Information,119,3.7
+05/01/2005,Agriculture,66,5.3
+01/01/2006,Construction,868,9
+01/01/2006,Other,308,4.9
+02/01/2005,Manufacturing,889,5.3
+09/01/2005,Self-employed,282,2.6
+05/01/2005,Information,145,4.7
+09/01/2006,Construction,586,5.6
+10/01/2006,Other,268,4.4
+12/01/2006,Government,395,1.9
+06/01/2006,Wholesale and Retail Trade,1085,5.1
+02/01/2005,Mining and Extraction,25,4
+12/01/2005,Business services,788,6.1
+12/01/2005,Agriculture,127,11.1
+08/01/2005,Agriculture,100,7.1
+08/01/2005,Mining and Extraction,12,2
+04/01/2006,Self-employed,334,3.1
+07/01/2006,Wholesale and Retail Trade,1083,5.1
+04/01/2006,Construction,674,6.9
+02/01/2005,Agriculture,107,9.9
+07/01/2005,Mining and Extraction,22,3.7
+02/01/2005,Education and Health,619,3.4
+07/01/2006,Other,305,4.7
+11/01/2006,Mining and Extraction,22,2.9
+04/01/2005,Transportation and Utilities,257,4.7
+12/01/2005,Mining and Extraction,23,3.5
+11/01/2006,Business services,658,4.9
+07/01/2005,Education and Health,635,3.5
+09/01/2006,Mining and Extraction,14,2.1
+08/01/2006,Government,595,2.9
+02/01/2006,Wholesale and Retail Trade,1141,5.4
+08/01/2006,Leisure and hospitality,855,6.9
+06/01/2005,Mining and Extraction,25,4
+11/01/2005,Agriculture,118,9.6
+08/01/2006,Finance,263,2.7
+01/01/2005,Construction,1079,11.8
+11/01/2005,Other,300,4.9
+02/01/2006,Mining and Extraction,25,3.8
+01/01/2005,Mining and Extraction,29,4.9
+11/01/2005,Business services,711,5.5
+06/01/2005,Manufacturing,743,4.4
+10/01/2006,Information,116,3.4
