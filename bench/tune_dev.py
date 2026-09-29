@@ -21,34 +21,28 @@ from cases import generate  # noqa: E402
 from dmguard.core import resolve_column  # noqa: E402
 
 THRESHOLDS = [0, 2, 4, 6, 8, 10, 12, 16, 20, 24, 32, 40]
-WEIGHTS = [0.0, 0.5, 1.0, 2.0]
+WEIGHTS = [1.0]  # weekday weight fixed to a plain sum since method v1.3 (see activity log)
 
 
 def main():
     cases = [c for c in generate("DEV") if c.klass == "ambiguous"]
-    rows = []
-    for c in cases:
-        res = resolve_column(c.strings, threshold_bits=float("inf"))
-        st = res.stats
-        rows.append((c.render, {o: (s.sequence_bits, s.weekday_bits) for o, s in st.items()}))
     grid = []
     for w in WEIGHTS:
         for tau in THRESHOLDS:
             correct = wrong = abstain = 0
-            for truth_order, comp in rows:
-                tot = {o: seq + w * wd for o, (seq, wd) in comp.items()}
-                (b, lb), (o, lo) = sorted(tot.items(), key=lambda kv: kv[1])
-                if lo - lb >= tau and lo - lb > 0:
-                    if b == truth_order:
-                        correct += 1
-                    else:
-                        wrong += 1
-                else:
+            for c in cases:
+                res = resolve_column(c.strings, threshold_bits=tau)
+                if not res.resolved:
                     abstain += 1
-            n = len(rows)
+                elif res.verdict == c.render:
+                    correct += 1
+                else:
+                    wrong += 1
+            n = len(cases)
             grid.append({"weekday_weight": w, "threshold_bits": tau, "n": n,
                          "auto_correct": correct / n, "silent_wrong": wrong / n,
                          "abstain": abstain / n})
+            print(grid[-1], flush=True)
     for g in grid:
         g["utility"] = round(g["auto_correct"] - 5 * g["silent_wrong"], 9)
     ok = [g for g in grid if g["silent_wrong"] <= 0.02]

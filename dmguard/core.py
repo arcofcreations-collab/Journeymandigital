@@ -31,7 +31,7 @@ __all__ = [
 
 # Minimum evidence (bits) before a structural verdict is issued. Chosen on the
 # DEV split only (see docs/SPEC_v1_FROZEN.md and bench/tune_dev.py).
-DEFAULT_THRESHOLD_BITS = 8.0
+DEFAULT_THRESHOLD_BITS = 2.0
 
 # Weight of the weekday component relative to the sequence component.
 WEEKDAY_WEIGHT = 1.0
@@ -46,7 +46,7 @@ MIN_Z = 3.0
 # structure-free surrogate columns (p < 1/(N+1)). Fixed a priori, not tuned.
 N_SURROGATES = 39
 SURROGATE_SEED = 20260929
-SURROGATE_MAX_ROWS = 5000
+SURROGATE_MAX_ROWS = 2000
 
 MISSING = {"", "na", "n/a", "nan", "null", "none", "nat", "-", "--", "?"}
 
@@ -149,7 +149,7 @@ def _new_symbol_bits(sym: tuple) -> float:
     kind, units, secs = sym
     bits = math.log2(4)  # which kind: T / M / E / D
     if kind != "T":
-        bits += 1 + _gamma_bits(abs(units) + 1)  # sign + magnitude
+        bits += _gamma_bits(abs(units) + 1)  # magnitude (direction coded separately)
     bits += 1  # time part present?
     if secs:
         bits += 1 + _gamma_bits(abs(secs) // 60 + 1)
@@ -181,17 +181,35 @@ def _delta_symbol(x: datetime, y: datetime) -> tuple:
 
 
 def _sequence_bits(values: Sequence[datetime]) -> tuple[list, Counter]:
-    """Adaptive (escape-based) code length, per step, of the delta sequence."""
+    """Adaptive code length, per step, of the delta sequence.
+
+    Each step is coded as a direction (forward/backward, adaptive binary
+    code; nothing for a zero step) plus a size (adaptive escape code over
+    the step sizes seen so far). Coding direction on its own makes a file in
+    date order cheap under the right reading (every step forward) and
+    expensive under a wrong one that jumps backward at regular intervals.
+    Forward and backward are treated alike, so descending files work too.
+    """
     counts: Counter = Counter()
     n = 0
+    dirs = [0, 0]
     items = []
     for x, y in zip(values, values[1:]):
-        sym = _delta_symbol(x, y)
+        kind, units, secs = _delta_symbol(x, y)
+        sign = (units > 0) - (units < 0) or (secs > 0) - (secs < 0)
+        bits = 0.0
+        if sign:
+            d = 0 if sign > 0 else 1
+            bits += -math.log2((dirs[d] + 0.5) / (dirs[0] + dirs[1] + 1))
+            dirs[d] += 1
+            units, secs = units * sign, secs * sign
+        sym = (kind, units, secs)
         c = counts[sym]
         if c:
-            items.append(-math.log2(c / (n + 1)))
+            bits += -math.log2(c / (n + 1))
         else:
-            items.append(-math.log2(1 / (n + 1)) + _new_symbol_bits(sym))
+            bits += -math.log2(1 / (n + 1)) + _new_symbol_bits(sym)
+        items.append(bits)
         counts[sym] += 1
         n += 1
     return items, counts
