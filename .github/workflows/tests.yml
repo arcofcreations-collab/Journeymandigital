@@ -18,10 +18,18 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install . pytest==8.4.2
       - run: python -m pytest -q
-      - name: CLI smoke test
+      - name: CLI smoke test (exit codes are part of the contract)
         run: |
-          printf 'Date,Value\n01/01/2020,1\n01/02/2020,2\n01/03/2020,3\n01/04/2020,4\n01/05/2020,5\n01/06/2020,6\n01/07/2020,7\n01/08/2020,8\n01/09/2020,9\n01/10/2020,10\n01/11/2020,11\n01/12/2020,12\n01/01/2021,13\n01/02/2021,14\n' > smoke.csv
-          dmguard check smoke.csv
+          # monthly on the 1st has a mirror pattern: flagged (exit 2), applied only with --accept-likely
+          printf 'Date,Value\n01/01/2020,1\n01/02/2020,2\n01/03/2020,3\n01/04/2020,4\n01/05/2020,5\n01/06/2020,6\n01/07/2020,7\n01/08/2020,8\n01/09/2020,9\n01/10/2020,10\n01/11/2020,11\n01/12/2020,12\n01/01/2021,13\n01/02/2021,14\n' > monthly.csv
+          set +e; dmguard check monthly.csv; code=$?; set -e
+          test "$code" -eq 2
+          dmguard fix monthly.csv -o monthly_iso.csv --accept-likely
+          grep -q '^2020-02-01,2$' monthly_iso.csv
+          # a value past 12 proves the order: exit 0, lossless conversion
+          printf 't\n13/04/2021 12:30:00.123456\n' > proven.csv
+          dmguard fix proven.csv -o proven_iso.csv
+          grep -q '^2021-04-13 12:30:00.123456$' proven_iso.csv
 
   javascript-parity:
     # The in-browser version (web/dmguard.js) must give the same verdicts as the Python tool.

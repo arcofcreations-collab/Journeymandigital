@@ -65,3 +65,11 @@ def test_4b_mostly_dates_column_is_not_silently_skipped(tmp_path, capsys):
     write(p, [["d"]] + [[v] for v in vals] + [["n/k"], ["tbc"], ["?? "], ["later"], ["x"]])
     assert main(["check", str(p)]) == 2
     assert "not valid dates" in capsys.readouterr().out
+
+
+def test_fix_keeps_the_input_line_endings(tmp_path):
+    for eol in ("\n", "\r\n"):
+        p, o = tmp_path / "e.csv", tmp_path / "e_out.csv"
+        p.write_bytes(("t" + eol + "13/04/2021" + eol + "14/04/2021" + eol).encode())
+        assert main(["fix", str(p), "-o", str(o)]) == 0
+        assert o.read_bytes() == ("t" + eol + "2021-04-13" + eol + "2021-04-14" + eol).encode()

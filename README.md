@@ -113,7 +113,7 @@ Everything dmguard does not answer is flagged, never loaded wrong. On unambiguou
 
 ```bash
 pip install -r requirements-bench.txt
-python3 -m pytest -q                    # 38 tests, incl. misleading-pattern and review regressions
+python3 -m pytest -q                    # 39 tests, incl. misleading-pattern and review regressions
 python3 bench/fetch_data.py             # pinned sources, sha256 in bench/data/MANIFEST.json
 python3 bench/tune_dev.py               # DEV-only threshold choice  -> bench/results/dev_tuning.json
 python3 bench/run_eval.py DEV

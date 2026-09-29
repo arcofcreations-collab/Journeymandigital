@@ -73,6 +73,8 @@ def read_table(path: str, delimiter: Optional[str] = None, encoding: str = "utf-
             dialect = csv.Sniffer().sniff(text[:65536], delimiters=",;\t|")
         except csv.Error:
             dialect = csv.excel()
+    # Keep the file's own line endings when writing a converted copy.
+    dialect.lineterminator = "\r\n" if "\r\n" in text[:65536] else "\n"
     rows = list(csv.reader(io.StringIO(text), dialect))
     rows = [r for r in rows if any(cell.strip() for cell in r)]
     if not rows:
@@ -157,7 +159,8 @@ def rewrite_iso(report: TableReport, out_path: str) -> dict:
             converters[j] = iso_with_order(col, res.verdict)
     changed = {names[j]: 0 for j in converters}
     with open(out_path, "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh, delimiter=getattr(report.dialect, "delimiter", ","))
+        w = csv.writer(fh, delimiter=getattr(report.dialect, "delimiter", ","),
+                       lineterminator=getattr(report.dialect, "lineterminator", "\n"))
         w.writerow(report.header)
         for i, row in enumerate(report.rows):
             row = list(row)

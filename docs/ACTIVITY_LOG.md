@@ -38,6 +38,7 @@
 | ≈10:45 | Committed `SPEC_v3_REVIEW_FIXES.md` (criteria R1–R5; T2 kept and expected to fail) **before** running any 1.1.0 evaluation. Version 1.1.0. |
 | ≈10:47–10:52 | Fresh adversarial set (seed 777, 840 ambiguous columns), run once: 1.0.0 was 11.4% silently wrong (94 of its 96 errors in "daily run each year"); 1.1.0 default 0 wrong, 28.3% correct. TEST re-run (no longer unseen): 1.1.0 default 0.3% correct, 0 wrong; `--accept-likely` 72.4% / 0 wrong. R1–R5 pass; **T2 fails for the default**. Performance: 1.30 s worst case per 100k rows. |
 | ≈10:52–10:58 | Ported 1.1.0 to JavaScript; parity 5,947/5,947 columns, including likely answers, `--accept-likely` and lossless ISO. Rebuilt the demo: real-data proof case of S&P 500 first-trading-day closes, proven by weekdays. Updated the page, README, RESULTS, CHANGELOG. |
+| ≈11:00–11:10 | CI went red after the 1.1.0 push. Cause: my CI smoke step used a monthly-on-the-1st file and expected exit 0; 1.1.0 correctly flags it (exit 2). pytest itself passed on every version. Rewrote the smoke step to assert the intended exit codes. Running it locally exposed a real defect: `fix` wrote CRLF line endings for LF input. Fixed (input line endings preserved) with a regression test; 39 tests. |
 
 ## Human interventions
 
