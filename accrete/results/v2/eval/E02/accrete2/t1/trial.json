@@ -1,0 +1,19 @@
+{
+ "id": "E02",
+ "set": "eval",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "maintenance",
+ "categories": [
+  "new_concept",
+  "permissions",
+  "rule_change",
+  "data_migration",
+  "conflict_or_ambiguity",
+  "sequence"
+ ],
+ "expect_rejection": false,
+ "version": "f54b594",
+ "attempts": [],
+ "extra": []
+}

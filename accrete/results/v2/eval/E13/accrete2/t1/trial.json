@@ -1,0 +1,38 @@
+{
+ "id": "E13",
+ "set": "eval",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "expenses",
+ "categories": [
+  "rule_change",
+  "new_concept",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "version": "f54b594",
+ "attempts": [
+  {
+   "attempt": 1,
+   "duration_ms": 103224,
+   "tool_uses": 16,
+   "tokens": 75791,
+   "hidden_passed": 8,
+   "hidden_total": 8,
+   "hidden_failures": [],
+   "regressions": [],
+   "clarification_written": false,
+   "success": true,
+   "t_start": 1790841314.3092046,
+   "t_end": 1790841403.605753,
+   "verify_s": 1.9
+  }
+ ],
+ "extra": [],
+ "finished": true,
+ "correct": true,
+ "correct_at_attempt": 1,
+ "cost_s": 105.1,
+ "tokens": 75791,
+ "tool_uses": 16
+}

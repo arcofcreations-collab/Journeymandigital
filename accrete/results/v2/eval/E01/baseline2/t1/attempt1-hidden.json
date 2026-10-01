@@ -1,0 +1,85 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/eval/E01/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E01/test_E01.py",
+ "passed": 15,
+ "total": 15,
+ "seconds": 1.41,
+ "results": [
+  {
+   "test": "challenges.eval.E01.test_E01::test_parts_seeded_and_low_stock_derived",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_existing_orders_have_zero_parts_cost_and_no_usages",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_use_parts_creates_usages_and_decrements_stock",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_low_stock_messages_only_on_crossing",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_insufficient_stock_is_409_and_atomic",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_stock_conflict_wins_over_invalid_item",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_use_parts_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_use_parts_permissions_and_state",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_part_usages_follow_work_order_read_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_part_usages_cannot_be_written_directly",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_parts_cost_is_frozen_and_reported_on_completion",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_cancel_keeps_usages_and_stock",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_parts_crud_permissions_and_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_ui_parts_and_use_parts_form",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E01.test_E01::test_base_behaviour_preserved",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

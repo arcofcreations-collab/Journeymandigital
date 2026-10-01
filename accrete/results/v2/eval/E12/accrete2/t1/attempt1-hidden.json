@@ -1,0 +1,55 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/eval/E12/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E12/test_E12.py",
+ "passed": 9,
+ "total": 9,
+ "seconds": 0.7,
+ "results": [
+  {
+   "test": "challenges.eval.E12.test_E12::test_active_flag_migrated_and_read_only",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E12.test_E12::test_offboard_manager_reassigns_reports",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E12.test_E12::test_offboard_deletes_drafts_once_nothing_is_in_flight",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E12.test_E12::test_invalid_successor_changes_nothing",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E12.test_E12::test_offboard_permissions_and_conflicts",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E12.test_E12::test_inactive_employees_can_read_but_not_write",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E12.test_E12::test_inactive_employee_cannot_become_manager",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E12.test_E12::test_ui_offboard_form",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E12.test_E12::test_claims_flow_after_reassignment",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

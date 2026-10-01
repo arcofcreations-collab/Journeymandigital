@@ -1,0 +1,40 @@
+{
+ "id": "E14",
+ "set": "eval",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "library",
+ "categories": [
+  "sequence",
+  "interaction",
+  "rule_change",
+  "data_migration",
+  "failure_atomicity"
+ ],
+ "expect_rejection": false,
+ "version": "f54b594",
+ "attempts": [
+  {
+   "attempt": 1,
+   "duration_ms": 129675,
+   "tool_uses": 16,
+   "tokens": 86562,
+   "hidden_passed": 7,
+   "hidden_total": 7,
+   "hidden_failures": [],
+   "regressions": [],
+   "clarification_written": false,
+   "success": true,
+   "t_start": 1790841314.8290915,
+   "t_end": 1790841429.0136836,
+   "verify_s": 2.7
+  }
+ ],
+ "extra": [],
+ "finished": true,
+ "correct": true,
+ "correct_at_attempt": 1,
+ "cost_s": 132.4,
+ "tokens": 86562,
+ "tool_uses": 16
+}

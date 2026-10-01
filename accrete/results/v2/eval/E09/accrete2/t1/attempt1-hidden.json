@@ -1,0 +1,55 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/eval/E09/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E09/test_E09.py",
+ "passed": 9,
+ "total": 9,
+ "seconds": 0.37,
+ "results": [
+  {
+   "test": "challenges.eval.E09.test_E09::test_guardians_migrated",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E09.test_E09::test_guardian_reads_dependants",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E09.test_E09::test_guardian_borrows_for_dependant",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E09.test_E09::test_guardian_returns_dependants_loans",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E09.test_E09::test_guardian_cannot_edit_dependants",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E09.test_E09::test_librarian_manages_guardians",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E09.test_E09::test_deleting_members_with_dependants",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E09.test_E09::test_ui_for_guardians",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E09.test_E09::test_other_members_unchanged",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

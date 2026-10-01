@@ -1,0 +1,60 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/eval/E08/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E08/test_E08.py",
+ "passed": 10,
+ "total": 10,
+ "seconds": 0.74,
+ "results": [
+  {
+   "test": "challenges.eval.E08.test_E08::test_copies_migrated",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E08.test_E08::test_loans_reference_copies",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E08.test_E08::test_book_status_and_available_copies",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E08.test_E08::test_borrow_takes_lowest_available_copy",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E08.test_E08::test_returning_frees_the_copy",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E08.test_E08::test_book_without_copies_is_unavailable",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E08.test_E08::test_copies_write_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E08.test_E08::test_deleting_a_book_removes_its_copies",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E08.test_E08::test_base_rules_preserved",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E08.test_E08::test_ui_copies",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

@@ -1,0 +1,18 @@
+{
+ "id": "D04",
+ "set": "dev",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "sequence",
+  "interaction",
+  "data_migration",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "version": "f54b594",
+ "attempts": [],
+ "extra": []
+}

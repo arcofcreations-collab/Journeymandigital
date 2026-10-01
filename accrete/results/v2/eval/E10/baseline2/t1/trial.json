@@ -10,6 +10,28 @@
  ],
  "expect_rejection": true,
  "version": "70314a4",
- "attempts": [],
- "extra": []
+ "attempts": [
+  {
+   "attempt": 1,
+   "duration_ms": 31087,
+   "tool_uses": 6,
+   "tokens": 55382,
+   "hidden_passed": 4,
+   "hidden_total": 4,
+   "hidden_failures": [],
+   "regressions": [],
+   "clarification_written": true,
+   "success": true,
+   "t_start": 1790841084.962964,
+   "t_end": 1790841104.2622886,
+   "verify_s": 4.0
+  }
+ ],
+ "extra": [],
+ "finished": true,
+ "correct": true,
+ "correct_at_attempt": 1,
+ "cost_s": 35.1,
+ "tokens": 55382,
+ "tool_uses": 6
 }
