@@ -1,0 +1,473 @@
+{
+ "kind": "change",
+ "request": "Build the expense-claims application described in spec/apps/expenses.md",
+ "interpretation": "",
+ "operators": [
+  {
+   "add_entity": {
+    "name": "employees",
+    "fields": {
+     "username": "text required unique",
+     "name": "text required",
+     "role": "enum employee|manager|finance required",
+     "manager": "ref employees",
+     "department": "text required"
+    },
+    "rules": {
+     "read": "True",
+     "create": "user.role == 'finance'",
+     "update": "user.role == 'finance'",
+     "delete": "user.role == 'finance'"
+    }
+   }
+  },
+  {
+   "set_users": {
+    "entity": "employees",
+    "key": "username"
+   }
+  },
+  {
+   "add_entity": {
+    "name": "claims",
+    "fields": {
+     "employee": {
+      "type": "ref",
+      "ref": "employees",
+      "required": true,
+      "system": true,
+      "default": "user"
+     },
+     "amount": "number required",
+     "category": "enum travel|meals|equipment|other required",
+     "description": "text required",
+     "status": {
+      "type": "enum",
+      "values": [
+       "draft",
+       "submitted",
+       "approved",
+       "rejected",
+       "paid"
+      ],
+      "required": true,
+      "system": true,
+      "default": "'draft'"
+     },
+     "submitted_at": {
+      "type": "datetime",
+      "system": true
+     },
+     "decided_at": {
+      "type": "datetime",
+      "system": true
+     },
+     "decided_by": {
+      "type": "ref",
+      "ref": "employees",
+      "system": true
+     },
+     "rejection_reason": {
+      "type": "text",
+      "system": true
+     }
+    },
+    "rules": {
+     "read": "record.employee == user or record.employee.manager == user or user.role == 'finance'",
+     "create": "True",
+     "update": "record.employee == user",
+     "update_guard": "record.status == 'draft'",
+     "delete": "record.employee == user",
+     "delete_guard": "record.status == 'draft'"
+    },
+    "constraints": {
+     "amount_range": {
+      "expr": "record.amount > 0 and record.amount <= 5000",
+      "message": "must be greater than 0 and at most 5000",
+      "field": "amount"
+     }
+    }
+   }
+  },
+  {
+   "add_action": {
+    "entity": "claims",
+    "name": "submit",
+    "allow": "record.employee == user",
+    "guard": "record.status == 'draft'",
+    "effects": [
+     {
+      "set": {
+       "status": "'submitted'",
+       "submitted_at": "now"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "add_action": {
+    "entity": "claims",
+    "name": "approve",
+    "allow": "record.employee.manager == user",
+    "guard": "record.status == 'submitted'",
+    "effects": [
+     {
+      "set": {
+       "status": "'approved'",
+       "decided_at": "now",
+       "decided_by": "user"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "add_action": {
+    "entity": "claims",
+    "name": "reject",
+    "params": {
+     "reason": "text required"
+    },
+    "allow": "record.employee.manager == user",
+    "guard": "record.status == 'submitted'",
+    "effects": [
+     {
+      "set": {
+       "status": "'rejected'",
+       "decided_at": "now",
+       "decided_by": "user",
+       "rejection_reason": "params.reason"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "add_action": {
+    "entity": "claims",
+    "name": "pay",
+    "allow": "user.role == 'finance'",
+    "guard": "record.status == 'approved'",
+    "effects": [
+     {
+      "set": {
+       "status": "'paid'"
+      }
+     },
+     {
+      "emit": "payment",
+      "payload": {
+       "claim": "record",
+       "employee": "record.employee",
+       "amount": "record.amount"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "add_records": {
+    "entity": "employees",
+    "from_json": "../../../spec/apps/expenses_seed.json",
+    "key": "employees"
+   }
+  },
+  {
+   "add_records": {
+    "entity": "claims",
+    "from_json": "../../../spec/apps/expenses_seed.json",
+    "key": "claims"
+   }
+  }
+ ],
+ "started": "2026-10-01T01:10:29",
+ "dry_run": false,
+ "expanded_operators": 9,
+ "what_happened": [
+  "added entity employees with 5 fields",
+  "users are employees records identified by username",
+  "added entity claims with 9 fields",
+  "claims: added action submit",
+  "claims: added action approve",
+  "claims: added action reject",
+  "claims: added action pay",
+  "added 15 employees record(s)",
+  "added 80 claims record(s)"
+ ],
+ "warnings": [],
+ "static_check": {
+  "problems": []
+ },
+ "data_check": {
+  "records": 95,
+  "violations": []
+ },
+ "footprint": {
+  "fields": [
+   "claims.amount",
+   "claims.category",
+   "claims.decided_at",
+   "claims.decided_by",
+   "claims.description",
+   "claims.employee",
+   "claims.rejection_reason",
+   "claims.status",
+   "claims.submitted_at",
+   "employees.department",
+   "employees.manager",
+   "employees.name",
+   "employees.role",
+   "employees.username"
+  ],
+  "visibility": [
+   "claims",
+   "employees"
+  ],
+  "operations": [
+   "*.any",
+   "claims.action:approve",
+   "claims.action:pay",
+   "claims.action:reject",
+   "claims.action:submit",
+   "claims.any",
+   "claims.create",
+   "claims.delete",
+   "claims.update",
+   "employees.any",
+   "employees.create",
+   "employees.delete",
+   "employees.update"
+  ],
+  "renamed_fields": {},
+  "renamed_entities": {},
+  "declared": [],
+  "consequences": [
+   "rule claims.delete_guard changed",
+   "the user directory changed: every request",
+   "rule employees.create changed",
+   "rule employees.update_guard changed",
+   "action claims.approve changed",
+   "field claims.status changed: its values, create and update",
+   "rule employees.read changed",
+   "field employees.role changed: its values, create and update",
+   "field claims.submitted_at changed: its values, create and update",
+   "field claims.employee changed: its values, create and update",
+   "field employees.department changed: its values, create and update",
+   "rule employees.update changed",
+   "action claims.pay changed",
+   "field employees.username changed: its values, create and update",
+   "rule claims.update_guard changed",
+   "rule employees.delete changed",
+   "field claims.category changed: its values, create and update",
+   "field claims.decided_by changed: its values, create and update",
+   "field claims.rejection_reason changed: its values, create and update",
+   "rule claims.create changed",
+   "field employees.manager changed: its values, create and update",
+   "action claims.reject changed",
+   "rule claims.read changed",
+   "rule claims.update changed",
+   "entity employees added or removed: all of its operations",
+   "entity claims added or removed: all of its operations",
+   "field claims.decided_at changed: its values, create and update",
+   "rule claims.delete changed",
+   "field claims.amount changed: its values, create and update",
+   "rule employees.delete_guard changed",
+   "action claims.submit changed",
+   "field employees.name changed: its values, create and update",
+   "a constraint on claims changed: create/update and actions writing claims",
+   "field claims.description changed: its values, create and update",
+   "records of claims added or removed",
+   "records of employees added or removed",
+   "employees rule create depends on what changed",
+   "employees rule update depends on what changed",
+   "employees rule delete depends on what changed",
+   "claims rule read depends on what changed",
+   "claims rule update depends on what changed",
+   "claims rule delete depends on what changed",
+   "claims rule update_guard depends on what changed",
+   "claims rule delete_guard depends on what changed",
+   "claims constraint amount_range depends on what changed",
+   "claims action submit (allow) depends on what changed",
+   "claims action submit (guard) depends on what changed",
+   "claims action approve (allow) depends on what changed",
+   "claims action approve (guard) depends on what changed",
+   "claims action reject (allow) depends on what changed",
+   "claims action reject (guard) depends on what changed",
+   "claims action pay (allow) depends on what changed",
+   "claims action pay (guard) depends on what changed",
+   "claims action pay (effects.1.payload.employee) depends on what changed",
+   "claims action pay (effects.1.payload.amount) depends on what changed",
+   "action claims.submit writes claims",
+   "action claims.approve writes claims",
+   "action claims.reject writes claims",
+   "action claims.pay writes claims"
+  ]
+ },
+ "replay": {
+  "skipped": "first change: there is no previous version"
+ },
+ "expectations": [],
+ "inverse": [
+  {
+   "delete_records": {
+    "entity": "claims",
+    "ids": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17,
+     18,
+     19,
+     20,
+     21,
+     22,
+     23,
+     24,
+     25,
+     26,
+     27,
+     28,
+     29,
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63,
+     64,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80
+    ]
+   }
+  },
+  {
+   "delete_records": {
+    "entity": "employees",
+    "ids": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15
+    ]
+   }
+  },
+  {
+   "remove_action": {
+    "entity": "claims",
+    "name": "pay"
+   }
+  },
+  {
+   "remove_action": {
+    "entity": "claims",
+    "name": "reject"
+   }
+  },
+  {
+   "remove_action": {
+    "entity": "claims",
+    "name": "approve"
+   }
+  },
+  {
+   "remove_action": {
+    "entity": "claims",
+    "name": "submit"
+   }
+  },
+  {
+   "remove_entity": {
+    "name": "claims"
+   }
+  },
+  {
+   "restore_users": {
+    "users": null
+   }
+  },
+  {
+   "remove_entity": {
+    "name": "employees"
+   }
+  }
+ ],
+ "verdict": "committed",
+ "timings": {
+  "apply_ms": 1.4,
+  "static_ms": 0.6,
+  "data_ms": 2.6,
+  "footprint_ms": 0.8,
+  "replay_ms": 0.0,
+  "expect_ms": 0.0,
+  "total_ms": 5.4
+ },
+ "seq": 1,
+ "source": "/home/user/Journeymandigital/accrete/apps/expenses/changes/0001-initial.yaml"
+}

@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 # benchmark source files are re-downloaded from pinned commits by bench/fetch_data.py
 bench/data/*/
+accrete/runs/

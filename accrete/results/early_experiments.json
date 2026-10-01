@@ -1,0 +1,52 @@
+{
+ "C1_diff_inferred_migration": {
+  "diff_sees": {
+   "removed": [
+    "author"
+   ],
+   "added": [
+    "writer"
+   ]
+  },
+  "values_lost_without_human_hint": 5,
+  "records": 5,
+  "ms": 0.02
+ },
+ "C2_operator_ledger": {
+  "dependents_rewritten": [
+   "visible"
+  ],
+  "values_preserved": true,
+  "inverse_restores_exactly": true,
+  "inverse": [
+   "rename_field",
+   "book",
+   "writer",
+   "author"
+  ],
+  "ms": 0.07
+ },
+ "C3_relational_rules": {
+  "new_concept_by_rule": [
+   3,
+   4,
+   5
+  ],
+  "rename_needs_external_migration": true,
+  "ui_and_permissions_derived": false,
+  "ms": 0.02
+ },
+ "C4_replay_gate": {
+  "intended_change": {
+   "diffs": 2,
+   "outside_footprint": 0,
+   "accepted": true
+  },
+  "accidental_regression": {
+   "diffs": 12,
+   "outside_footprint": 10,
+   "accepted": false
+  },
+  "ms": 0.46
+ }
+}
