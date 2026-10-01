@@ -1,0 +1,34 @@
+MESSAGE ORGANISER - runs only on your own computer. Nothing is uploaded anywhere.
+
+A. ON YOUR SAMSUNG PHONE (one time, ~5 minutes)
+ 1. Open the Play Store (or Galaxy Store), install "SMS Backup & Restore" by SyncTech.
+ 2. Open it -> "Set up a backup" -> switch ON "Messages" (Call logs optional) -> Next.
+ 3. Choose "Your phone" (local storage) as the location. Do NOT choose Google Drive / Dropbox / email.
+ 4. Tap "Back up now". When it finishes it shows how many messages it saved - note that number.
+
+B. COPY THE BACKUP TO THE LAPTOP (phone is already plugged in by USB)
+ 5. On the phone, pull down the notification shade -> tap the "USB" notification -> choose "File transfer".
+    If the phone asks "Allow access to phone data?", tap Allow.
+ 6. Windows: open File Explorer -> "Galaxy ..." -> Phone -> SMSBackupRestore.
+    Mac: install "Android File Transfer" (or "OpenMTP") first, then open the phone -> SMSBackupRestore.
+ 7. Copy the newest file named like  sms-20261001123456.xml  to your Desktop.
+
+C. RUN THE ORGANISER
+ 8. Unzip this folder anywhere. Double-click:
+      Windows: start_organiser_windows.bat      Mac: start_organiser_mac.command (right-click -> Open the first time)
+    Your browser opens http://127.0.0.1:8765 (needs Python 3.8+; the launcher tells you if it is missing).
+ 9. Click "Import", choose the sms-....xml file, click Import.
+10. Go to "Contacts & jobs": add a job label (e.g. "cafe", "Smith cleaning") to each client/employer.
+11. Go to "Absences": the timeline of days you said you couldn't work, with the messages as evidence.
+    Each finding says requested / proposed / stated / confirmed / declined / cancelled / rescheduled / uncertain.
+    Click "open in conversation" to see the surrounding messages. Use "correct this" to fix any mistake.
+    Export -> Markdown or CSV.
+
+D. TELL CLAUDE ONLY THIS (no message text):
+   - the number the backup app showed in step 4, and the numbers on the organiser's Overview page
+   - the "Coverage limits" lines, any import errors
+   - your default texting app (Samsung Messages or Google Messages) and Android version (Settings > About phone > Software information)
+   - what looks wrong, described without quoting private messages
+
+Your data is stored in a file in your home folder (.msgorg/archive.db). "Delete data" in the menu removes it.
+The organiser never changes anything on the phone.
