@@ -1,0 +1,20 @@
+# Engine freeze for the evaluation set
+
+Frozen at commit `cefce2f` on 2026-10-01T01:58:10Z, before the evaluation challenges were read or run.
+Every evaluation run records the engine version it used (`accrete_version` in its result file).
+The engine must not change until the evaluation is complete. Any later change is reported as a post-evaluation revision.
+
+```
+5d10dcde3dec7b08270abf64e33b91e2a8f1a8d35f47da2aeab6942b400f0bb0 accrete/__init__.py
+13a1a5b340cdcfc1902b62be90e508c7c71886000d5bf087e7854aadf09fb35e accrete/__main__.py
+6606b6fe5e0f005064b52b5b1233cb7809a54ba9c1af0b2e1ec1362c9cec51cf accrete/change.py
+6f6bdc44dc16cb39702026261450d1082cc74cd6f6a982ed2ccc86f6cadfb307 accrete/cli.py
+651227fd22158e36a05eafe8b17f9fb291e7d917af5f6880d2e0751bd615ca07 accrete/demo.py
+096571ff3e399346dbe105be32da0e15c51d15a6f463570cfbac42c02fd4e3f9 accrete/expr.py
+96ff199eb8e8556352a41da473ed4c16c0d12fe974cd95745f8e0754e9935ffd accrete/model.py
+69725c9be1691b19b7246b908a5759db4ae4f1473d727200ba8dcc0a837457af accrete/ops.py
+cd2aa3d9c4f5fd89a3f9177a958353bef6c9cb4261889399e25b7b9690e877e5 accrete/runtime.py
+c336d24ca83e6d8ab6905c0724efa3708e62f37bb5872d9d6c57a87e69af73d3 accrete/store.py
+818780e58dcf2d3b8a723449b0450f2580cb63a7c4229a8295565c22730d6f5e accrete/ui.py
+855df8a3ff7c0ad33aedbf056e862bfd7502343af6813cd3482a9bf4988af743 accrete/wsgi.py
+```
