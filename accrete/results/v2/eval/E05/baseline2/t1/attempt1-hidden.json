@@ -1,0 +1,45 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/eval/E05/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E05/test_E05.py",
+ "passed": 7,
+ "total": 7,
+ "seconds": 0.87,
+ "results": [
+  {
+   "test": "challenges.eval.E05.test_E05::test_claim_action_is_gone",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E05.test_E05::test_dispatch_field_is_gone",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E05.test_E05::test_self_dispatched_assigned_orders_return_to_pool",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E05.test_E05::test_freed_capacity_can_be_assigned",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E05.test_E05::test_workload_cap_kept",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E05.test_E05::test_requesters_regain_rights_on_returned_orders",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E05.test_E05::test_earlier_changes_still_work",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
