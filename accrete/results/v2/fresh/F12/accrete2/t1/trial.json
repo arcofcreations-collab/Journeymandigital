@@ -1,0 +1,18 @@
+{
+ "id": "F12",
+ "set": "fresh",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "library",
+ "categories": [
+  "new_concept",
+  "new_relationship",
+  "failure_atomicity",
+  "permissions",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "version": "bb1df48",
+ "attempts": [],
+ "extra": []
+}

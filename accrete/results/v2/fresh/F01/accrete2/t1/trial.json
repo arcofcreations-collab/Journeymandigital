@@ -1,0 +1,16 @@
+{
+ "id": "F01",
+ "set": "fresh",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "expenses",
+ "categories": [
+  "rule_change",
+  "data_migration",
+  "sequence"
+ ],
+ "expect_rejection": false,
+ "version": "bb1df48",
+ "attempts": [],
+ "extra": []
+}

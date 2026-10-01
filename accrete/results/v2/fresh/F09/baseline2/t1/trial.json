@@ -1,0 +1,16 @@
+{
+ "id": "F09",
+ "set": "fresh",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "maintenance",
+ "categories": [
+  "should_reject",
+  "conflict_or_ambiguity",
+  "permissions"
+ ],
+ "expect_rejection": true,
+ "version": "bb1df48",
+ "attempts": [],
+ "extra": []
+}

@@ -1,0 +1,18 @@
+{
+ "id": "F07",
+ "set": "fresh",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "maintenance",
+ "categories": [
+  "new_concept",
+  "failure_atomicity",
+  "cross_cutting",
+  "permissions",
+  "rule_change"
+ ],
+ "expect_rejection": false,
+ "version": "bb1df48",
+ "attempts": [],
+ "extra": []
+}

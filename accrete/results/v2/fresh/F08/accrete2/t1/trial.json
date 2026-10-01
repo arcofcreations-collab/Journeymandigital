@@ -1,0 +1,16 @@
+{
+ "id": "F08",
+ "set": "fresh",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "maintenance",
+ "categories": [
+  "permissions",
+  "rule_change",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "version": "bb1df48",
+ "attempts": [],
+ "extra": []
+}

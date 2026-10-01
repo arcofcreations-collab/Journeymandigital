@@ -1,0 +1,15 @@
+{
+ "id": "F10",
+ "set": "fresh",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "data_migration"
+ ],
+ "expect_rejection": false,
+ "version": "bb1df48",
+ "attempts": [],
+ "extra": []
+}
