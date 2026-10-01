@@ -1,0 +1,17 @@
+{
+ "id": "D09",
+ "set": "dev",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "expenses",
+ "categories": [
+  "reversal",
+  "data_migration",
+  "sequence",
+  "permissions"
+ ],
+ "expect_rejection": false,
+ "version": "b400319",
+ "attempts": [],
+ "extra": []
+}

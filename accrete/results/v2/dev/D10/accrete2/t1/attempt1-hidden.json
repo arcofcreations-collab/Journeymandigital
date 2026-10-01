@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D10/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D10/test_D10.py",
+ "passed": 11,
+ "total": 11,
+ "seconds": 0.56,
+ "results": [
+  {
+   "test": "challenges.dev.D10.test_D10::test_backfill_counts",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_backfill_for_paid_claim",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_backfill_for_rejected_submitted_and_draft_claims",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_actions_record_events_after_backfill",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_reject_records_event",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_failed_actions_record_nothing",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_draft_edits_record_nothing",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_events_follow_claim_read_permission",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_events_are_read_only",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_ui_claim_events_list",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D10.test_D10::test_claim_actions_unchanged",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
