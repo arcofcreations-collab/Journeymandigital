@@ -1,0 +1,50 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/dev/D09/accrete/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D09/test_D09.py",
+ "passed": 8,
+ "total": 8,
+ "seconds": 0.25,
+ "results": [
+  {
+   "test": "challenges.dev.D09.test_D09::test_awaiting_claims_restored_with_first_approval",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D09.test_D09::test_second_approval_fields_and_status_gone",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D09.test_D09::test_large_claims_need_single_approval_again",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D09.test_D09::test_skip_level_manager_loses_access",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D09.test_D09::test_restored_claims_can_be_paid",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D09.test_D09::test_restored_claims_cannot_be_approved_again",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D09.test_D09::test_other_claims_untouched",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D09.test_D09::test_ui_after_reversal",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
