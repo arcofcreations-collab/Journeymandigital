@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field %}
+{% block title %}Work order #{{ order.id }}{% endblock %}
+{% block content %}
+<h1>Work order #{{ order.id }}</h1>
+<dl>
+  {{ field("asset", order.asset, href=url_for('ui.show_asset', asset_id=order.asset)) }}
+  {{ field("title", order.title) }}
+  {{ field("description", order.description) }}
+  {{ field("priority", order.priority) }}
+  {{ field("status", order.status) }}
+  {{ field("requested_by", order.requested_by, href=url_for('ui.show_staff', staff_id=order.requested_by)) }}
+  {{ field("created_at", order.created_at) }}
+  {{ field("assignee", order.assignee, href=order.assignee and url_for('ui.show_staff', staff_id=order.assignee)) }}
+  {{ field("started_at", order.started_at) }}
+  {{ field("completed_at", order.completed_at) }}
+  {{ field("resolution", order.resolution) }}
+  {{ field("labor_minutes", order.labor_minutes) }}
+  {{ field("cancel_reason", order.cancel_reason) }}
+  {{ field("due_date", order.due_date) }}
+  {{ field("overdue", order.overdue) }}
+</dl>
+
+{% if "assign" in actions %}
+<form data-action="assign" method="post" action="{{ url_for('ui.assign_work_order', work_order_id=order.id) }}">
+  <label>Technician
+    <select name="technician" required>
+      {% for technician in technicians %}
+      <option value="{{ technician.id }}"{% if technician.id == order.assignee %} selected{% endif %}>{{ technician.name }} ({{ technician.username }})</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">{{ "Re-assign" if order.status == "assigned" else "Assign" }}</button>
+</form>
+{% endif %}
+{% if "start" in actions %}
+<form data-action="start" method="post" action="{{ url_for('ui.start_work_order', work_order_id=order.id) }}">
+  <button type="submit">Start work</button>
+</form>
+{% endif %}
+{% if "complete" in actions %}
+<form data-action="complete" method="post" action="{{ url_for('ui.complete_work_order', work_order_id=order.id) }}">
+  <label>Resolution <textarea name="resolution" required></textarea></label>
+  <label>Labour (minutes) <input name="labor_minutes" type="number" min="1" step="1" required></label>
+  <button type="submit">Complete</button>
+</form>
+{% endif %}
+{% if "cancel" in actions %}
+<form data-action="cancel" method="post" action="{{ url_for('ui.cancel_work_order', work_order_id=order.id) }}">
+  <label>Reason <textarea name="reason" required></textarea></label>
+  <button type="submit">Cancel work order</button>
+</form>
+{% endif %}
+{% endblock %}

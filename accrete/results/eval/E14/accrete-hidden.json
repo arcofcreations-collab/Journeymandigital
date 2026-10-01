@@ -1,0 +1,45 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/eval/E14/accrete/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E14/test_E14.py",
+ "passed": 7,
+ "total": 7,
+ "seconds": 0.39,
+ "results": [
+  {
+   "test": "challenges.eval.E14.test_E14::test_lost_loans_and_copies_migrated",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E14.test_E14::test_lost_loans_are_closed",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E14.test_E14::test_declare_lost",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E14.test_E14::test_declare_lost_refusals_change_nothing",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E14.test_E14::test_found_copy",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E14.test_E14::test_copies_and_loans_still_protected",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E14.test_E14::test_ui_lost_flow",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

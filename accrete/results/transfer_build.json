@@ -6,5 +6,13 @@
   "self_timed_s": 203.2,
   "base_suite": "48/50 (2 failures: unknown filter field must be 400; accrete has no way to validate query parameters - engine gap, not fixable by operators)",
   "artifact": "apps/maintenance/changes/0001-initial.yaml"
+ },
+ "baseline": {
+  "agent_duration_ms": 489140,
+  "tool_uses": 34,
+  "tokens": 154393,
+  "self_timed_s": 472.6,
+  "base_suite": "50/50",
+  "artifact": "baseline/maintenance/"
  }
 }
