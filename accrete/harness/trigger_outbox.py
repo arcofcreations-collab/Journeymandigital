@@ -134,6 +134,8 @@ def search(model, world, rng):
 
 def mutant_engine(work):
     eng = os.path.join(work, "engine-mutant")
+    if os.path.exists(os.path.join(eng, "accrete")):
+        return eng
     shutil.copytree(os.path.join(ROOT, "accrete"), os.path.join(eng, "accrete"), ignore=shutil.ignore_patterns("__pycache__"))
     p = os.path.join(eng, "accrete", MUTANT[2])
     text = open(p).read()
@@ -199,8 +201,21 @@ def main():
     work = tempfile.mkdtemp(prefix="trig-outbox-")
     report = {"apps": [], "minimal": None}
     try:
+        logged = {}
+        if os.environ.get("TRIGGER_FROM_LOG"):  # reuse a completed search (its log lines) after a later crash
+            for line in open(os.environ["TRIGGER_FROM_LOG"]):
+                p = line.split()
+                if len(p) >= 2 and ":" in p[0] and p[1].isdigit():
+                    logged[p[0]] = int(p[1])
         for cset, name, d in apps():
-            model, world = Store(d).load()
+            if f"{cset}:{name}" in logged and logged[f"{cset}:{name}"] == 0:
+                report["apps"].append({"app": f"{cset}:{name}", "triggering_requests_found": 0, "verified": [],
+                                       "from_log": True})
+                continue
+            tmp_app = os.path.join(work, "load-copy")
+            shutil.rmtree(tmp_app, ignore_errors=True)
+            shutil.copytree(d, tmp_app, ignore=shutil.ignore_patterns("report-*.json", "__pycache__"))
+            model, world = Store(tmp_app).load()  # a copy: opening a store adds tables
             hits = search(model, world, rng)
             entry = {"app": f"{cset}:{name}", "triggering_requests_found": len(hits), "verified": []}
             for h in hits[:3]:

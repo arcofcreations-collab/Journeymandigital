@@ -1,0 +1,423 @@
+{
+ "apps": [
+  {
+   "app": "base:library",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "base:expenses",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "base:maintenance",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D01",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D02",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D03",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D04",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D05",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D06",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D07",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D08",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D09",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D10",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D11",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D12",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D13",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "dev:D14",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E01",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E02",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E03",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E04",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E05",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E06",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E07",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E08",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E09",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E10",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E11",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E12",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E13",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "eval:E14",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D01",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D02",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D03",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D04",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D05",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D06",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D07",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D08",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D09",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D10",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D11",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D12",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D13",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2dev:D14",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E01",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E02",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E03",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E04",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E05",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E06",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E07",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E08",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E09",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E10",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E11",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E12",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E13",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  },
+  {
+   "app": "v2eval:E14",
+   "triggering_requests_found": 0,
+   "verified": [],
+   "from_log": true
+  }
+ ],
+ "minimal": {
+  "apply_log": "verdict: COMMITTED  (ledger #2)\nrequest: Librarians can send a reminder for a loan; reminders for returned loans are refused\n  - loans: added action remind\n  direct footprint: loans.action:remind\n  replay: 449 requests: 449 identical, 0 changed as intended, 0 acknowledged consequences, 0 UNACKNOWLEDGED consequences, 0 unexplained\n  timings (ms): {'apply_ms': 3.1, 'static_ms': 1.0, 'data_ms': 0.3, 'footprint_ms': 2.0, 'replay_ms': 226.3, 'expect_ms': 0.0, 'total_ms': 232.8}\n",
+  "triggering_requests_found": 3,
+  "verified": [
+   {
+    "request": {
+     "user": "ada",
+     "method": "POST",
+     "path": "/api/loans/1/remind",
+     "body": {},
+     "status": 409
+    },
+    "correct": {
+     "cli_output": "409\n{\n \"error\": \"conflict\",\n \"message\": \"loan already returned\",\n \"fields\": {}\n}\n",
+     "outbox_added": [],
+     "records_changed": false
+    },
+    "mutant": {
+     "cli_output": "409\n{\n \"error\": \"conflict\",\n \"message\": \"loan already returned\",\n \"fields\": {}\n}\n",
+     "outbox_added": [
+      {
+       "id": 1,
+       "channel": "reminder",
+       "payload": {
+        "loan": 1
+       },
+       "created_at": "2026-03-01T12:00:00"
+      }
+     ],
+     "records_changed": false
+    },
+    "harmful": true
+   },
+   {
+    "request": {
+     "user": "ben",
+     "method": "POST",
+     "path": "/api/loans/1/remind",
+     "body": {},
+     "status": 409
+    },
+    "correct": {
+     "cli_output": "409\n{\n \"error\": \"conflict\",\n \"message\": \"loan already returned\",\n \"fields\": {}\n}\n",
+     "outbox_added": [],
+     "records_changed": false
+    },
+    "mutant": {
+     "cli_output": "409\n{\n \"error\": \"conflict\",\n \"message\": \"loan already returned\",\n \"fields\": {}\n}\n",
+     "outbox_added": [
+      {
+       "id": 1,
+       "channel": "reminder",
+       "payload": {
+        "loan": 1
+       },
+       "created_at": "2026-03-01T12:00:00"
+      }
+     ],
+     "records_changed": false
+    },
+    "harmful": true
+   }
+  ],
+  "upgrade_check_with_mutant": "[\"same\", 0]"
+ }
+}
