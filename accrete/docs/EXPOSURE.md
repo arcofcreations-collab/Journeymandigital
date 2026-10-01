@@ -51,4 +51,6 @@ attempt after the freeze. That is part of the measured procedure and is identica
 
 ## Recorded exposures of improvers
 
-(filled in after each improver run)
+- accrete v2.1 improver (isolated copy `scratchpad/improver_accrete`, 2026-10-01): transcript
+  audited. Every absolute path in its tool calls lies inside its copy (it used `_work/tmp` as
+  TMPDIR). It read nothing outside its copy. No exposure.

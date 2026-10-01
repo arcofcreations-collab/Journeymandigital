@@ -418,6 +418,13 @@
     "harmful": true
    }
   ],
-  "upgrade_check_with_mutant": "[\"same\", 0]"
+  "upgrade_check_with_mutant": "[\"same\", 0]",
+  "upgrade_check_with_mutant_CORRECTION": {
+   "value": [
+    "DIFFERENT",
+    50
+   ],
+   "explanation": "The original value ['same', 0] was a harness error: the upgrade-check subprocess ran with the repository root as working directory, so `import accrete` loaded the unpatched engine (sys.path[0]='' precedes PYTHONPATH). Re-run from a neutral directory with the v2.0 engine: DIFFERENT, 50 differences. Found by the v2.1 improver; re-verified by the experimenter."
+  }
  }
 }

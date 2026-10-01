@@ -1,0 +1,26 @@
+[
+ {
+  "run": "dev/D11",
+  "note": "The snapshot predates the previous change, so I'll write the notes by hand for this change only, and add a short README section."
+ },
+ {
+  "run": "dev/D09",
+  "note": "The generated notes compare against a stale pre-D08 snapshot, so I'll write the notes by hand."
+ },
+ {
+  "run": "eval/E14",
+  "note": "The generated notes include E08 work (stale snapshot), so I'll write the notes by hand for this change only."
+ },
+ {
+  "run": "eval/E04",
+  "note": "The snapshot predates E01, so the generated notes also list earlier changes."
+ },
+ {
+  "run": "eval/E04",
+  "note": "I'll write the notes by hand."
+ },
+ {
+  "run": "eval/E07",
+  "note": "The auto-generated notes use a stale snapshot from before E05, so I'll write CHANGE_NOTES.md by hand to cover only this change, after a final check."
+ }
+]

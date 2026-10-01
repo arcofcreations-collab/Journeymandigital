@@ -1,0 +1,59 @@
+{
+ "valid": {
+  "n": 19,
+  "rejected": 0,
+  "rejected_ids": []
+ },
+ "mutants": {
+  "slip:code": {
+   "planted": 107,
+   "equivalent": 16,
+   "effective": 91,
+   "rejected_by_check": 90,
+   "warned_only": 0,
+   "missed": 1,
+   "missed_but_hidden_or_base_tests_fail": 0,
+   "rejected_equivalent": 6
+  },
+  "slip:stored-data": {
+   "planted": 20,
+   "equivalent": 5,
+   "effective": 15,
+   "rejected_by_check": 12,
+   "warned_only": 0,
+   "missed": 3,
+   "missed_but_hidden_or_base_tests_fail": 0,
+   "rejected_equivalent": 0
+  },
+  "stray-code": {
+   "planted": 55,
+   "equivalent": 16,
+   "effective": 39,
+   "rejected_by_check": 38,
+   "warned_only": 0,
+   "missed": 1,
+   "missed_but_hidden_or_base_tests_fail": 0,
+   "rejected_equivalent": 7
+  },
+  "stray-data": {
+   "planted": 17,
+   "equivalent": 0,
+   "effective": 17,
+   "rejected_by_check": 17,
+   "warned_only": 0,
+   "missed": 0,
+   "missed_but_hidden_or_base_tests_fail": 0,
+   "rejected_equivalent": 0
+  },
+  "stray-user": {
+   "planted": 19,
+   "equivalent": 0,
+   "effective": 19,
+   "rejected_by_check": 19,
+   "warned_only": 0,
+   "missed": 0,
+   "missed_but_hidden_or_base_tests_fail": 0,
+   "rejected_equivalent": 0
+  }
+ }
+}
