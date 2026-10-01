@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D07/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D07/test_D07.py",
+ "passed": 11,
+ "total": 11,
+ "seconds": 0.38,
+ "results": [
+  {
+   "test": "challenges.dev.D07.test_D07::test_member_with_overdue_loan_cannot_borrow",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_librarian_cannot_lend_to_member_with_overdue_loan",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_members_without_overdue_loans_still_borrow",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_loan_due_today_does_not_block_but_tomorrow_does",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_returning_overdue_loan_lifts_block",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_returns_are_never_blocked",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_new_releases_are_lent_for_seven_days",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_older_and_undated_books_keep_fourteen_days",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_new_release_window_follows_request_year",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_existing_loans_are_not_recalculated",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D07.test_D07::test_other_borrow_rules_still_apply",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D05/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D05/test_D05.py",
+ "passed": 11,
+ "total": 11,
+ "seconds": 0.5,
+ "results": [
+  {
+   "test": "challenges.dev.D05.test_D05::test_librarian_creates_assistant_and_role_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_assistant_reads_all_books_members_and_loans",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_assistant_lends_with_all_borrow_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_assistant_returns_any_loan",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_assistant_deactivates_and_reactivates_member",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_assistant_cannot_patch_other_fields_or_staff_records",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_assistant_own_record_name_only",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_assistant_cannot_write_books_members_or_loans",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_promoting_member_to_assistant_grants_rights",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_member_and_librarian_rights_unchanged",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D05.test_D05::test_ui_for_assistant",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
