@@ -114,33 +114,6 @@ def _new_entity(model, name):
             "guard_messages": {}, "constraints": {}, "actions": {}, "triggers": {}}
 
 
-_PROSE_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ,.;:!?-/&%")
-
-
-def message_expr(v, notes=None, what="guard_message"):
-    """`guard_message` and `fail` are expressions, so text needs quotes inside the YAML string.
-    Plain prose (letters, digits, spaces, , . ; : ! ? - / & % and apostrophes inside words) that is not a valid expression
-    can only have meant that text: it is stored as the quoted expression. This never changes a
-    valid model (such a value would fail the static check). Anything else is left as written; the
-    static check reports it with the exact quoted form to use."""
-    src = _expr_or_none(v)
-    if src is None:
-        return None
-    try:
-        E.parse(src)
-        return src
-    except E.ExprError:
-        pass
-    import re
-    text = src.strip()
-    if text and set(re.sub(r"(?<=[A-Za-z])'(?=[A-Za-z])", "", text)) <= _PROSE_CHARS:  # "member's", "can't"
-        quoted = repr(text)
-        if notes is not None:
-            notes.append(f"{what} {text!r} is plain text, not an expression: stored as the text expression {quoted}")
-        return quoted
-    return src
-
-
 def _effects(v):
     if v is None:
         return []
@@ -149,12 +122,10 @@ def _effects(v):
     return list(v)
 
 
-def _norm_effects(effects, notes=None):
+def _norm_effects(effects):
     out = []
     for eff in _effects(effects):
         eff = dict(eff)
-        if "fail" in eff and not isinstance(eff["fail"], (list, dict)):
-            eff["fail"] = message_expr(eff["fail"], notes, "fail message")
         for key in ("set", "values", "payload"):
             if key in eff:
                 eff[key] = {k: _expr_or_none(v) for k, v in eff[key].items()}
@@ -165,7 +136,7 @@ def _norm_effects(effects, notes=None):
             eff["in"] = _expr_or_none(eff["in"])
         for key in ("then", "else", "do"):
             if key in eff:
-                eff[key] = _norm_effects(eff[key], notes)
+                eff[key] = _norm_effects(eff[key])
         out.append(eff)
     return out
 
@@ -199,9 +170,9 @@ def op_add_entity(cx, a):
     for cname, c in (a.get("constraints") or {}).items():
         _add_constraint(cx, ent, cname, c, existing="enforce")
     for aname, act in (a.get("actions") or {}).items():
-        _add_action(m, ent, aname, act, cx.notes)
+        _add_action(m, ent, aname, act)
     for tname, trig in (a.get("triggers") or {}).items():
-        _add_trigger(m, ent, tname, trig, cx.notes)
+        _add_trigger(m, ent, tname, trig)
     cx.notes.append(f"added entity {a['name']} with {len(ent['fields'])} fields")
     return [{"remove_entity": {"name": a["name"]}}]
 
@@ -641,20 +612,20 @@ def _ok(rc, src, rec):
         return False
 
 
-def _add_action(m, ent, name, spec, notes=None):
+def _add_action(m, ent, name, spec):
     if any(x["name"] == name for x in ent["actions"].values()):
         raise OpError(f"{ent['name']} already has an action {name!r}")
     aid = M.new_id(m, "a")
     ent["actions"][aid] = {"id": aid, "name": name, "params": _params(m, spec.get("params")),
                            "allow": _expr_or_none(spec.get("allow")), "guard": _expr_or_none(spec.get("guard")),
-                           "guard_message": message_expr(spec.get("guard_message"), notes),
-                           "effects": _norm_effects(spec.get("effects"), notes)}
+                           "guard_message": _expr_or_none(spec.get("guard_message")),
+                           "effects": _norm_effects(spec.get("effects"))}
     return ent["actions"][aid]
 
 
 def op_add_action(cx, a):
     ent = M.entity(cx.model, a["entity"])
-    _add_action(cx.model, ent, a["name"], a, cx.notes)
+    _add_action(cx.model, ent, a["name"], a)
     cx.notes.append(f"{ent['name']}: added action {a['name']}")
     return [{"remove_action": {"entity": ent["name"], "name": a["name"]}}]
 
@@ -683,14 +654,12 @@ def op_change_action(cx, a):
         elif k == "add_params":
             act["params"].update(_params(cx.model, v))
         elif k == "effects":
-            act["effects"] = _norm_effects(v, cx.notes)
+            act["effects"] = _norm_effects(v)
         elif k == "append_effects":
-            act["effects"] = act["effects"] + _norm_effects(v, cx.notes)
+            act["effects"] = act["effects"] + _norm_effects(v)
         elif k == "prepend_effects":
-            act["effects"] = _norm_effects(v, cx.notes) + act["effects"]
-        elif k == "guard_message":
-            act[k] = message_expr(v, cx.notes)
-        elif k in ("allow", "guard"):
+            act["effects"] = _norm_effects(v) + act["effects"]
+        elif k in ("allow", "guard", "guard_message"):
             act[k] = _expr_or_none(v)
         else:
             raise OpError(f"change_action: unknown key {k!r}")
@@ -698,20 +667,20 @@ def op_change_action(cx, a):
     return [{"replace_element": {"entity": ent["name"], "kind": "actions", "definition": old}}]
 
 
-def _add_trigger(m, ent, name, spec, notes=None):
+def _add_trigger(m, ent, name, spec):
     on = spec.get("on")
     if not on or not (on in M.EVENTS or on.startswith("action:")):
         raise OpError(f"trigger {name}: `on` must be create, update, delete or action:<name>")
     tid = M.new_id(m, "t")
     ent["triggers"][tid] = {"id": tid, "name": name, "on": on, "when": _expr_or_none(spec.get("when")),
-                            "effects": _norm_effects(spec.get("effects"), notes)}
+                            "effects": _norm_effects(spec.get("effects"))}
 
 
 def op_add_trigger(cx, a):
     ent = M.entity(cx.model, a["entity"])
     if any(x["name"] == a["name"] for x in ent["triggers"].values()):
         raise OpError(f"{ent['name']} already has a trigger {a['name']!r}")
-    _add_trigger(cx.model, ent, a["name"], a, cx.notes)
+    _add_trigger(cx.model, ent, a["name"], a)
     cx.notes.append(f"{ent['name']}: added trigger {a['name']} on {a['on']}")
     return [{"remove_trigger": {"entity": ent["name"], "name": a["name"]}}]
 
@@ -732,7 +701,7 @@ def op_change_trigger(cx, a):
         if k in ("entity", "name"):
             continue
         if k == "effects":
-            t["effects"] = _norm_effects(v, cx.notes)
+            t["effects"] = _norm_effects(v)
         elif k in ("when", "on"):
             t[k] = _expr_or_none(v) if k == "when" else v
         else:

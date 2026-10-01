@@ -84,11 +84,8 @@ replay they are the verification of a change; `accrete call` answers ad hoc ques
 3. **Data check.** Every existing record must satisfy the changed model: required fields,
    enum values, references, uniqueness and constraints. Fix data with `backfill`, `convert`,
    `map` or `update_records`, or add a constraint with `existing: exempt`.
-4. **Replay.** Recorded and generated requests (every collection, records of every state, every
-   action with parameter values, short chains of the same action, as several users including each
-   record's own users) run on the old and new versions. When the change can affect behaviour that
-   reads `now`/`today`, part of them run again at a few other times (around dates the change moves,
-   and later); such examples end with `at <time>`:
+4. **Replay.** Recorded and generated requests (every collection, record and action, as several
+   users) run on the old and new versions:
    - **changed as intended:** differences on what your operators modify directly;
    - **consequences:** other features that changed *because they depend on* what you
      modified (e.g. the borrow guard reads `status`). These are shown with before/after
@@ -110,8 +107,8 @@ plus planted engine regressions. Details are in `docs/RELIABILITY.md`.
 - **Behaviour that changed only through dependencies**: something your operators did not
   touch, but which reads what they changed. Replay rejects it as a CONSEQUENCE with examples.
   This is caught *when the probes exercise it*, which happened for only part of the planted
-  cases. Probes sample records by state and a few users per role, at a few points in time, so
-  consequences that only show for other records, other users, or other dates can still be missed.
+  cases. Probes sample a few records and users per role, at one point in time, so consequences
+  that only show for other records, other users, or other dates can be missed.
 
 **What the checks do NOT tell you.** In the planted-bug study:
 - **Your operators being right.** If an operator itself is wrong (a flipped condition, wrong
@@ -121,12 +118,8 @@ plus planted engine regressions. Details are in `docs/RELIABILITY.md`.
   criterion, per role the request mentions, plus at least one for behaviour that must stay the
   same, and include UI expectations when the request mentions the UI.
 - **Edits outside the request.** An operator that changes something the request does not ask for
-  is also "intended" as far as replay knows. `SCOPE` warnings flag an existing field, action,
-  trigger, constraint or function that is modified but never named in the request or
-  interpretation (naming its entity is not enough), a rule whose entity and operation are not
-  named, and stored values changed in a field that is not named, or in a few records the text
-  does not identify (id or key value). A new optional field is not flagged. Read every SCOPE line
-  before you finish.
+  is also "intended" as far as replay knows. `SCOPE` warnings flag edits to elements that the
+  request and interpretation never mention. Read every SCOPE line before you finish.
 
 **What follows for your workflow:**
 - You do not need separate test scripts, test-client sessions or a dry run before applying.
@@ -164,8 +157,7 @@ plus planted engine regressions. Details are in `docs/RELIABILITY.md`.
   action would break them). With `existing: exempt`, current violators are exempt.
 - **Actions**: `POST /api/<entity>/<id>/<name>`. Checks run in this order:
   1. `params` are converted, then `allow` (false: 403);
-  2. `guard` (false: 409, message `guard_message`, an expression such as `"'not available'"`;
-     plain prose without quotes or operators is taken as that text, also for `fail`);
+  2. `guard` (false: 409, message `guard_message`);
   3. invalid params: 400;
   4. `effects` run atomically.
   

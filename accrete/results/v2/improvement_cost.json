@@ -5,5 +5,18 @@
   "tokens": 328887,
   "what": "dev.py (overview, check with contract/UI scan, call, new-migration, migrate, snapshot/dbdiff/notes), rewritten READMEs, migration runner + seed refactor",
   "built_by": "independent agent"
+ },
+ "accrete_v2_1_improver": {
+  "agent_duration_ms": 2081644,
+  "tool_uses": 89,
+  "tokens": 350081,
+  "what": "general fixes for dev-measured weaknesses: extra probe generator (_probes_v21), failed-request side-effect comparison, multi-time replay for clock-dependent behaviour, plain-text guard_message, per-element scope warnings; 17 regression tests",
+  "built_by": "isolated improver agent (no access to fresh/heldout material; see docs/EXPOSURE.md)"
+ },
+ "accrete_v2_0_features": {
+  "what": "context command, NEXT hints, apply --notes, UI expectations, scope warnings, engine-upgrade gate, escape-hatch functions, fixes of the two v1 correctness gaps, monotonic probes",
+  "built_by": "experimenter (this session), git commits fe1610b..d1c07ab",
+  "agent_duration_ms": null,
+  "note": "built interactively by the experimenter; its time is not separable from the experiment work and is not included in any implementer cost"
  }
 }

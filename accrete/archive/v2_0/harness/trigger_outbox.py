@@ -236,12 +236,10 @@ def main():
             # does the upgrade check (golden snapshot of the minimal app) catch the bug?
             script = ("import json,sys\nfrom accrete import change as C\nr=C.upgrade_check(sys.argv[1]);"
                       "print(json.dumps([r['verdict'], r.get('differences')]))")
-            # cwd=mw: with `python -c`, the current directory comes first on sys.path, so running from the
-            # repository root would import the unpatched ./accrete instead of the engine on PYTHONPATH
             subprocess.run([sys.executable, "-c", "import sys;from accrete import change as C;C.snapshot(sys.argv[1])", app],
-                           env=dict(os.environ, PYTHONPATH=ROOT), capture_output=True, text=True, cwd=mw)
+                           env=dict(os.environ, PYTHONPATH=ROOT), capture_output=True, text=True)
             r = subprocess.run([sys.executable, "-c", script, app], env=dict(os.environ, PYTHONPATH=mutant_engine(mw + "x")),
-                               capture_output=True, text=True, cwd=mw)
+                               capture_output=True, text=True)
             report["minimal"]["upgrade_check_with_mutant"] = (r.stdout.strip().splitlines() or [r.stderr[-300:]])[-1]
             print("minimal", report["minimal"]["triggering_requests_found"], report["minimal"]["upgrade_check_with_mutant"])
     finally:

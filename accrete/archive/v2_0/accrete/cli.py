@@ -107,9 +107,6 @@ def next_steps(rep):
         out.append("fix that operator (names: `accrete context APP`; operator keys: GUIDE.md 'Operator reference'); nothing was changed")
     if (rep.get("static_check") or {}).get("problems"):
         out.append("each 'static:' line names an expression that no longer resolves; change or remove it in the same change file")
-        for p in rep["static_check"]["problems"]:
-            if "If this is meant as text, write it quoted: " in p:
-                out.append("replace that line with: " + p.split("If this is meant as text, write it quoted: ", 1)[1])
     for p in (rep.get("data_check") or {}).get("violations") or []:
         out.append(f"{p['count']} existing {p['entity']} record(s) fail `{p['field_or_rule']}`: add `backfill:` to the add_field, an "
                    f"`update_records` op, a `convert:`/`map:` on change_field, or `existing: exempt` on the constraint")

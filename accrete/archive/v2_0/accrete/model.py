@@ -284,24 +284,15 @@ def check(model) -> list[str]:
         try:
             an = E.analyse(src, tenv_for_location(model, ent, kw))
         except E.ExprError as exc:
-            errors.append(f"{describe(model, loc)}: {exc}{_text_fix(loc, src)}")
+            errors.append(f"{describe(model, loc)}: {exc}")
             continue
         for err in an.errors:
-            errors.append(f"{describe(model, loc)}: {err} in `{src}`{_text_fix(loc, src)}")
+            errors.append(f"{describe(model, loc)}: {err} in `{src}`")
     if model.get("users"):
         ue = model["entities"].get(model["users"]["entity"])
         if not ue or model["users"]["key"] not in ue["fields"]:
             errors.append("the users entity or its key field is missing")
     return errors
-
-
-def _text_fix(loc, src):
-    """For a message written as plain text where an expression is expected, the exact line to write."""
-    import json
-    key = "guard_message" if loc[-1] == "guard_message" else ("fail" if loc[-1] == "fail" else None)
-    if key is None:
-        return ""
-    return f". If this is meant as text, write it quoted: {key}: {json.dumps(repr(str(src).strip()))}"
 
 
 def describe(model, loc) -> str:
@@ -324,6 +315,18 @@ def describe(model, loc) -> str:
 def dependencies(model):
     """Map each expression location to the (entity name, field name) pairs and collections it reads."""
     deps = {}
+    known_attrs = {"id"} | E.SAFE_METHODS
+    for e in model["entities"].values():
+        known_attrs |= {f["name"] for f in e["fields"].values()}
+    for fn in (model.get("functions") or {}).values():
+        try:
+            tree = E.validate_function(fn["name"], fn["params"], fn["body"], (model.get("functions") or {}).keys())
+        except E.ExprError as exc:
+            errors.append(f"function {fn['name']}: {exc}")
+            continue
+        for attr in sorted(E.attributes_read(tree) - known_attrs):
+            errors.append(f"function {fn['name']} reads .{attr}, which is not a field of any entity "
+                          f"(renamed or removed?); update it with change_function in the same change")
     for loc, ent, src, kw in expressions(model):
         try:
             an = E.analyse(src, tenv_for_location(model, ent, kw))

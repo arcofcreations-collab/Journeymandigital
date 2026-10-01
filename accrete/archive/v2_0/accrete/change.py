@@ -288,167 +288,12 @@ def _causes(effects, target, event, own):
     return False
 
 
-RULE_WORDS = {"read": {"read", "see", "view", "visible", "visibility", "access", "list", "hidden", "hide"},
-              "create": {"create", "add", "new", "submit", "register", "record", "open"},
-              "update": {"update", "edit", "change", "modify", "patch", "set"},
-              "delete": {"delete", "remove", "cancel"}}
-
-
-def _mention_test(change):
+def scope_warnings(fp, change):
+    """Elements this change modifies that neither its request nor its interpretation mentions.
+    Not a rejection: a prompt to confirm that an edit outside the stated scope is intended."""
     import re
     text = (str(change.get("request") or "") + " " + str(change.get("interpretation") or "")).lower()
-    words = set(re.findall(r"[a-z0-9_']+", text))
-    words |= {w.replace("'s", "").strip("'") for w in words}
-
-    def mentioned(name):
-        if not name:
-            return False
-        name = str(name).lower()
-        variants = {name, name.rstrip("s"), name + "s", name.replace("_", " ")}
-        if any(v in words or (" " in v and v in text) for v in variants):
-            return True
-        # inflected forms: "borrowing" names borrow, "priorities" names priority
-        stem = name.rstrip("s").replace("_", " ")
-        stem = stem[:max(4, len(stem) - 1)]
-        return len(stem) >= 4 and " " not in stem and any(w.startswith(stem) for w in words)
-    return text, words, mentioned
-
-
-def scope_warnings(fp, change, old_model=None, new_model=None, old_world=None, new_world=None):
-    """Elements this change modifies that neither its request nor its interpretation mentions.
-    Not a rejection: a prompt to confirm that an edit outside the stated scope is intended.
-
-    v2.1: judged per changed element, not per derived footprint label (REVISIONS v2.1):
-    - an added element is flagged when neither it nor its entity is named, except a new optional,
-      non-unique field: it cannot alter any existing request (it only adds a key);
-    - an existing field, action, trigger, constraint or function that is modified or removed must
-      be named itself (naming its entity is not enough); a rule needs its entity and a word for its
-      operation (e.g. read: see/view/access...); edits that only follow a rename are not flagged;
-    - stored values of existing records: the field must be named, and an edit of only a few
-      records (at most 3) must identify them (id, or a unique/key value) in the text;
-    - a changed user directory (`set_users`) is flagged unless users are named."""
-    if old_model is None or new_model is None:
-        return _scope_warnings_labels(fp, change)
-    text, words, mentioned = _mention_test(change)
-    old_el, new_el = _elements(old_model), _elements(new_model)
-    norm = _rename_normaliser(fp)
-    out = []
-
-    def ent_of(eid):
-        return new_model["entities"].get(eid) or old_model["entities"].get(eid)
-
-    def names(kind, eid, xid):
-        out_ = set()
-        for mdl in (old_model, new_model):
-            e = mdl["entities"].get(eid)
-            holder = (e or {}).get({"field": "fields", "action": "actions", "trigger": "triggers",
-                                    "constraint": "constraints"}[kind], {})
-            if xid in holder:
-                out_.add(holder[xid]["name"])
-                if kind == "constraint" and holder[xid].get("field"):
-                    out_.add(holder[xid]["field"])
-        return out_
-
-    for k in sorted(set(old_el) | set(new_el), key=str):
-        a, b = old_el.get(k), new_el.get(k)
-        if a == b or (a is not None and b is not None and norm(a) == norm(b)):
-            continue
-        kind, added = k[0], a is None
-        if kind == "users":
-            if not (mentioned("users") or mentioned("user")):
-                out.append("*.users")
-            continue
-        if kind == "function":
-            if not mentioned(k[1]):
-                out.append(f"function:{k[1]}")
-            continue
-        e = ent_of(k[1])
-        n = e["name"] if e else k[1]
-        enames = {x["name"] for x in (old_model["entities"].get(k[1]), new_model["entities"].get(k[1])) if x}
-        ent_named = any(mentioned(x) for x in enames)
-        if kind == "entity":
-            if not ent_named:
-                out.append(f"{n}.any")
-            continue
-        if kind == "display":
-            if not ent_named:
-                out.append(f"{n}.display")
-            continue
-        if added and k[1] not in old_model["entities"]:
-            continue  # part of a new entity: judged with the entity
-        if kind == "rule":
-            rule = k[2]
-            ok = ent_named and (mentioned(rule) or bool(RULE_WORDS.get(rule.replace("_guard", ""), set()) & words)
-                                or ("guard" in rule and bool({"guard", "allowed", "refuse", "refused", "only", "block"} & words)))
-            if not ok:
-                out.append(f"{n}.{rule}")
-            continue
-        own = names(kind, k[1], k[2])
-        label = {"field": "field", "action": "action", "trigger": "trigger", "constraint": "constraint"}[kind]
-        lab = f"{n}.{label}:{sorted(own)[0] if own else k[2]}"
-        if added:
-            if kind == "field":
-                f = new_model["entities"][k[1]]["fields"][k[2]]
-                if not f.get("required") and not f.get("unique"):
-                    continue  # inert addition
-            if not (ent_named or any(mentioned(x) for x in own)):
-                out.append(lab)
-            continue
-        if not any(mentioned(x) for x in own):
-            out.append(lab)
-    if old_world is not None and new_world is not None:
-        out += _data_scope(old_model, new_model, old_world, new_world, text, words, mentioned)
-    return out
-
-
-def _rename_normaliser(fp):
-    """Rewrites an element's JSON as if the change's renames had already been applied to it, so an
-    element whose expressions were only rewritten by a rename does not count as edited."""
-    import re
-    pairs = [(o, n) for (_e, o), n in fp.renamed_fields.items()] + list(fp.renamed_entities.items())
-    if not pairs:
-        return lambda s: s
-    pats = [(re.compile(r"\b" + re.escape(o) + r"\b"), n) for o, n in pairs]
-
-    def norm(s):
-        for pat, n in pats:
-            s = pat.sub(n, s)
-        return s
-    return norm
-
-
-def _data_scope(old_model, new_model, old_world, new_world, text, words, mentioned, few=3):
-    out = []
-    for eid, ent in new_model["entities"].items():
-        oent = old_model["entities"].get(eid)
-        if not oent:
-            continue
-        o, n = old_world["records"].get(eid, {}), new_world["records"].get(eid, {})
-        if set(o) != set(n) and not mentioned(ent["name"]) and not mentioned(oent["name"]):
-            out.append(f"{ent['name']}.records")
-        changed = {}
-        for rid in set(o) & set(n):
-            if o[rid] is n[rid] or o[rid] == n[rid]:
-                continue
-            for fid, f in oent["fields"].items():
-                if not f.get("computed") and fid in ent["fields"] and o[rid].get(fid) != n[rid].get(fid):
-                    changed.setdefault(fid, set()).add(rid)
-        for fid, rids in sorted(changed.items()):
-            fname = ent["fields"][fid]["name"]
-            if not (mentioned(fname) or mentioned(oent["fields"][fid]["name"])):
-                out.append(f"{ent['name']}.field:{fname} (stored values of {len(rids)} record(s))")
-            elif len(rids) <= few and len(o) > len(rids):
-                idf = [x for x in ent["fields"].values() if x.get("unique") or x["id"] == ent.get("display")]
-                ident = {str(r) for r in rids} | {str(o[r].get(x["id"])).lower() for r in rids for x in idf
-                                                    if o[r].get(x["id"]) is not None}
-                if not any(i in words or (len(i) > 3 and i in text) for i in ident):
-                    out.append(f"{ent['name']} {sorted(rids)}.{fname} (records not identified in the request)")
-    return out
-
-
-def _scope_warnings_labels(fp, change):
-    """v2 rule on footprint labels (used when the models are not available)."""
-    text, words, _m = _mention_test(change)
+    words = set(re.findall(r"[a-z0-9_]+", text))
 
     def mentioned(name):
         name = name.lower()
@@ -519,8 +364,7 @@ def generate_probes(model, world, now, per_entity=3, focus=None, thorough=False)
     exposed is still exposed (the same requests are still sent and compared). See REVISIONS P3."""
     seen, out = set(), []
     for p in _probes_v1(model, world, now, per_entity=per_entity, focus=focus) + _probes_extra(
-            model, world, now, per_entity=per_entity, focus=focus, thorough=thorough) + _probes_v21(
-            model, world, now, focus=focus, thorough=thorough):
+            model, world, now, per_entity=per_entity, focus=focus, thorough=thorough):
         key = json.dumps(p, sort_keys=True, default=str)
         if key not in seen:
             seen.add(key)
@@ -670,402 +514,12 @@ def _probes_extra(model, world, now, per_entity=3, focus=None, thorough=False):
     return probes
 
 
-# ------------------------------------------------------------------ v2.1 probe additions
-PRECISE = 0.123457      # added to numbers: any rounding coarser than 6 decimals changes the stored value
-MISSING_ID = 999999     # a record id that does not exist
-CHAIN = 4               # longest chain of one action over different records (reaches count limits)
-
-
-def _user_groups(model, world):
-    """Usernames grouped by the user entity's enum/bool values (roles, flags), in record order."""
-    ue = M.user_entity(model)
-    if not ue:
-        return []
-    key = model["users"]["key"]
-    recs = R.records(world, ue["id"])
-    flags = [f["id"] for f in ue["fields"].values() if f["type"] in ("enum", "bool") and not f.get("computed")]
-    groups = {}
-    for rid in sorted(recs):
-        groups.setdefault(tuple(recs[rid].get(f) for f in flags), []).append(recs[rid].get(key))
-    return list(groups.values())
-
-
-def _state_groups(ent, world):
-    """Record ids grouped by state: the combination of enum/bool values and of which optional
-    references/dates are set (e.g. returned_at). Guards, permissions and computed values branch on these."""
-    flds = [f for f in M.ordered_fields(ent) if not f.get("computed")]
-    keyf = [f["id"] for f in flds if f["type"] in ("enum", "bool")]
-    setf = [f["id"] for f in flds if not f.get("required") and f["type"] in ("ref", "date", "datetime", "list")]
-    groups = {}
-    recs = R.records(world, ent["id"])
-    for rid in sorted(recs):
-        d = recs[rid]
-        sig = tuple(json.dumps(d.get(f)) for f in keyf) + tuple(d.get(f) in (None, []) for f in setf)
-        groups.setdefault(sig, []).append(rid)
-    return list(groups.values())
-
-
-def _state_sample(ent, world, cap, focus_ids=()):
-    """One record per state (first by id), then the records a change touched."""
-    out = [g[0] for g in _state_groups(ent, world)][:cap]
-    recs = R.records(world, ent["id"])
-    for rid in sorted(focus_ids or ())[:cap]:
-        if rid in recs and rid not in out:
-            out.append(rid)
-    return out
-
-
-def _record_users(model, world, ent, data):
-    """Users a record refers to (owner, assignee, requester, ...): those for whom rules such as
-    `record.employee == user` hold. For a user record, that user."""
-    ue = M.user_entity(model)
-    if not ue or data is None:
-        return []
-    key = model["users"]["key"]
-    urecs = R.records(world, ue["id"])
-    out = [data.get(key)] if ent["id"] == ue["id"] else []
-    for f in M.ordered_fields(ent):
-        if f.get("computed") or M.refers_to(f) != ue["id"]:
-            continue
-        v = data.get(f["id"])
-        for x in (v if isinstance(v, list) else [v]):
-            if x in urecs and urecs[x].get(key) not in out:
-                out.append(urecs[x].get(key))
-    return [u for u in out if u is not None]
-
-
-def _entity_of(model, ref):
-    if ref in model["entities"]:
-        return model["entities"][ref]
-    return next((e for e in model["entities"].values() if e["name"] == ref), None)
-
-
-def _typed_values(model, world, spec, now, cap=3):
-    """A few valid client values for a field or parameter spec, the most ordinary first: records of
-    different states for references, every enum value, numbers at full precision."""
-    t = spec.get("type", "text")
-    if t == "list":
-        el = M.element(spec)
-        if el["type"] == "ref":
-            target = _entity_of(model, el.get("ref"))
-            if target is None:
-                return []
-            return [g[:2] for g in _state_groups(target, world)][:2 * cap]
-        if el["type"] in M.ELEMENT_TYPES:
-            return [[v] for v in _typed_values(model, world, el, now, cap)]
-        return []
-    if t == "ref":
-        target = _entity_of(model, spec.get("ref"))
-        return _state_sample(target, world, 2 * cap) if target else []
-    if t == "enum":
-        return list(spec.get("values") or [])[:max(cap, 4)]
-    return {"bool": [False, True], "int": [1, 0, 2], "number": [round(10 + PRECISE, 6), 0.0, 1.0],
-            "text": ["probe text"], "date": [now.date().isoformat(), (now.date() + dt.timedelta(days=1)).isoformat()],
-            "datetime": [now.replace(microsecond=0).isoformat()]}.get(t, [])[:cap]
-
-
-def _alt_value(model, world, f, v, now):
-    """A valid value of f's type that differs from v."""
-    t = f["type"]
-    num = isinstance(v, (int, float)) and not isinstance(v, bool)
-    if t == "bool":
-        return (not v) if isinstance(v, bool) else True
-    if t == "enum":
-        return next((x for x in f.get("values") or [] if x != v), None)
-    if t == "int":
-        return (v if num else 0) + 1
-    if t == "number":
-        return round((float(v) if num else 0.0) + 1 + PRECISE, 6)
-    if t == "text":
-        return (v if isinstance(v, str) else "probe") + "-alt"
-    try:
-        if t == "date":
-            return ((E._to_date(v) if v else now.date()) + dt.timedelta(days=1)).isoformat()
-        if t == "datetime":
-            return ((E._to_datetime(v) if v else now) + dt.timedelta(hours=1)).replace(microsecond=0).isoformat()
-    except (ValueError, TypeError):
-        return None
-    if t == "ref":
-        return next((i for i in sorted(R.records(world, f["ref"])) if i != v), None)
-    return None
-
-
-def _default_value(model, world, ent, f, data, user, now):
-    """What f's default gives for a candidate record (None when it cannot be computed here)."""
-    ctx = R.Ctx(model, world, user, now)
-    try:
-        return R.to_storage(f, ctx.eval(f["default"], record=R.Rec(ctx, ent, None, override=dict(data or {}))))
-    except Exception:  # noqa: BLE001 - any failure just means "unknown"
-        return None
-
-
-def _param_bodies(model, world, action, now, cap):
-    """Parameter bodies: ordinary valid values, one parameter varied at a time, and an id that does
-    not exist for every reference parameter (params are converted before the guard runs)."""
-    params = action.get("params") or {}
-    if not params:
-        return [{}]
-    pools = {p: _typed_values(model, world, spec, now) for p, spec in params.items()}
-    base = {p: v[0] for p, v in pools.items() if v}
-    bodies, i = [base], 1
-    while len(bodies) < cap and any(len(v) > i for v in pools.values()):
-        for p, v in pools.items():
-            if len(v) > i and len(bodies) < cap:
-                bodies.append(dict(base, **{p: v[i]}))
-        i += 1
-    refs = {p: (MISSING_ID if spec.get("type") == "ref" else [MISSING_ID]) for p, spec in params.items() if M.is_reference(spec)}
-    if refs:
-        bodies.append(dict(base, **refs))
-    return bodies
-
-
-def _create_bodies(model, world, ent, now, user, cap):
-    """Create bodies: a copy of the last record (or, for an empty collection, typed values with
-    references to records of different states), explicit values for defaulted fields that differ from
-    what the default gives, and numbers at full precision."""
-    writable = [f for f in M.ordered_fields(ent) if not f.get("computed") and not f.get("system")]
-    recs = R.records(world, ent["id"])
-    src = recs[max(recs)] if recs else None
-    bases = []
-    if src is not None:
-        base = {}
-        for f in writable:
-            v = src.get(f["id"])
-            if v is None:
-                continue
-            if f.get("unique"):
-                v = v + "-p21" if isinstance(v, str) else (v + 100000 if isinstance(v, int) and not isinstance(v, bool) else v)
-            base[f["name"]] = v
-        bases.append(base)
-    else:
-        pools = {f["name"]: _typed_values(model, world, f, now) for f in writable}
-        base = {k: v[0] for k, v in pools.items() if v}
-        for f in writable:
-            if f.get("unique") and isinstance(base.get(f["name"]), str):
-                base[f["name"]] = "probe-p21"
-        bases.append(base)
-        for f in writable:  # other states of what the new record refers to
-            if M.is_reference(f):
-                for v in pools[f["name"]][1:]:
-                    bases.append(dict(base, **{f["name"]: v}))
-    out = list(bases[:2 * cap])
-    base = bases[0]
-    data = dict(src or {})
-    for f in writable:
-        if f.get("default") in (None, ""):
-            continue
-        dv = _default_value(model, world, ent, f, data, user, now)
-        alt = _alt_value(model, world, f, dv if dv is not None else base.get(f["name"]), now)
-        if alt is not None:
-            out.append(dict(base, **{f["name"]: alt}))
-            if f["type"] == "bool" and dv is None:
-                out.append(dict(base, **{f["name"]: False}))
-    nums = [f["name"] for f in writable if f["type"] == "number"]
-    if nums:
-        out.append(dict(base, **{k: round(float(base.get(k) or 0) + PRECISE, 6) for k in nums}))
-    return out
-
-
-def _clock_locations(model):
-    """Expression locations that read the clock (`now` or `today`)."""
-    import ast
-    out = []
-    for loc, ent, src, kw in M.expressions(model):
-        try:
-            tree = E.parse(src)
-        except E.ExprError:
-            continue
-        if any(isinstance(n, ast.Name) and n.id in ("now", "today") for n in ast.walk(tree)):
-            out.append(loc)
-    return out
-
-
-def _time_offsets(model, cap=4):
-    """Durations written in expressions (`days(7)`, `hours(168)`): where time windows end."""
-    import ast
-    unit = {"days": "days", "hours": "hours", "minutes": "minutes"}
-    out = set()
-    for loc, ent, src, kw in M.expressions(model):
-        try:
-            tree = E.parse(src)
-        except E.ExprError:
-            continue
-        for n in ast.walk(tree):
-            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in unit and n.args
-                    and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, (int, float))
-                    and not isinstance(n.args[0].value, bool)):
-                out.add(dt.timedelta(**{unit[n.func.id]: n.args[0].value}))
-    return sorted(out)[:cap]
-
-
-def _probes_v21(model, world, now, focus=None, thorough=False):
-    """v2.1 additions (see REVISIONS v2.1). Every request is made from the same starting state.
-
-    - records of every distinct state (not only the first/last ids), probed also as the users they
-      refer to (owner, assignee): permissions and guards are exercised on both sides of their branches;
-    - PATCH of every writable field with a *different* valid value (not a no-op), numbers at full precision;
-    - creates with explicit values for defaulted fields, numbers at full precision, and for empty
-      collections a typed body referring to records of each state;
-    - action parameter bodies (valid values of each kind, and an id that does not exist);
-    - chains: one action over up to CHAIN different records by the same user, each prefix compared,
-      so that limits (`count(...) < n`) and failures late in a request are reached;
-    - (``thorough``) requests at times where windows written in expressions end, for stored dates."""
-    probes = []
-    t = now.isoformat()
-    groups = _user_groups(model, world)
-    per_group = 2 if thorough else 1
-    role_users = [u for g in groups for u in g[:per_group]]
-    rec_cap = 8 if thorough else 4
-    body_cap = 4 if thorough else 3
-    for e in model["entities"].values():
-        coll = e["name"]
-        recs = R.records(world, e["id"])
-        writable = [f for f in M.ordered_fields(e) if not f.get("computed") and not f.get("system")]
-        actor = role_users[0] if role_users else None
-        for u in [None] + role_users:
-            for body in _create_bodies(model, world, e, now, u or actor, body_cap):
-                probes.append({"method": "POST", "path": f"/api/{coll}", "query": {}, "body": body, "user": u, "now": t})
-        if not recs:
-            continue
-        bodies = {a["name"]: _param_bodies(model, world, a, now, body_cap) for a in e["actions"].values()}
-        for rid in _state_sample(e, world, rec_cap, (focus or {}).get(e["id"], ())):
-            data = recs[rid]
-            users = list(dict.fromkeys(_record_users(model, world, e, data)[:2] + role_users))
-            for u in users:
-                probes.append({"method": "GET", "path": f"/api/{coll}/{rid}", "query": {}, "body": None, "user": u, "now": t})
-                for a in e["actions"].values():
-                    for body in [{}] + bodies[a["name"]]:
-                        probes.append({"method": "POST", "path": f"/api/{coll}/{rid}/{a['name']}", "query": {}, "body": body,
-                                       "user": u, "now": t})
-                for f in writable:
-                    alt = _alt_value(model, world, f, data.get(f["id"]), now)
-                    if alt is not None:
-                        probes.append({"method": "PATCH", "path": f"/api/{coll}/{rid}", "query": {}, "body": {f["name"]: alt},
-                                       "user": u, "now": t})
-                probes.append({"method": "DELETE", "path": f"/api/{coll}/{rid}", "query": {}, "body": None, "user": u, "now": t})
-        for a in e["actions"].values():
-            probes += _chains(model, world, e, a, bodies[a["name"]][0], role_users, now)
-    if thorough:
-        probes += _time_probes(model, world, now, role_users)
-    return probes
-
-
-def _chains(model, world, e, a, body, users, now):
-    """The same action by one user over up to CHAIN records on which it is currently possible, as
-    chains of growing length (each chain's final request is compared; the earlier ones set up state)."""
-    out = []
-    recs = R.records(world, e["id"])
-    path = f"/api/{e['name']}/{{}}/{a['name']}"
-    for u in users:
-        ctx = R.Ctx(model, world, u, now)
-        if ctx.user is None:
-            continue
-        try:
-            params, _ = R.parse_params(ctx, a, body)
-        except (M.ModelError, E.ExprError, TypeError, ValueError, KeyError):
-            continue
-        ok = []
-        for rid in sorted(recs)[:80]:
-            rec = R.Rec(ctx, e, rid)
-            if R.can_read(ctx, e, rid) and R.action_allowed(ctx, e, rec, a, params) and R.action_possible(ctx, e, rec, a, params):
-                ok.append(rid)
-                if len(ok) >= CHAIN:
-                    break
-        steps = [{"method": "POST", "path": path.format(rid), "query": {}, "body": body} for rid in ok]
-        for n in range(1, len(steps) + 1):
-            p = dict(steps[n - 1], user=u, now=now.isoformat())
-            if n > 1:
-                p["setup"] = steps[:n - 1]
-            out.append(p)
-    return out
-
-
-def _time_probes(model, world, now, role_users, cap=400):
-    """Requests at the times where a window written in an expression ends for a stored date
-    (date + offset + 12h, offsets from `days(n)`/`hours(n)` in the model): a time-dependent
-    behaviour that one fixed `now` never puts on both sides of its boundary."""
-    if not _clock_locations(model):
-        return []
-    offsets = [dt.timedelta(0)] + _time_offsets(model)
-    out = []
-    for e in model["entities"].values():
-        datef = [f for f in M.ordered_fields(e) if f["type"] in ("date", "datetime") and not f.get("computed")][:3]
-        if not datef:
-            continue
-        recs = R.records(world, e["id"])
-        for rid in _state_sample(e, world, 4):
-            data = recs[rid]
-            users = list(dict.fromkeys(_record_users(model, world, e, data)[:2] + role_users[:2]))
-            times = set()
-            for f in datef:
-                try:
-                    base = E._to_datetime(data.get(f["id"])) if data.get(f["id"]) else None
-                except (ValueError, TypeError):
-                    base = None
-                if base is not None:
-                    times |= {(base + o + dt.timedelta(hours=12)).replace(microsecond=0) for o in offsets}
-            for tm in sorted(times):
-                for u in users:
-                    out.append({"method": "GET", "path": f"/api/{e['name']}/{rid}", "query": {}, "body": None, "user": u,
-                                "now": tm.isoformat()})
-                    for a in e["actions"].values():
-                        out.append({"method": "POST", "path": f"/api/{e['name']}/{rid}/{a['name']}", "query": {}, "body": {},
-                                    "user": u, "now": tm.isoformat()})
-    return out[:cap]
-
-
 def _run_probe(model, world, p):
     """(status, body, emitted messages, records written) -- the last so that side-effects a
-    response does not show (e.g. the loan an action creates) are compared too.
-
-    For a failing request (status >= 400) "records written" is what the request left behind
-    after its rollback, found by comparing the stored state before and after it (not by trusting
-    the engine's own journal): normally nothing, so the result is the same as before v2.1.
-
-    A probe with ``setup`` (a list of {method, path, body} steps by the same user at the same
-    time) runs those steps first, statefully, and returns a fifth element: their outcomes. The
-    first four elements describe the final request only. Everything is undone afterwards."""
+    response does not show (e.g. the loan an action creates) are compared too."""
     now = dt.datetime.fromisoformat(p["now"]) if p.get("now") else dt.datetime(2026, 1, 1)
     mark = len(world["outbox"])
-    saved = ({eid: dict(recs) for eid, recs in world["records"].items()}, dict(world["next_id"]), world["outbox_next"])
-    ctxs, setup = [], None
-    if p.get("setup"):
-        setup = []
-        for s in p["setup"]:
-            st, o, em, wr, c = _step(model, world, s["method"], s["path"], s.get("query") or {}, s.get("body"), p.get("user"), now)
-            ctxs.append(c)
-            setup.append([st, o, em, wr])
-    status, out, emitted, writes, ctx = _step(model, world, p["method"], p["path"], p.get("query") or {}, p.get("body"),
-                                              p.get("user"), now)
-    ctxs.append(ctx)
-    for c in reversed(ctxs):
-        c.rollback()  # every probe sees the same starting state
-    del world["outbox"][mark:]
-    # also undo whatever a faulty rollback left behind, so one probe cannot leak into the next
-    for eid in list(world["records"]):
-        if eid not in saved[0]:
-            del world["records"][eid]
-    for eid, recs in saved[0].items():
-        cur = world["records"].setdefault(eid, {})
-        if cur != recs:
-            cur.clear()
-            cur.update(recs)
-    world["next_id"], world["outbox_next"] = saved[1], saved[2]
-    if setup is not None:
-        return status, out, emitted, writes, setup
-    return status, out, emitted, writes
-
-
-def _record_view(ent, data):
-    return None if data is None else {f["name"]: data.get(fid) for fid, f in ent["fields"].items() if not f.get("computed")}
-
-
-def _step(model, world, method, path, query, body, user, now):
-    """One request: (status, body, emitted, writes, ctx), without undoing it."""
-    mark = len(world["outbox"])
-    before = {eid: dict(recs) for eid, recs in world["records"].items()}
-    counters = (dict(world["next_id"]), world["outbox_next"])
-    status, out, ctx = R.handle_full(model, world, method, path, query, body, user, now)
+    status, out, ctx = R.handle_full(model, world, p["method"], p["path"], p.get("query") or {}, p.get("body"), p.get("user"), now)
     emitted = copy.deepcopy(world["outbox"][mark:])
     writes = {}
     if status < 400:
@@ -1073,28 +527,12 @@ def _step(model, world, method, path, query, body, user, now):
             ent = model["entities"].get(eid)
             if not ent:
                 continue
-            writes.setdefault(ent["name"], {})[str(rid)] = _record_view(ent, R.records(world, eid).get(rid))
-    else:
-        writes = _residue(model, world, before, counters)
-    return status, out, emitted, writes, ctx
-
-
-def _residue(model, world, before, counters):
-    """Stored state a failed request left behind (records and counters that differ from before it)."""
-    out = {}
-    for eid in set(before) | set(world["records"]):
-        a, b = before.get(eid, {}), world["records"].get(eid, {})
-        if a is b or a == b:
-            continue
-        ent = model["entities"].get(eid)
-        name = ent["name"] if ent else eid
-        for rid in set(a) | set(b):
-            x, y = a.get(rid), b.get(rid)
-            if x is not y and x != y:
-                out.setdefault(name, {})[str(rid)] = _record_view(ent, y) if ent else y
-    if (dict(world["next_id"]), world["outbox_next"]) != counters:
-        out["_counters"] = {"next_id": dict(world["next_id"]), "outbox_next": world["outbox_next"]}
-    return out
+            data = R.records(world, eid).get(rid)
+            writes.setdefault(ent["name"], {})[str(rid)] = (
+                None if data is None else {f["name"]: data.get(fid) for fid, f in ent["fields"].items() if not f.get("computed")})
+    ctx.rollback()  # every probe sees the same starting state
+    del world["outbox"][mark:]
+    return status, out, emitted, writes
 
 
 def _target(path):
@@ -1158,7 +596,7 @@ def _labels_needed(fp, method, path, old, new, query=None):
         return [{"*.any"}]
     n = fp.renamed_entities.get(coll, coll)
     op = _op_of(method, parts)
-    (os_, ob, oe, ow), (ns, nb, ne, nw) = old[:4], new[:4]
+    (os_, ob, oe, ow), (ns, nb, ne, nw) = old, new
     base = [{f"{n}.any"}, {"*.any"}]
     wl = _write_labels(fp, ow, nw)
     if op == "outbox":
@@ -1221,9 +659,6 @@ def _covered(need, have):
 def _translate_writes(fp, w):
     out = {}
     for ename, recs in (w or {}).items():
-        if ename.startswith("_"):
-            out[ename] = recs
-            continue
         en = fp.renamed_entities.get(ename, ename)
         out[en] = {rid: (None if d is None else {fp.renamed_fields.get((en, k), k): v for k, v in d.items()})
                    for rid, d in recs.items()}
@@ -1237,10 +672,6 @@ def _write_labels(fp, ow, nw):
     need = set()
     for en in set(o) | set(nw or {}):
         a, b = o.get(en, {}), (nw or {}).get(en, {})
-        if en.startswith("_"):  # counters left behind by a failed request: an engine fault, nothing explains it
-            if a != b:
-                need.add("*.residue")
-            continue
         for rid in set(a) | set(b):
             x, y = a.get(rid), b.get(rid)
             if (x is None) != (y is None):
@@ -1285,7 +716,6 @@ def replay(old_model, old_world, new_model, new_world, probes, fp, acknowledged=
     stats = {"probes": len(probes), "identical": 0, "direct": 0, "acknowledged": 0, "consequence": 0,
              "unexplained": 0, "consequence_labels": {}, "examples": [], "direct_examples": []}
     stats["_golden"] = []
-    stats["_dates"] = set()
     for p in probes:
         old = _run_probe(old_model, old_world, p)
         np_ = _rename_probe(fp, p)
@@ -1294,18 +724,11 @@ def replay(old_model, old_world, new_model, new_world, probes, fp, acknowledged=
         if _same(old, new, fp, p):
             stats["identical"] += 1
             continue
-        stats["_dates"] |= _date_pairs(old[1], new[1])
-        if not _setup_same(old, new, fp, p):
-            # an earlier step already behaves differently; that step is compared on its own (as the
-            # final request of a shorter chain), so this longer chain adds nothing to explain
-            stats["diverged_setup"] = stats.get("diverged_setup", 0) + 1
-            continue
         verdict, labels = classify(fp, acknowledged, p["method"], p["path"], old, new, p.get("query"))
         if new[0] == 500 and old[0] != 500:
             verdict, labels = "unexplained", {"crash"}
         stats[verdict] += 1
-        brief = {"request": f"{p['method']} {p['path']} as {p.get('user')}" + (f" {json.dumps(p.get('body'))}" if p.get("body") else "")
-                 + (f" at {p['now']}" if p.get("shifted") else "") + (f" after {len(p['setup'])} earlier request(s)" if p.get("setup") else ""),
+        brief = {"request": f"{p['method']} {p['path']} as {p.get('user')}" + (f" {json.dumps(p.get('body'))}" if p.get("body") else ""),
                  "before": [old[0], _short(old[1])], "after": [new[0], _short(new[1])], "labels": sorted(labels)}
         if verdict == "consequence":
             for lab in labels:
@@ -1317,146 +740,7 @@ def replay(old_model, old_world, new_model, new_world, probes, fp, acknowledged=
     return stats
 
 
-_DATE_RE = None
-
-
-def _dates_in(v, out=None):
-    """ISO dates/datetimes appearing anywhere in a response body."""
-    global _DATE_RE
-    if _DATE_RE is None:
-        import re
-        _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?$")
-    out = set() if out is None else out
-    if isinstance(v, str):
-        if _DATE_RE.match(v):
-            out.add(v)
-    elif isinstance(v, dict):
-        for x in v.values():
-            _dates_in(x, out)
-    elif isinstance(v, list):
-        for x in v:
-            _dates_in(x, out)
-    return out
-
-
-def _date_pairs(ob, nb):
-    """(old, new) pairs of dates that differ at the same place of two response bodies (list items
-    matched by id); dates present on one side only are paired with themselves."""
-    out = set()
-    if isinstance(ob, dict) and isinstance(nb, dict) and "items" in ob and "items" in nb:
-        oi = {i.get("id"): i for i in ob["items"] if isinstance(i, dict)}
-        for i in nb["items"]:
-            if isinstance(i, dict) and i.get("id") in oi:
-                out |= _date_pairs(oi[i["id"]], i)
-        return out
-    if isinstance(ob, dict) and isinstance(nb, dict):
-        for k in set(ob) | set(nb):
-            a, b = ob.get(k), nb.get(k)
-            da, db = _dates_in(a), _dates_in(b)
-            if isinstance(a, str) and isinstance(b, str) and da and db and a != b:
-                out.add((a, b))
-            elif da != db:
-                out |= {(d, d) for d in da ^ db}
-    return out
-
-
-def _clock_entities(model):
-    """Entities whose behaviour can depend on the clock: owners of expressions that read `now` or
-    `today` (defaults and values written by effects only stamp the time, the same way in both
-    versions, so they are left out), and transitively of everything that reads a clock-dependent
-    computed field."""
-    locs = [loc for loc in _clock_locations(model) if not (loc[0] == "field" and loc[3] == "default")
-            and not (loc[0] in ("action", "trigger") and any(k in loc[4:] for k in ("set", "values", "payload")))]
-    if not locs:
-        return set()
-    deps = M.dependencies(model)
-    names, pairs, done = set(), set(), set()
-    todo = list(locs)
-    while todo:
-        loc = todo.pop()
-        if loc in done:
-            continue
-        done.add(loc)
-        ent = model["entities"].get(loc[1])
-        if not ent:
-            continue
-        names.add(ent["name"])
-        if loc[0] == "field" and loc[3] == "computed" and loc[2] in ent["fields"]:
-            pair = (ent["name"], ent["fields"][loc[2]]["name"])
-            if pair not in pairs:
-                pairs.add(pair)
-                todo += [l2 for l2, (reads, _c, _o) in deps.items() if pair in reads]
-    return names
-
-
-def _shift_times(model, now, dates, cap_data=2, cap_generic=2):
-    """Other times to replay at. ``dates`` holds (old, new) values of dates the change alters: a
-    comparison with `today`/`now` gives different answers between the two, so the day after the
-    earlier one (and the earlier day itself) is a time where the versions can disagree. The ones
-    closest to `now` are used (records still active have dates near the present). Then `now` plus
-    one day and plus durations written in the model's expressions."""
-    data = set()
-    for a, b in dates:
-        try:
-            x, y = sorted((E._to_datetime(a.replace(" ", "T")), E._to_datetime(b.replace(" ", "T"))))
-        except (ValueError, TypeError):
-            continue
-        day = dt.datetime(x.year, x.month, x.day, 12)
-        data |= {day + dt.timedelta(days=1), day} if x != y else {day, day + dt.timedelta(days=1)}
-    data.discard(now)
-    picked = sorted(sorted(data, key=lambda d: (abs(d - now), d))[:cap_data])
-    generic = [now + dt.timedelta(days=1)] + [now + o for o in _time_offsets(model) if o > dt.timedelta(days=1)]
-    for g in [g for g in generic if g not in picked][:cap_generic]:
-        picked.append(g)
-    return picked
-
-
-def _replay_other_times(rp, model0, world0, model1, world1, probes, fp, ack, now):
-    """Replay the clock-dependent part of the probe set at other times (REVISIONS v2.1, weakness 3):
-    consequences that depend on the date (e.g. `overdue` for orders whose due date moved) do not
-    show at a single `now`. Results are added to the replay statistics."""
-    ents = _clock_entities(model0) | _clock_entities(model1)
-    ents |= {fp.renamed_entities.get(n, n) for n in ents}
-    if not ents:
-        return
-    touched = {lab.split(".", 1)[0] for lab in fp.all() | set(ack)}
-    if "*" not in touched and not (touched & ents):
-        return
-    dates = set(rp.get("_dates") or ())
-    for eid in set(world0["records"]) & set(world1["records"]):
-        ent = model1["entities"].get(eid) or model0["entities"].get(eid)
-        dfs = [fid for fid, f in ent["fields"].items() if f["type"] in ("date", "datetime")] if ent else []
-        o, n = world0["records"][eid], world1["records"][eid]
-        for rid in set(o) & set(n):
-            for fid in dfs:
-                a, b = o[rid].get(fid), n[rid].get(fid)
-                if a != b:
-                    dates.add((str(a or b), str(b or a)))
-    subset = []
-    for p in probes:
-        coll, parts = _target(p["path"])
-        if not coll or coll not in ents or p.get("setup") or p.get("query"):
-            continue
-        op = _op_of(p["method"], parts)
-        if op in ("list", "read") or op.startswith("action:"):
-            subset.append(p)
-    times = _shift_times(model1, now, dates)
-    rp["other_times"] = [t.isoformat() for t in times]
-    for t in times:
-        shifted = [dict(p, now=t.isoformat(), shifted=True) for p in subset]
-        st = replay(model0, copy.deepcopy(world0), model1, copy.deepcopy(world1), shifted, fp, ack)
-        for k in ("probes", "identical", "direct", "acknowledged", "consequence", "unexplained", "diverged_setup"):
-            if st.get(k):
-                rp[k] = rp.get(k, 0) + st[k]
-        for lab, c in st["consequence_labels"].items():
-            rp["consequence_labels"][lab] = rp["consequence_labels"].get(lab, 0) + c
-        for key in ("examples", "direct_examples"):
-            rp[key] += st[key][:max(0, 8 - len(rp[key]))]
-
-
 def _rename_probe(fp, p):
-    if p.get("setup"):
-        p = dict(p, setup=[_rename_probe(fp, dict(st)) for st in p["setup"]])
     coll, parts = _target(p["path"])
     if coll and coll in fp.renamed_entities:
         p = dict(p, path="/api/" + "/".join([fp.renamed_entities[coll]] + parts[1:]))
@@ -1479,19 +763,7 @@ def _same(old, new, fp, p):
         ob = _translate(fp, newc, ob)
     if not (old[0] == new[0] and ob == new[1] and old[2] == new[2]):
         return False
-    if not _setup_same(old, new, fp, p):
-        return False
     return not _write_labels(fp, old[3] if len(old) > 3 else {}, new[3] if len(new) > 3 else {})
-
-
-def _setup_same(old, new, fp, p):
-    """Did the setup steps of a chained probe have the same outcomes on both versions?"""
-    so, sn = (old[4] if len(old) > 4 else None), (new[4] if len(new) > 4 else None)
-    if so is None and sn is None:
-        return True
-    if so is None or sn is None or len(so) != len(sn):
-        return False
-    return all(_same(a, b, fp, st) for a, b, st in zip(so, sn, p.get("setup") or []))
 
 
 def _short(v):
@@ -1629,7 +901,7 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
         t = time.perf_counter()
         fp = compute_footprint(model0, model1, world0, world1, list(extra_footprint))
         report["footprint"] = fp.to_json()
-        report["scope_warnings"] = scope_warnings(fp, change, model0, model1, world0, world1)
+        report["scope_warnings"] = scope_warnings(fp, change)
         timings["footprint_ms"] = _ms(t)
 
         t = time.perf_counter()
@@ -1643,7 +915,6 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
                 ack = [change["consequences"]]
             report["replay"] = replay(model0, copy.deepcopy(world0), model1, copy.deepcopy(world1), probes, fp, ack)
             rp = report["replay"]
-            _replay_other_times(rp, model0, world0, model1, world1, probes, fp, ack, probe_now)
             if rp["unexplained"]:
                 raise ChangeRejected("replaying recorded and generated requests shows behaviour changes that nothing in "
                                      "this change accounts for (see replay.examples): regressions or engine faults")
@@ -1664,7 +935,6 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
         report["inverse"] = inverse
         report["verdict"] = "dry-run passed" if dry_run else "committed"
         (report.get("replay") or {}).pop("_golden", None)
-        (report.get("replay") or {}).pop("_dates", None)
         timings["total_ms"] = _ms(t0)
         report["timings"] = timings
         if not dry_run:
@@ -1678,7 +948,6 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
         return report
     except ChangeRejected as exc:
         (report.get("replay") or {}).pop("_golden", None)
-        (report.get("replay") or {}).pop("_dates", None)
         report["verdict"] = "rejected"
         report["reason"] = str(exc)
         timings["total_ms"] = _ms(t0)
