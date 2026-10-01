@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/dev/D13/accrete/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D13/test_D13.py",
+ "passed": 11,
+ "total": 11,
+ "seconds": 0.33,
+ "results": [
+  {
+   "test": "challenges.dev.D13.test_D13::test_manager_creates_delegation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_delegation_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_only_managers_create_delegations",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_active_delegate_reads_and_approves",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_delegation_respects_date_window",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_deleting_delegation_revokes_rights",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_delegate_cannot_decide_own_claim",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_delegator_keeps_rights_and_state_rules_apply",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_delegations_do_not_chain",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_delegation_read_and_write_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D13.test_D13::test_ui_delegate_actions",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
