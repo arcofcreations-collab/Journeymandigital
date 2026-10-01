@@ -1,0 +1,50 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/fresh/F10/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/fresh/F10/test_F10.py",
+ "passed": 8,
+ "total": 8,
+ "seconds": 0.97,
+ "results": [
+  {
+   "test": "challenges.fresh.F10.test_F10::test_reference_flag_migrated",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F10.test_F10::test_reference_books_cannot_be_borrowed",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F10.test_F10::test_book_on_loan_stays_until_returned",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F10.test_F10::test_librarian_toggles_reference_flag",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F10.test_F10::test_reference_flag_validation_and_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F10.test_F10::test_create_book_reference_flag",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F10.test_F10::test_ui_reference_books",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F10.test_F10::test_other_borrow_rules_unchanged",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

@@ -1,0 +1,55 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/fresh/F12/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/fresh/F12/test_F12.py",
+ "passed": 9,
+ "total": 9,
+ "seconds": 1.04,
+ "results": [
+  {
+   "test": "challenges.fresh.F12.test_F12::test_seeded_suggestions_and_read_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F12.test_F12::test_member_creates_suggestion",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F12.test_F12::test_suggestion_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F12.test_F12::test_suggester_edits_and_withdraws_pending_suggestion",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F12.test_F12::test_accept_adds_book_to_catalogue",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F12.test_F12::test_refused_accepts_leave_no_trace",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F12.test_F12::test_decline",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F12.test_F12::test_book_from_suggestion_cannot_be_deleted",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F12.test_F12::test_ui_suggestions",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

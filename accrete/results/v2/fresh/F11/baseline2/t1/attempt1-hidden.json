@@ -1,0 +1,60 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/fresh/F11/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/fresh/F11/test_F11.py",
+ "passed": 10,
+ "total": 10,
+ "seconds": 0.73,
+ "results": [
+  {
+   "test": "challenges.fresh.F11.test_F11::test_membership_dates_migrated",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F11.test_F11::test_expired_member_cannot_borrow",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F11.test_F11::test_expired_member_can_still_return_and_read",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F11.test_F11::test_extend_membership",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F11.test_F11::test_extend_refusals",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F11.test_F11::test_librarian_sets_member_until",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F11.test_F11::test_members_cannot_change_their_expiry",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F11.test_F11::test_create_member_with_and_without_expiry",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F11.test_F11::test_ui_membership",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F11.test_F11::test_borrow_rules_unchanged_today",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

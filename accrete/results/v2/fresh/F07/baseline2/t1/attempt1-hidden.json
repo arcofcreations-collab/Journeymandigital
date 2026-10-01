@@ -1,0 +1,50 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/fresh/F07/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/fresh/F07/test_F07.py",
+ "passed": 8,
+ "total": 8,
+ "seconds": 0.7,
+ "results": [
+  {
+   "test": "challenges.fresh.F07.test_F07::test_transfer_unassigns_assigned_orders",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F07.test_F07::test_visibility_and_creation_follow_new_site",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F07.test_F07::test_transfer_keeps_history_and_requester_access",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F07.test_F07::test_transfer_without_assigned_orders",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F07.test_F07::test_refused_transfers_change_nothing",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F07.test_F07::test_site_cannot_be_patched_directly",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F07.test_F07::test_ui_transfer_form",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F07.test_F07::test_other_operations_unchanged",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
