@@ -1,0 +1,70 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/dev/D08/baseline/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D08/test_D08.py",
+ "passed": 12,
+ "total": 12,
+ "seconds": 0.63,
+ "results": [
+  {
+   "test": "challenges.dev.D08.test_D08::test_large_approved_claims_migrated_to_second_approval",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_other_claims_not_migrated",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_large_claim_needs_two_approvals_then_pay",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_threshold_is_strictly_greater_than_1000",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_single_approval_when_manager_has_no_manager",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_second_approver_rejects",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_approve_and_reject_permissions_with_two_levels",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_awaiting_claims_cannot_be_paid",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_second_approver_can_read_two_step_claims",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_two_step_claim_stays_readable_after_decision",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_new_workflow_fields_are_protected",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D08.test_D08::test_ui_second_approval_forms",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

@@ -1,0 +1,24 @@
+{
+ "id": "D03",
+ "system": "accrete",
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "sequence",
+  "interaction"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 11,
+ "hidden_total": 11,
+ "hidden_failures": [],
+ "base_checked": 58,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "t_start": 1790818829.0266004,
+ "t_end": 1790818888.1560633,
+ "self_timed_s": 59.1,
+ "duration_ms": 65086,
+ "tool_uses": 14,
+ "tokens": 65631
+}

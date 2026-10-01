@@ -1,0 +1,38 @@
+{
+ "id": "D11",
+ "system": "accrete",
+ "app": "expenses",
+ "categories": [
+  "failure_atomicity",
+  "new_concept",
+  "new_relationship",
+  "interaction",
+  "sequence"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 0,
+ "hidden_total": 11,
+ "hidden_failures": [
+  "test_run_pays_claims_and_emits_messages_in_order: AssertionError: <Response 404 '{\"error\": \"not_found\", \"message\": \"unknown collection \\'payment_runs\\'\", \"fields\": {}}'>\nassert 404 == 201\n +  where 404 = <Response 404 '{\"error\": \"not_found\", \"message",
+  "test_run_records_pay_events: assert 404 == 201\n +  where 404 = <Response 404 '{\"error\": \"not_found\", \"message\": \"unknown collection \\'payment_runs\\'\", \"fields\": {}}'>.status\n +    where <Response 404 '{\"error\": \"not_found\", \"mess",
+  "test_run_with_non_approved_claim_leaves_no_trace: KeyError: 'items'",
+  "test_run_over_total_cap_leaves_no_trace: KeyError: 'items'",
+  "test_run_validation_leaves_no_trace: KeyError: 'items'",
+  "test_conflict_wins_over_validation: KeyError: 'items'",
+  "test_only_finance_creates_and_reads_runs: KeyError: 'items'",
+  "test_runs_are_immutable: KeyError: 'id'",
+  "test_claims_paid_by_run_cannot_be_paid_again: assert 404 == 201\n +  where 404 = <Response 404 '{\"error\": \"not_found\", \"message\": \"unknown collection \\'payment_runs\\'\", \"fields\": {}}'>.status\n +    where <Response 404 '{\"error\": \"not_found\", \"mess",
+  "test_individual_pay_unchanged_and_payment_run_null: KeyError: 'payment_run'",
+  "test_payment_run_field_is_protected: KeyError: 'payment_run'"
+ ],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": true,
+ "success": false,
+ "t_start": 1790818789.876524,
+ "t_end": 1790818871.494591,
+ "self_timed_s": 81.6,
+ "duration_ms": 93589,
+ "tool_uses": 14,
+ "tokens": 75948
+}

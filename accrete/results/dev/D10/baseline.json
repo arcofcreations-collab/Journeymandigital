@@ -1,0 +1,24 @@
+{
+ "id": "D10",
+ "system": "baseline",
+ "app": "expenses",
+ "categories": [
+  "cross_cutting",
+  "new_concept",
+  "data_migration"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 11,
+ "hidden_total": 11,
+ "hidden_failures": [],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "t_start": 1790818680.0347912,
+ "t_end": 1790818884.4346294,
+ "self_timed_s": 204.4,
+ "duration_ms": 218074,
+ "tool_uses": 27,
+ "tokens": 103863
+}

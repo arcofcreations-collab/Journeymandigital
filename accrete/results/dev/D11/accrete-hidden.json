@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/dev/D11/accrete/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D11/test_D11.py",
+ "passed": 0,
+ "total": 11,
+ "seconds": 0.31,
+ "results": [
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_pays_claims_and_emits_messages_in_order",
+   "passed": false,
+   "message": "AssertionError: <Response 404 '{\"error\": \"not_found\", \"message\": \"unknown collection \\'payment_runs\\'\", \"fields\": {}}'>\nassert 404 == 201\n +  where 404 = <Response 404 '{\"error\": \"not_found\", \"message\": \"unknown collection \\'payment_runs\\'\", \"fields\": {}}'>.status"
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_records_pay_events",
+   "passed": false,
+   "message": "assert 404 == 201\n +  where 404 = <Response 404 '{\"error\": \"not_found\", \"message\": \"unknown collection \\'payment_runs\\'\", \"fields\": {}}'>.status\n +    where <Response 404 '{\"error\": \"not_found\", \"message\": \"unknown collection \\'payment_runs\\'\", \"fields\": {}}'> = post('/api/payment_runs', {'claims': "
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_with_non_approved_claim_leaves_no_trace",
+   "passed": false,
+   "message": "KeyError: 'items'"
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_over_total_cap_leaves_no_trace",
+   "passed": false,
+   "message": "KeyError: 'items'"
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_validation_leaves_no_trace",
+   "passed": false,
+   "message": "KeyError: 'items'"
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_conflict_wins_over_validation",
+   "passed": false,
+   "message": "KeyError: 'items'"
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_only_finance_creates_and_reads_runs",
+   "passed": false,
+   "message": "KeyError: 'items'"
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_runs_are_immutable",
+   "passed": false,
+   "message": "KeyError: 'id'"
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_claims_paid_by_run_cannot_be_paid_again",
+   "passed": false,
+   "message": "assert 404 == 201\n +  where 404 = <Response 404 '{\"error\": \"not_found\", \"message\": \"unknown collection \\'payment_runs\\'\", \"fields\": {}}'>.status\n +    where <Response 404 '{\"error\": \"not_found\", \"message\": \"unknown collection \\'payment_runs\\'\", \"fields\": {}}'> = post('/api/payment_runs', {'claims': "
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_individual_pay_unchanged_and_payment_run_null",
+   "passed": false,
+   "message": "KeyError: 'payment_run'"
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_payment_run_field_is_protected",
+   "passed": false,
+   "message": "KeyError: 'payment_run'"
+  }
+ ],
+ "pytest_tail": ""
+}

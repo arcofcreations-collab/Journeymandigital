@@ -1,0 +1,29 @@
+{
+ "id": "D01",
+ "system": "accrete",
+ "app": "library",
+ "categories": [
+  "data_migration",
+  "new_relationship",
+  "new_concept",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 11,
+ "hidden_total": 12,
+ "hidden_failures": [
+  "test_ui_shows_author_name_and_authors_list: AssertionError: assert '6' == 'K. Tanaka'\n  \n  - K. Tanaka\n  + 6"
+ ],
+ "base_checked": 54,
+ "regressions": [
+  "test_ui_book_detail_fields_and_borrow_action"
+ ],
+ "clarification_written": false,
+ "success": false,
+ "t_start": 1790818680.8504565,
+ "t_end": 1790818852.1587808,
+ "self_timed_s": 171.3,
+ "duration_ms": 186685,
+ "tool_uses": 31,
+ "tokens": 85836
+}
