@@ -1,0 +1,32 @@
+{
+ "id": "E02",
+ "system": "baseline",
+ "app": "maintenance",
+ "categories": [
+  "new_concept",
+  "permissions",
+  "rule_change",
+  "data_migration",
+  "conflict_or_ambiguity",
+  "sequence"
+ ],
+ "expect_rejection": false,
+ "base_failing_before": [
+  "test_assignee_completes_order_and_emits",
+  "test_full_lifecycle"
+ ],
+ "hidden_passed": 11,
+ "hidden_total": 11,
+ "hidden_failures": [],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": "ec78748",
+ "t_start": 1790822908.0703871,
+ "t_end": 1790823188.6519864,
+ "self_timed_s": 280.6,
+ "duration_ms": 297841,
+ "tool_uses": 33,
+ "tokens": 136557
+}
