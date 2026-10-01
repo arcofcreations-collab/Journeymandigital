@@ -1,0 +1,24 @@
+{
+ "id": "D02",
+ "system": "accrete",
+ "app": "library",
+ "categories": [
+  "new_concept",
+  "cross_cutting",
+  "rule_change"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 13,
+ "hidden_total": 13,
+ "hidden_failures": [],
+ "base_checked": 59,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "t_start": 1790818679.8784678,
+ "t_end": 1790818814.7754316,
+ "self_timed_s": 134.9,
+ "duration_ms": 140278,
+ "tool_uses": 16,
+ "tokens": 74696
+}
