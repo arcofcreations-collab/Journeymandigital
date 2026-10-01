@@ -1,0 +1,260 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/eval/E05/accrete/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/base/test_maintenance_base.py",
+ "passed": 30,
+ "total": 50,
+ "seconds": 1.68,
+ "results": [
+  {
+   "test": "challenges.base.test_maintenance_base::test_missing_and_unknown_user_are_401",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_401_precedes_404",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_unknown_collection_record_and_action_are_404",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_404_precedes_403",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_any_user_reads_all_staff_and_assets",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_staff_filters",
+   "passed": false,
+   "message": "AssertionError: <Response 200 '{\"items\": []}'>\nassert 200 == 400\n +  where 200 = <Response 200 '{\"items\": []}'>.status"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_asset_open_orders_derived_and_filters",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_supervisor_creates_staff_with_default_active",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_staff_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_non_supervisors_cannot_write_staff_or_assets",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_supervisor_creates_and_updates_asset",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_asset_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_retire_asset_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_delete_staff_and_asset_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_new_staff_is_identity_and_assignable",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_work_order_lists_per_role",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_work_order_read_permissions",
+   "passed": false,
+   "message": "assert 400 == 201\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'>.status"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_work_order_fields_match_seed",
+   "passed": false,
+   "message": "AssertionError: ('priority', 'p4')\nassert 'p4' == 'low'\n  \n  - low\n  + p4"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_due_date_and_overdue_derived",
+   "passed": false,
+   "message": "assert [30, 37, 38, 47, 52, 54, ...] == [30, 37, 38, 47, 52, 54, ...]\n  \n  At index 9 diff: 65 != 73\n  Left contains 2 more items, first extra item: 73\n  Use -v to get more diff"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_overdue_uses_now_date_boundary",
+   "passed": false,
+   "message": "assert [30, 37, 38, 47, 52, 54, ...] == [30, 37, 38, 47, 52, 54, ...]\n  \n  At index 10 diff: 68 != 73\n  Left contains 2 more items, first extra item: 79\n  Use -v to get more diff"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_work_order_filters",
+   "passed": false,
+   "message": "assert [30, 38, 52, 54, 60, 63, ...] == [30, 38, 52, 54, 60, 63, ...]\n  \n  At index 9 diff: 72 != 74\n  Left contains 2 more items, first extra item: 81\n  Use -v to get more diff"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_requester_creates_work_order_defaults",
+   "passed": false,
+   "message": "AssertionError: <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'>\nassert 400 == 201\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_create_due_dates_per_priority",
+   "passed": false,
+   "message": "AssertionError: <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'>\nassert 400 == 201\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_create_site_rule",
+   "passed": false,
+   "message": "AssertionError: <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'>\nassert 400 == 201\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_create_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_inactive_staff_can_create_orders",
+   "passed": false,
+   "message": "AssertionError: <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'>\nassert 400 == 201\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_requester_patches_open_order",
+   "passed": false,
+   "message": "AssertionError: assert ('p2' == 'normal'\n  \n  - normal\n  + p2)"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_supervisor_patch_priority_recomputes_due_date",
+   "passed": false,
+   "message": "AssertionError: <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'>\nassert 400 == 200\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_patch_by_others_is_403",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_nobody_deletes_work_orders",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_supervisor_assigns_open_order",
+   "passed": false,
+   "message": "AssertionError: assert (None is None and 3 == 3 and '2026-03-01' == '2026-03-05'\n  \n  - 2026-03-05\n  ?          ^\n  + 2026-03-01\n  ?          ^)"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_reassign_assigned_order",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_assign_technician_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_assign_permission_and_state",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_assignee_starts_order",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_inactive_assignee_can_start",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_assignee_completes_order_and_emits",
+   "passed": false,
+   "message": "AssertionError: <Response 409 '{\"error\": \"conflict\", \"message\": \"only an order in progress with at least one time entry can be completed\", \"fields\": {}}'>\nassert 409 == 200\n +  where 409 = <Response 409 '{\"error\": \"conflict\", \"message\": \"only an order in progress with at least one time entry can be "
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_complete_validation",
+   "passed": false,
+   "message": "AssertionError: <Response 409 '{\"error\": \"conflict\", \"message\": \"only an order in progress with at least one time entry can be completed\", \"fields\": {}}'>\nassert 409 == 400\n +  where 409 = <Response 409 '{\"error\": \"conflict\", \"message\": \"only an order in progress with at least one time entry can be "
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_complete_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_requester_cancels_own_open_order",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_cancel_permissions_and_states",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_supervisor_cancels_in_progress_keeps_assignee",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_full_lifecycle",
+   "passed": false,
+   "message": "AssertionError: <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'>\nassert 400 == 201\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_other_operations_emit_nothing",
+   "passed": false,
+   "message": "AssertionError: <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'>\nassert 400 == 201\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"priority\": \"must be one of p1, p2, p3, p4\"}}'"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_outbox_readable_by_any_user",
+   "passed": false,
+   "message": "assert 409 == 200\n +  where 409 = <Response 409 '{\"error\": \"conflict\", \"message\": \"technician already has 3 or more active work orders\", \"fields\": {}}'>.status\n +    where <Response 409 '{\"error\": \"conflict\", \"message\": \"technician already has 3 or more active work orders\", \"fields\": {}}'> = post('/"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_ui_lists_follow_read_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_ui_work_order_detail_fields",
+   "passed": false,
+   "message": "AssertionError: assert 'p2' == 'normal'\n  \n  - normal\n  + p2"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_ui_actions_per_role_and_state",
+   "passed": false,
+   "message": "AssertionError: assert set() == {'complete'}\n  \n  Extra items in the right set:\n  'complete'\n  Use -v to get more diff"
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_ui_create_forms",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_maintenance_base::test_ui_errors_and_forbidden_forms",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
