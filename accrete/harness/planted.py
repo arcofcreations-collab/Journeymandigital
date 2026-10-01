@@ -73,6 +73,35 @@ def corpus():
     return out
 
 
+def corpus_v2(cset, system="accrete2"):
+    """Change files written by v2 implementers (results/v2/<cset>), from correct runs only.
+
+    The starting point is the same one the implementer had: the base app, or the final app of the
+    previous chain step of the same trial. The change files are those in the final app's
+    changes/ directory that are absent from the starting point."""
+    runs2 = os.environ.get("ACCRETE_RUNS2", "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2")
+    out = []
+    for res in sorted(glob.glob(os.path.join(ROOT, "results", "v2", cset, "*", system, "t*", "trial.json"))):
+        d = json.load(open(res))
+        if not d.get("correct") or d.get("expect_rejection"):
+            continue
+        cid, trial = d["id"], d["trial"]
+        meta = json.load(open(os.path.join(ROOT, "challenges", cset, cid, "meta.json")))
+        final = os.path.join(runs2, cset, cid, system, f"t{trial}", "app")
+        start = (os.path.join(runs2, cset, meta["depends_on"], system, f"t{trial}", "app") if meta.get("depends_on")
+                 else os.path.join(ROOT, "apps", meta["app"]))
+        have = set(os.listdir(os.path.join(start, "changes")))
+        files = sorted(os.path.join(final, "changes", f) for f in os.listdir(os.path.join(final, "changes"))
+                       if f.endswith(".yaml") and f not in have)
+        if not files:
+            continue
+        t0 = (d.get("attempts") or [{}])[-1].get("t_start")
+        when = dt.datetime.utcfromtimestamp(t0).replace(microsecond=0) if t0 else NOW
+        out.append({"set": cset, "id": cid + (f"-t{trial}" if trial != 1 else ""), "challenge": cid, "app": meta["app"],
+                    "start": start, "files": files, "now": when})
+    return out
+
+
 def load(path):
     doc, base = C.load_change(path)
     return doc, base
@@ -334,7 +363,8 @@ def hidden_tests_catch(item, model, world):
     st = Store(app)
     st.save_all(model, world)
     st.close()
-    test = os.path.join(ROOT, "challenges", item["set"], item["id"], f"test_{item['id']}.py")
+    cid = item.get("challenge", item["id"])
+    test = os.path.join(ROOT, "challenges", item["set"], cid, f"test_{cid}.py")
     r = subprocess.run([sys.executable, os.path.join(ROOT, "harness", "run_acceptance.py"), app, test],
                        env=dict(os.environ, PYTHONPATH=os.path.join(ROOT, "harness") + os.pathsep + ROOT),
                        capture_output=True, text=True, cwd=tmp)
@@ -366,11 +396,13 @@ def stage(rep):
     return "other"
 
 
-def run(limit=None, seed=7):
+def run(limit=None, seed=7, name="raw.jsonl"):
     os.makedirs(OUT, exist_ok=True)
     rng = random.Random(seed)
-    raw = open(os.path.join(OUT, "raw.jsonl"), "w")
-    items = corpus()[:limit] if limit else corpus()
+    raw = open(os.path.join(OUT, name), "w")
+    cs = os.environ.get("PLANTED_CORPUS", "")
+    items = corpus_v2(cs.split(":", 1)[1]) if cs.startswith("v2:") else corpus()
+    items = items[:limit] if limit else items
     global NOW
     for item in items:
         NOW = item["now"]  # every application, probe and oracle request of this item uses the original run time
@@ -456,6 +488,6 @@ if __name__ == "__main__":
     if sys.argv[1] == "run":
         lim = int(sys.argv[sys.argv.index("--limit") + 1]) if "--limit" in sys.argv else None
         seed = int(sys.argv[sys.argv.index("--seed") + 1]) if "--seed" in sys.argv else 7
-        run(lim, seed)
+        run(lim, seed, sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else "raw.jsonl")
     else:
         summary(sys.argv[2] if len(sys.argv) > 2 else "raw.jsonl")
