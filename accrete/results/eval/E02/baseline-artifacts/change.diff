@@ -1,0 +1,697 @@
+--- a/README.md
++++ b/README.md
+@@ -1,8 +1,8 @@
+ # Maintenance work orders
+ 
+ A facilities team at three sites tracks its staff, the assets it maintains and the work orders
+-raised against those assets. Requesters raise orders, supervisors assign them to technicians,
+-technicians start and complete them, recording the spare parts they use (stock is kept per
++raised against those assets. Requesters raise orders, supervisors assign them to technicians
++(or technicians claim open orders themselves, up to a workload cap), technicians start and complete them, recording the spare parts they use (stock is kept per
+ site; part usages are read-only history). Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External
+ behaviour follows `spec/CONTRACT.md` and `spec/apps/maintenance.md`.
+ 
+@@ -65,6 +65,7 @@
+ 
+ ```
+ open --assign--> assigned --start--> in_progress --complete--> completed
++open --claim---> assigned                                    (technician self-dispatch)
+                  assigned --assign--> assigned               (re-assignment)
+ open | assigned | in_progress --cancel--> cancelled          (a non-supervisor requester: only from open)
+ in_progress --use_parts--> in_progress                       (assignee only; consumes stock)
+@@ -75,7 +76,10 @@
+ | transitions and timestamps | `services.assign_/start_/complete_/cancel_work_order` |
+ | who may run an action, from which statuses | `services._authorize_<action>` (+ `permissions.py`, `*_STATUSES` constants) |
+ | technician eligibility for `assign` | `services._assignment_problem` |
+-| outbox messages `assignment`, `work_completed` | `services.assign_work_order`, `services.complete_work_order` |
++| who may `claim` | `permissions.can_claim_work_order` (active technician at the asset's site) |
++| workload cap (`assign`, `claim`) | `services.WORKLOAD_CAP`, `_ensure_below_workload_cap` (counts `validation.WORKLOAD_STATUSES`) |
++| `dispatch` (`"supervisor"` / `"self"` / `null`) | set by `services._assign` (shared by `assign` and `claim`) |
++| outbox messages `assignment`, `work_completed` | `services._assign` (assign and claim), `services.complete_work_order` |
+ | `use_parts`: usages, stock, `low_stock` messages | `services.use_parts_on_work_order` (shape checks in `validation.clean_use_parts_params`) |
+ | who may manage parts / read and write part usages | `permissions.can_manage_parts`, `can_read_part_usage`, `can_write_part_usages` |
+ | who can read/create/edit an order | `permissions.can_read_work_order`, `can_create_work_order_for`, `can_edit_work_order` |
+@@ -146,6 +150,16 @@
+ * The detail page's `data-field` elements cover every field including derived ones; the `id` is
+   shown in the heading. The `assign` form lists the eligible technicians; it is shown whenever
+   the caller may assign right now, even if no technician is eligible.
++* Workload cap: a technician who is the assignee of 3 or more `assigned`/`in_progress` orders cannot
++  receive another by `assign` (409, checked after the technician's 400 checks) or `claim` (409, after
++  the `open` check; 409 beats a 400 for unknown body keys). Re-assigning an order to its current
++  assignee adds nothing to their workload and is always allowed, even for a technician kept above the
++  cap by existing data (migration 0003 left such overloads as they were). The `assign` form lists only
++  technicians below the cap (plus the current assignee); the `claim` form is shown only when a claim
++  would succeed, workload included.
++* `dispatch` is stored, read-only (400 in create/PATCH bodies); migration 0003 backfilled it for
++  existing orders (`"self"` when the assignee is also `requested_by`, otherwise `"supervisor"`,
++  `null` without assignee). `seed.py` applies the same rule (`seed_dispatch`) because the seed predates it.
+ * `use_parts`: after 404/403/409 (assignee, `in_progress`), any item whose `part` is an existing
+   part at the order's asset's site and whose `quantity` is an integer >= 1 but more than the part's
+   stock makes the whole call a 409, even if other items (or extra keys) are invalid. A part at
+--- a/maintenance_app/migrations/0003_work_order_dispatch.sql
++++ b/maintenance_app/migrations/0003_work_order_dispatch.sql
+@@ -0,0 +1,12 @@
++-- How a work order got its assignee: 'supervisor' (assign), 'self' (claim) or NULL (never assigned).
++
++ALTER TABLE work_orders ADD COLUMN dispatch TEXT CHECK (dispatch IS NULL OR dispatch IN ('supervisor', 'self'));
++
++-- Existing orders (all statuses): an assignee who also requested the order took it themselves.
++UPDATE work_orders
++   SET dispatch = CASE
++                      WHEN assignee_id IS NULL THEN NULL
++                      WHEN assignee_id = requested_by_id THEN 'self'
++                      ELSE 'supervisor'
++                  END;
++
+--- a/maintenance_app/permissions.py
++++ b/maintenance_app/permissions.py
+@@ -3,7 +3,7 @@
+ ``asset`` is the asset record a work order is raised against (its ``site`` decides which
+ technicians may read the order and where requesters/technicians may raise orders).
+ These answer only "is this user allowed?"; state rules (409) live in ``services``.
+-Inactive staff keep all the rights of their role (``active`` only matters for ``assign``).
++Inactive staff keep all the rights of their role (``active`` only matters for ``assign`` and ``claim``).
+ """
+ 
+ # Work order fields only a supervisor may change; the requester sending one gets a 403.
+@@ -82,6 +82,11 @@
+     return is_supervisor(user)
+ 
+ 
++def can_claim_work_order(user, order, asset):
++    """``claim``: active technicians at the site of the order's asset."""
++    return is_technician(user) and user["active"] and user["site"] == asset["site"]
++
++
+ def can_work_on_work_order(user, order):
+     """``start`` and ``complete``: only the current assignee."""
+     return is_assignee_of(user, order)
+--- a/maintenance_app/repository.py
++++ b/maintenance_app/repository.py
+@@ -140,7 +140,7 @@
+ _WORK_ORDER_SELECT = """
+     SELECT w.id, w.asset_id, w.title, w.description, w.priority, w.status, w.requested_by_id,
+            w.created_at, w.assignee_id, w.started_at, w.completed_at, w.resolution, w.labor_minutes,
+-           w.cancel_reason,
++           w.cancel_reason, w.dispatch,
+            (SELECT COALESCE(SUM(u.quantity * u.unit_cost), 0) FROM part_usages u
+              WHERE u.work_order_id = w.id) AS parts_cost
+     FROM work_orders w
+@@ -165,6 +165,7 @@
+         "resolution": row["resolution"],
+         "labor_minutes": row["labor_minutes"],
+         "cancel_reason": row["cancel_reason"],
++        "dispatch": row["dispatch"],
+         "parts_cost": round(row["parts_cost"], 2),
+     }
+ 
+@@ -192,10 +193,22 @@
+     _update("work_orders", columns, work_order_id, values)
+ 
+ 
+-def mark_work_order_assigned(work_order_id, technician_id):
++def mark_work_order_assigned(work_order_id, technician_id, dispatch):
++    """Set the assignee; ``dispatch`` records who chose them (``"supervisor"`` or ``"self"``)."""
+     get_db().execute(
+-        "UPDATE work_orders SET status = 'assigned', assignee_id = ? WHERE id = ?", (technician_id, work_order_id)
+-    )
++        "UPDATE work_orders SET status = 'assigned', assignee_id = ?, dispatch = ? WHERE id = ?",
++        (technician_id, dispatch, work_order_id),
++    )
++
++
++def count_assigned_work(staff_id, statuses):
++    """How many work orders in ``statuses`` have ``staff_id`` as assignee."""
++    placeholders = ", ".join("?" for _ in statuses)
++    row = get_db().execute(
++        f"SELECT COUNT(*) FROM work_orders WHERE assignee_id = ? AND status IN ({placeholders})",
++        (staff_id, *statuses),
++    ).fetchone()
++    return row[0]
+ 
+ 
+ def mark_work_order_started(work_order_id, started_at):
+--- a/maintenance_app/routes_api.py
++++ b/maintenance_app/routes_api.py
+@@ -118,6 +118,11 @@
+     return services.assign_work_order(current_context(), work_order_id, _body())
+ 
+ 
++@bp.post("/work_orders/<int:work_order_id>/claim")
++def claim_work_order(work_order_id):
++    return services.claim_work_order(current_context(), work_order_id, _body())
++
++
+ @bp.post("/work_orders/<int:work_order_id>/start")
+ def start_work_order(work_order_id):
+     return services.start_work_order(current_context(), work_order_id, _body())
+--- a/maintenance_app/routes_ui.py
++++ b/maintenance_app/routes_ui.py
+@@ -152,7 +152,7 @@
+     order = services.get_work_order(ctx, work_order_id)
+     actions = services.work_order_actions(ctx, order)
+     asset = services.get_asset(ctx, order["asset"])
+-    technicians = services.eligible_technicians(asset) if "assign" in actions else []
++    technicians = services.eligible_technicians(order, asset) if "assign" in actions else []
+     parts = services.usable_parts(asset) if "use_parts" in actions else []
+     return render_template("work_orders/detail.html", order=order, actions=actions, technicians=technicians,
+                            parts=parts)
+@@ -161,6 +161,12 @@
+ @bp.post("/work_orders/<int:work_order_id>/assign")
+ def assign_work_order(work_order_id):
+     services.assign_work_order(current_context(), work_order_id, _form_values({"technician": _integer}))
++    return _redirect_to_work_order(work_order_id)
++
++
++@bp.post("/work_orders/<int:work_order_id>/claim")
++def claim_work_order(work_order_id):
++    services.claim_work_order(current_context(), work_order_id, {})
+     return _redirect_to_work_order(work_order_id)
+ 
+ 
+--- a/maintenance_app/services.py
++++ b/maintenance_app/services.py
+@@ -7,6 +7,7 @@
+ Work order workflow::
+ 
+     open --assign--> assigned --start--> in_progress --complete--> completed
++    open --claim---> assigned                                    (technician self-dispatch)
+                      assigned --assign--> assigned               (re-assignment)
+     open | assigned | in_progress --cancel--> cancelled          (requester: only from open)
+     in_progress --use_parts--> in_progress                       (consumes stock, records part usages)
+@@ -17,13 +18,14 @@
+ from .db import transaction
+ from .errors import Conflict, Forbidden, NotFound, ValidationError
+ from .filters import apply_filters
+-from .validation import UNFINISHED_STATUSES
++from .validation import DISPATCH_SELF, DISPATCH_SUPERVISOR, UNFINISHED_STATUSES, WORKLOAD_STATUSES
+ 
+ # Days from the creation date to ``due_date``, by priority.
+ DUE_DAYS = {"urgent": 1, "normal": 7, "low": 30}
+ 
+ # Statuses from which each state-dependent operation may start.
+ ASSIGNABLE_STATUSES = ("open", "assigned")
++CLAIMABLE_STATUSES = ("open",)
+ STARTABLE_STATUSES = ("assigned",)
+ COMPLETABLE_STATUSES = ("in_progress",)
+ PARTS_USABLE_STATUSES = ("in_progress",)
+@@ -32,11 +34,15 @@
+ SUPERVISOR_EDITABLE_STATUSES = UNFINISHED_STATUSES
+ SUPERVISOR_CANCELLABLE_STATUSES = UNFINISHED_STATUSES
+ 
++# A technician who is already the assignee of this many orders in ``WORKLOAD_STATUSES`` cannot
++# receive another one (by ``assign`` or ``claim``). Existing overloads are kept as they are.
++WORKLOAD_CAP = 3
++
+ STAFF_FIELDS = ("id", "username", "name", "role", "site", "active")
+ ASSET_FIELDS = ("id", "tag", "name", "site", "criticality", "retired", "open_orders")
+ WORK_ORDER_FIELDS = ("id", "asset", "title", "description", "priority", "status", "requested_by",
+                      "created_at", "assignee", "started_at", "completed_at", "resolution",
+-                     "labor_minutes", "cancel_reason", "parts_cost", "due_date", "overdue")
++                     "labor_minutes", "cancel_reason", "dispatch", "parts_cost", "due_date", "overdue")
+ PART_FIELDS = ("id", "sku", "name", "site", "unit_cost", "quantity", "reorder_level", "low_stock")
+ PART_USAGE_FIELDS = ("id", "work_order", "part", "quantity", "unit_cost", "used_by", "used_at")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+@@ -258,6 +264,14 @@
+     _require_status(order, ASSIGNABLE_STATUSES, "Only open or assigned work orders can be assigned.")
+ 
+ 
++def _authorize_claim(user, order):
++    asset = repository.get_asset(order["asset"])
++    if not permissions.can_claim_work_order(user, order, asset):
++        raise Forbidden("Only active technicians at the asset's site can claim work orders.")
++    _require_status(order, CLAIMABLE_STATUSES, "Only open work orders can be claimed.")
++    _ensure_below_workload_cap(user["id"])
++
++
+ def _authorize_start(user, order):
+     if not permissions.can_work_on_work_order(user, order):
+         raise Forbidden("Only the assignee can start the work order.")
+@@ -287,6 +301,7 @@
+ 
+ WORK_ORDER_ACTIONS = {
+     "assign": _authorize_assign,
++    "claim": _authorize_claim,
+     "start": _authorize_start,
+     "complete": _authorize_complete,
+     "cancel": _authorize_cancel,
+@@ -313,12 +328,31 @@
+         technician_id = validation.clean_assign_params(params)
+         asset = repository.get_asset(order["asset"])
+         _ensure_can_be_assigned(repository.get_staff(technician_id), asset)
+-        repository.mark_work_order_assigned(work_order_id, technician_id)
+-        repository.add_outbox_message(
+-            "assignment", {"work_order": work_order_id, "asset": asset["id"], "technician": technician_id},
+-            ctx.now_text,
+-        )
+-    return present_work_order(ctx, repository.get_work_order(work_order_id))
++        # Re-assigning an order to its current assignee adds nothing to their workload, so it is
++        # always allowed (even for a technician kept above the cap by existing data).
++        if technician_id != order["assignee"]:
++            _ensure_below_workload_cap(technician_id)
++        _assign(ctx, order, technician_id, DISPATCH_SUPERVISOR)
++    return present_work_order(ctx, repository.get_work_order(work_order_id))
++
++
++def claim_work_order(ctx, work_order_id, params):
++    """The calling technician takes an open order for themselves (self-dispatch)."""
++    with transaction():
++        order = _load_work_order(work_order_id)
++        _authorize_claim(ctx.user, order)
++        validation.clean_no_params(params)
++        _assign(ctx, order, ctx.user["id"], DISPATCH_SELF)
++    return present_work_order(ctx, repository.get_work_order(work_order_id))
++
++
++def _assign(ctx, order, technician_id, dispatch):
++    """Make ``technician_id`` the assignee and emit the ``assignment`` message (assign and claim)."""
++    repository.mark_work_order_assigned(order["id"], technician_id, dispatch)
++    repository.add_outbox_message(
++        "assignment", {"work_order": order["id"], "asset": order["asset"], "technician": technician_id},
++        ctx.now_text,
++    )
+ 
+ 
+ def start_work_order(ctx, work_order_id, params):
+@@ -410,9 +444,13 @@
+     return [p for p in repository.list_parts() if p["site"] == asset["site"]]
+ 
+ 
+-def eligible_technicians(asset):
+-    """Staff ``assign`` accepts for orders on ``asset``: active technicians at its site."""
+-    return [s for s in repository.list_staff() if _assignment_problem(s, asset) is None]
++def eligible_technicians(order, asset):
++    """Staff ``assign`` accepts for ``order`` on ``asset``: active technicians at its site who are
++    below the workload cap (or already its assignee)."""
++    return [
++        s for s in repository.list_staff()
++        if _assignment_problem(s, asset) is None and (s["id"] == order["assignee"] or not _at_workload_cap(s["id"]))
++    ]
+ 
+ 
+ def _ensure_can_be_assigned(staff, asset):
+@@ -433,6 +471,15 @@
+     return None
+ 
+ 
++def _at_workload_cap(staff_id):
++    return repository.count_assigned_work(staff_id, WORKLOAD_STATUSES) >= WORKLOAD_CAP
++
++
++def _ensure_below_workload_cap(staff_id):
++    if _at_workload_cap(staff_id):
++        raise Conflict(f"The technician already has {WORKLOAD_CAP} or more assigned or in-progress work orders.")
++
++
+ # --- work orders: helpers -------------------------------------------------------------
+ 
+ def _load_work_order(work_order_id):
+--- a/maintenance_app/templates/work_orders/detail.html
++++ b/maintenance_app/templates/work_orders/detail.html
+@@ -17,6 +17,7 @@
+   {{ field("resolution", order.resolution) }}
+   {{ field("labor_minutes", order.labor_minutes) }}
+   {{ field("cancel_reason", order.cancel_reason) }}
++  {{ field("dispatch", order.dispatch) }}
+   {{ field("parts_cost", order.parts_cost, href=url_for('ui.list_part_usages', work_order=order.id)) }}
+   {{ field("due_date", order.due_date) }}
+   {{ field("overdue", order.overdue) }}
+@@ -32,6 +33,11 @@
+     </select>
+   </label>
+   <button type="submit">{{ "Re-assign" if order.status == "assigned" else "Assign" }}</button>
++</form>
++{% endif %}
++{% if "claim" in actions %}
++<form data-action="claim" method="post" action="{{ url_for('ui.claim_work_order', work_order_id=order.id) }}">
++  <button type="submit">Claim for myself</button>
+ </form>
+ {% endif %}
+ {% if "start" in actions %}
+--- a/maintenance_app/templates/work_orders/list.html
++++ b/maintenance_app/templates/work_orders/list.html
+@@ -4,7 +4,7 @@
+ <h1>Work orders</h1>
+ <p><a href="{{ url_for('ui.new_work_order') }}">New work order</a></p>
+ <table>
+-  <thead><tr><th>Order</th><th>Asset</th><th>Title</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Due</th><th>Overdue</th></tr></thead>
++  <thead><tr><th>Order</th><th>Asset</th><th>Title</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Dispatch</th><th>Due</th><th>Overdue</th></tr></thead>
+   <tbody>
+   {% for order in work_orders %}
+     <tr data-id="{{ order.id }}">
+@@ -14,6 +14,7 @@
+       <td>{{ order.priority }}</td>
+       <td>{{ order.status }}</td>
+       <td>{{ order.assignee|display }}</td>
++      <td>{{ order.dispatch|display }}</td>
+       <td>{{ order.due_date }}</td>
+       <td>{{ order.overdue|display }}</td>
+     </tr>
+--- a/maintenance_app/validation.py
++++ b/maintenance_app/validation.py
+@@ -17,6 +17,11 @@
+ WORK_ORDER_STATUSES = ("open", "assigned", "in_progress", "completed", "cancelled")
+ # Work orders in these states still need work; they count towards an asset's ``open_orders``.
+ UNFINISHED_STATUSES = ("open", "assigned", "in_progress")
++# Work orders in these states count towards their assignee's workload.
++WORKLOAD_STATUSES = ("assigned", "in_progress")
++# How a work order got its assignee (``dispatch``): by ``assign`` or by the technician's ``claim``.
++DISPATCH_SUPERVISOR = "supervisor"
++DISPATCH_SELF = "self"
+ 
+ 
+ class FieldInvalid(Exception):
+@@ -134,7 +139,7 @@
+ WORK_ORDER_EDITABLE = ("title", "description", "priority")
+ # Maintained by the system and the workflow actions; clients sending them get a 400.
+ WORK_ORDER_READ_ONLY = ("id", "status", "requested_by", "created_at", "assignee", "started_at",
+-                        "completed_at", "resolution", "labor_minutes", "cancel_reason",
++                        "completed_at", "resolution", "labor_minutes", "cancel_reason", "dispatch",
+                         "due_date", "overdue", "parts_cost")
+ 
+ PART_WRITABLE = ("sku", "name", "site", "unit_cost", "quantity", "reorder_level")
+--- a/seed.py
++++ b/seed.py
+@@ -4,6 +4,8 @@
+ 
+ Seed records keep their ids. Any existing database file is replaced. The starting spare
+ parts are data in migration ``0002_spare_parts.sql``, so they are created by ``db.migrate``.
++The seed has no ``dispatch`` values; work orders get the same ones migration
++``0003_work_order_dispatch.sql`` gave the existing orders (see ``seed_dispatch``).
+ """
+ import json
+ import os
+@@ -16,6 +18,13 @@
+ 
+ DATABASE_PATH = os.path.join(HERE, "data.db")
+ SEED_PATH = os.path.join(HERE, "seed_data.json")
++
++
++def seed_dispatch(order):
++    """``dispatch`` for a seed work order: as backfilled by migration 0003."""
++    if order["assignee"] is None:
++        return None
++    return "self" if order["assignee"] == order["requested_by"] else "supervisor"
+ 
+ 
+ def load_seed(conn, seed):
+@@ -32,10 +41,11 @@
+     )
+     conn.executemany(
+         "INSERT INTO work_orders (id, asset_id, title, description, priority, status, requested_by_id,"
+-        " created_at, assignee_id, started_at, completed_at, resolution, labor_minutes, cancel_reason)"
++        " created_at, assignee_id, started_at, completed_at, resolution, labor_minutes, cancel_reason, dispatch)"
+         " VALUES (:id, :asset, :title, :description, :priority, :status, :requested_by,"
+-        " :created_at, :assignee, :started_at, :completed_at, :resolution, :labor_minutes, :cancel_reason)",
+-        seed["work_orders"],
++        " :created_at, :assignee, :started_at, :completed_at, :resolution, :labor_minutes, :cancel_reason,"
++        " :dispatch)",
++        [{**order, "dispatch": seed_dispatch(order)} for order in seed["work_orders"]],
+     )
+ 
+ 
+--- a/tests/test_maintenance_basics.py
++++ b/tests/test_maintenance_basics.py
+@@ -5,10 +5,13 @@
+ from accept_client import fresh_app
+ 
+ DERIVED = {"assets": ("open_orders",), "work_orders": ("due_date", "overdue", "parts_cost")}
++# Stored fields added after the seed was written (filled in by their migrations).
++NOT_IN_SEED = {"work_orders": ("dispatch",)}
+ 
+ 
+ def _without_derived(collection, items):
+-    return [{k: v for k, v in item.items() if k not in DERIVED.get(collection, ())} for item in items]
++    left_out = DERIVED.get(collection, ()) + NOT_IN_SEED.get(collection, ())
++    return [{k: v for k, v in item.items() if k not in left_out} for item in items]
+ 
+ 
+ def test_missing_or_unknown_user_is_401(app):
+--- a/tests/test_maintenance_dispatch.py
++++ b/tests/test_maintenance_dispatch.py
+@@ -0,0 +1,217 @@
++"""Technician self-dispatch (claim), the workload cap and the dispatch field.
++
++Workloads in the seed (assigned + in_progress orders per assignee): nils 3 (49, 62, 77),
++olga 2 (75, 79), ravi 4 (53, 56, 68, 73: kept above the cap), sara 3, tess 2, umar 1 (inactive), wade 1.
++Open North orders: 38, 52, 63, 65, 74, 82; open South orders: 54, 60, 71, 76, 78.
++"""
++import os
++import sqlite3
++
++from accept_client import parse_ui
++
++NOW = "2026-03-02T09:30:00"
++
++
++def _outbox(app):
++    return app.get("/api/_outbox", user="ruth").json["items"]
++
++
++def _order(app, order_id):
++    return app.get(f"/api/work_orders/{order_id}", user="sofia").json
++
++
++def _actions(app, order_id, user):
++    return parse_ui(app.get(f"/ui/work_orders/{order_id}", user=user).text).actions
++
++
++# --- claim ----------------------------------------------------------------------------
++
++def test_claim(app):
++    r = app.post("/api/work_orders/74/claim", {}, user="olga", now=NOW)
++    assert r.status == 200
++    assert (r.json["status"], r.json["assignee"], r.json["dispatch"]) == ("assigned", 9, "self")
++    assert _outbox(app) == [
++        {"id": 1, "channel": "assignment", "payload": {"work_order": 74, "asset": 1, "technician": 9},
++         "created_at": NOW}
++    ]
++
++
++def test_claim_permission(app):
++    for user in ("ruth", "sofia", "tomas", "umar", "ravi", "tess"):  # requester, supervisors, inactive, other sites
++        assert app.post("/api/work_orders/74/claim", {}, user=user).status == 403, user
++    assert app.post("/api/work_orders/2/claim", {}, user="ruth").status == 403  # 403 beats 409
++    assert app.post("/api/work_orders/74/claim", {"x": 1}, user="ruth").status == 403  # 403 beats 400
++    assert app.post("/api/work_orders/999/claim", {}, user="olga").status == 404
++    assert _order(app, 74)["status"] == "open" and _outbox(app) == []
++
++
++def test_claim_uses_current_site_and_active_flag(app):
++    app.patch("/api/staff/9", {"active": False}, user="sofia")
++    assert app.post("/api/work_orders/74/claim", {}, user="olga").status == 403
++    app.patch("/api/staff/9", {"active": True, "site": "South"}, user="sofia")
++    assert app.post("/api/work_orders/74/claim", {}, user="olga").status == 403
++    assert app.post("/api/work_orders/54/claim", {}, user="olga").status == 200
++
++
++def test_claim_only_open_orders(app):
++    for order_id in (75, 79, 4, 3):  # North: assigned, in_progress, completed, cancelled
++        assert app.post(f"/api/work_orders/{order_id}/claim", {}, user="olga").status == 409
++    assert app.post("/api/work_orders/79/claim", {"x": 1}, user="olga").status == 409  # 409 beats 400
++    assert app.post("/api/work_orders/74/claim", {"x": 1}, user="olga").status == 400
++    assert app.post("/api/work_orders/74/claim", [], user="olga").status == 400
++    assert _order(app, 74)["status"] == "open" and _outbox(app) == []
++
++
++def test_claim_workload_cap(app):
++    assert app.post("/api/work_orders/74/claim", {}, user="nils").status == 409  # already 3
++    assert app.post("/api/work_orders/54/claim", {}, user="ravi").status == 409  # already 4
++    assert app.post("/api/work_orders/74/claim", {}, user="olga").status == 200  # 2 -> 3
++    assert app.post("/api/work_orders/82/claim", {}, user="olga").status == 409
++    assert app.post("/api/work_orders/82/claim", {"x": 1}, user="olga").status == 409  # 409 beats 400
++    assert [m["payload"]["work_order"] for m in _outbox(app)] == [74]
++    assert _order(app, 82)["status"] == "open"
++
++
++def test_finished_and_cancelled_orders_do_not_count(app):
++    app.post("/api/work_orders/77/cancel", {"reason": "dup"}, user="sofia")  # nils 3 -> 2
++    assert app.post("/api/work_orders/74/claim", {}, user="nils").status == 200
++    app.post("/api/work_orders/79/complete", {"resolution": "ok", "labor_minutes": 5}, user="olga")  # olga 2 -> 1
++    assert app.post("/api/work_orders/82/claim", {}, user="olga").status == 200
++    assert app.post("/api/work_orders/63/claim", {}, user="olga").status == 200
++    assert app.post("/api/work_orders/65/claim", {}, user="olga").status == 409
++
++
++def test_claimed_order_follows_the_normal_workflow(app):
++    app.post("/api/work_orders/74/claim", {}, user="olga")
++    assert app.post("/api/work_orders/74/cancel", {"reason": "x"}, user="ruth").status == 409  # requester: open only
++    assert app.patch("/api/work_orders/74", {"title": "x"}, user="ruth").status == 409
++    assert app.post("/api/work_orders/74/start", {}, user="nils").status == 403
++    assert app.post("/api/work_orders/74/start", {}, user="olga").status == 200
++    r = app.post("/api/work_orders/74/complete", {"resolution": "Done", "labor_minutes": 15}, user="olga")
++    assert r.status == 200 and r.json["status"] == "completed" and r.json["dispatch"] == "self"
++    assert _outbox(app)[-1]["payload"] == {"work_order": 74, "asset": 1, "technician": 9, "labor_minutes": 15,
++                                           "parts_cost": 0}
++
++
++def test_supervisor_can_reassign_a_claimed_order(app):
++    app.post("/api/work_orders/74/claim", {}, user="olga")
++    r = app.post("/api/work_orders/74/assign", {"technician": 9}, user="sofia")
++    assert r.status == 200 and r.json["dispatch"] == "supervisor"
++
++
++# --- workload cap for assign ----------------------------------------------------------
++
++def test_assign_workload_cap(app):
++    assert app.post("/api/work_orders/74/assign", {"technician": 8}, user="sofia").status == 409  # nils: 3
++    assert app.post("/api/work_orders/54/assign", {"technician": 10}, user="tomas").status == 409  # ravi: 4
++    assert app.post("/api/work_orders/54/assign", {"technician": 11}, user="tomas").status == 409  # sara: 3
++    assert _order(app, 74)["status"] == "open" and _order(app, 54)["status"] == "open"
++    assert _outbox(app) == []
++    assert app.post("/api/work_orders/74/assign", {"technician": 9}, user="sofia").status == 200  # olga: 2 -> 3
++    assert app.post("/api/work_orders/82/assign", {"technician": 9}, user="sofia").status == 409
++
++
++def test_assign_check_order(app):
++    assert app.post("/api/work_orders/74/assign", {"technician": 8}, user="ruth").status == 403
++    assert app.post("/api/work_orders/49/assign", {"technician": 8}, user="sofia").status == 409  # in_progress
++    assert app.post("/api/work_orders/54/assign", {"technician": 8}, user="tomas").status == 400  # other site
++    assert app.post("/api/work_orders/54/assign", {"technician": 8, "x": 1}, user="tomas").status == 400
++    assert app.post("/api/work_orders/74/assign", {"technician": 10}, user="sofia").status == 400  # ravi elsewhere
++    assert app.post("/api/work_orders/74/assign", {"technician": 8}, user="sofia").status == 409  # valid, at cap
++
++
++def test_reassign_to_current_assignee_is_always_allowed(app):
++    r = app.post("/api/work_orders/77/assign", {"technician": 8}, user="sofia")  # nils at 3
++    assert r.status == 200 and r.json["dispatch"] == "supervisor"
++    r = app.post("/api/work_orders/68/assign", {"technician": 10}, user="tomas")  # ravi above the cap
++    assert r.status == 200 and r.json["assignee"] == 10
++    assert app.post("/api/work_orders/77/assign", {"technician": 9}, user="sofia").status == 200  # olga: 2 -> 3
++    assert app.post("/api/work_orders/77/assign", {"technician": 8}, user="sofia").status == 200  # back to nils (2)
++    assert len(_outbox(app)) == 4
++
++
++def test_overload_is_kept_until_it_drops_below_the_cap(app):
++    workload = app.get("/api/work_orders?assignee=10&status=assigned", user="sofia").json["items"]
++    workload += app.get("/api/work_orders?assignee=10&status=in_progress", user="sofia").json["items"]
++    assert sorted(o["id"] for o in workload) == [53, 56, 68, 73]
++    app.post("/api/work_orders/73/cancel", {"reason": "x"}, user="tomas")  # 4 -> 3: still at the cap
++    assert app.post("/api/work_orders/54/claim", {}, user="ravi").status == 409
++    app.post("/api/work_orders/68/assign", {"technician": 15}, user="tomas")  # 3 -> 2
++    assert app.post("/api/work_orders/54/claim", {}, user="ravi").status == 200
++
++
++# --- dispatch field -------------------------------------------------------------------
++
++def test_dispatch_is_read_only(app):
++    body = {"asset": 1, "title": "Noise", "priority": "low"}
++    assert app.post("/api/work_orders", {**body, "dispatch": None}, user="ruth").status == 400
++    assert app.post("/api/work_orders", {**body, "dispatch": "self"}, user="ruth").status == 400
++    r = app.post("/api/work_orders", body, user="ruth")
++    assert r.status == 201 and r.json["dispatch"] is None
++    assert app.patch("/api/work_orders/74", {"dispatch": "self"}, user="sofia").status == 400
++    assert app.patch("/api/work_orders/74", {"dispatch": None}, user="ruth").status == 400
++    assert app.patch("/api/work_orders/74", {"dispatch": "self"}, user="kofi").status == 403  # 403 beats 400
++
++
++def test_dispatch_filter(app, seed):
++    def ids(query):
++        return [o["id"] for o in app.get(f"/api/work_orders?{query}", user="sofia").json["items"]]
++
++    unassigned = [o["id"] for o in seed["work_orders"] if o["assignee"] is None]
++    own = [o["id"] for o in seed["work_orders"] if o["assignee"] is not None and o["assignee"] == o["requested_by"]]
++    assert ids("dispatch=null") == unassigned
++    assert ids("dispatch=self") == own
++    assert len(ids("dispatch=supervisor")) == len(seed["work_orders"]) - len(unassigned) - len(own)
++    app.post("/api/work_orders/74/claim", {}, user="olga")
++    assert 74 in ids("dispatch=self&status=assigned")
++
++
++def test_existing_orders_are_migrated(app, seed):
++    orders = {o["id"]: o for o in app.get("/api/work_orders", user="sofia").json["items"]}
++    for expected in seed["work_orders"]:
++        if expected["assignee"] is None:
++            dispatch = None
++        elif expected["assignee"] == expected["requested_by"]:
++            dispatch = "self"
++        else:
++            dispatch = "supervisor"
++        assert orders[expected["id"]]["dispatch"] == dispatch, expected["id"]
++    assert orders[22]["dispatch"] == "self" and orders[22]["status"] == "cancelled"  # all statuses
++    assert orders[13]["dispatch"] == "supervisor" and orders[1]["dispatch"] is None
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    assert conn.execute("SELECT COUNT(*) FROM outbox").fetchone()[0] == 0
++    conn.close()
++
++
++# --- UI -------------------------------------------------------------------------------
++
++def test_claim_form_shown_exactly_when_claim_would_succeed(app):
++    assert "claim" in _actions(app, 74, "olga")
++    assert "claim" not in _actions(app, 74, "nils")  # at the cap
++    assert "claim" not in _actions(app, 74, "umar")  # inactive
++    assert "claim" not in _actions(app, 74, "sofia")  # supervisor
++    assert "claim" not in _actions(app, 74, "ruth")  # requester
++    assert "claim" not in _actions(app, 75, "olga")  # not open
++    assert "claim" not in _actions(app, 54, "ravi")  # above the cap
++    assert _actions(app, 54, "wade") == ["claim"]
++    app.post("/api/work_orders/74/claim", {}, user="olga")
++    assert "claim" not in _actions(app, 82, "olga")  # now at the cap
++    page = parse_ui(app.get("/ui/work_orders/74", user="olga").text)
++    assert page.fields["dispatch"] == "self"
++
++
++def test_assign_form_lists_technicians_below_the_cap(app):
++    page = app.get("/ui/work_orders/74", user="sofia").text
++    assert 'value="9"' in page and 'value="8"' not in page  # nils is at the cap
++    page = app.get("/ui/work_orders/77", user="sofia").text
++    assert 'value="8"' in page  # ... but stays selectable for his own order
++
++
++def test_ui_claim_form_posts_through_service(app):
++    from test_maintenance_ui import _post_form
++
++    status, headers, _ = _post_form(app, "/ui/work_orders/74/claim", {}, "olga")
++    assert status == 303 and headers["Location"].endswith("/ui/work_orders/74")
++    assert _order(app, 74)["dispatch"] == "self"
++    assert _post_form(app, "/ui/work_orders/82/claim", {}, "olga")[0] == 409
++    assert _post_form(app, "/ui/work_orders/82/claim", {}, "ruth")[0] == 403
+--- a/tests/test_maintenance_ui.py
++++ b/tests/test_maintenance_ui.py
+@@ -46,7 +46,8 @@
+         "asset": "13", "title": "Zone 3 fault", "description": "", "priority": "urgent", "status": "in_progress",
+         "requested_by": "1", "created_at": "2026-02-28T15:00:00", "assignee": "9",
+         "started_at": "2026-02-28T16:00:00", "completed_at": "", "resolution": "", "labor_minutes": "",
+-        "cancel_reason": "", "parts_cost": "0", "due_date": "2026-03-01", "overdue": "false",
++        "cancel_reason": "", "dispatch": "supervisor", "parts_cost": "0", "due_date": "2026-03-01",
++        "overdue": "false",
+     }
+     assert page.actions == ["complete", "use_parts"]
+     assert app.get("/ui/work_orders/79", user="ruth").status == 403
+@@ -65,7 +66,7 @@
+ def test_actions_depend_on_role_and_state(app):
+     assert _actions(app, 74, "sofia") == ["assign", "cancel"]  # open
+     assert _actions(app, 74, "ruth") == ["cancel"]  # requester, open
+-    assert _actions(app, 74, "olga") == []  # technician at the site
++    assert _actions(app, 74, "olga") == ["claim"]  # technician at the site, below the workload cap
+     assert _actions(app, 77, "sofia") == ["assign", "cancel"]  # assigned: re-assign
+     assert _actions(app, 77, "ruth") == []  # requester, no longer open
+     assert _actions(app, 77, "nils") == ["start"]
+@@ -99,10 +100,11 @@
+     created = app.get("/api/work_orders/83", user="ruth").json
+     assert (created["asset"], created["description"], created["priority"]) == (2, None, "low")
+     assert _post_form(app, "/ui/work_orders", {"asset": "14", "title": "x", "priority": "low"}, "ruth")[0] == 403
+-    assert _post_form(app, "/ui/work_orders/83/assign", {"technician": "8"}, "sofia")[0] == 303
+-    assert _post_form(app, "/ui/work_orders/83/start", {}, "nils")[0] == 303
+-    assert _post_form(app, "/ui/work_orders/83/complete", {"resolution": "Fixed", "labor_minutes": "x"}, "nils")[0] == 400
+-    assert _post_form(app, "/ui/work_orders/83/complete", {"resolution": "Fixed", "labor_minutes": "20"}, "nils")[0] == 303
++    assert _post_form(app, "/ui/work_orders/83/assign", {"technician": "8"}, "sofia")[0] == 409  # nils is at the cap
++    assert _post_form(app, "/ui/work_orders/83/assign", {"technician": "9"}, "sofia")[0] == 303
++    assert _post_form(app, "/ui/work_orders/83/start", {}, "olga")[0] == 303
++    assert _post_form(app, "/ui/work_orders/83/complete", {"resolution": "Fixed", "labor_minutes": "x"}, "olga")[0] == 400
++    assert _post_form(app, "/ui/work_orders/83/complete", {"resolution": "Fixed", "labor_minutes": "20"}, "olga")[0] == 303
+     assert app.get("/api/work_orders/83", user="ruth").json["labor_minutes"] == 20
+     assert _post_form(app, "/ui/work_orders/74/cancel", {"reason": ""}, "ruth")[0] == 400
+     assert _post_form(app, "/ui/work_orders/74/cancel", {"reason": "Gone"}, "ruth")[0] == 303
+--- a/tests/test_maintenance_work_orders.py
++++ b/tests/test_maintenance_work_orders.py
+@@ -79,7 +79,7 @@
+         "id": 83, "asset": 1, "title": "Rattling fan", "description": None, "priority": "normal",
+         "status": "open", "requested_by": 3, "created_at": "2026-03-03T08:15:00", "assignee": None,
+         "started_at": None, "completed_at": None, "resolution": None, "labor_minutes": None,
+-        "cancel_reason": None, "due_date": "2026-03-10", "overdue": False, "parts_cost": 0,
++        "cancel_reason": None, "dispatch": None, "due_date": "2026-03-10", "overdue": False, "parts_cost": 0,
+     }
+     assert app.get("/api/work_orders/83", user="ruth").json == r.json
+     assert app.get("/api/_outbox", user="ruth").json["items"] == []

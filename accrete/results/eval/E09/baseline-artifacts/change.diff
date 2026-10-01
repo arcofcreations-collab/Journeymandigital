@@ -1,0 +1,675 @@
+--- a/README.md
++++ b/README.md
+@@ -54,6 +54,8 @@
+ | borrow / return | `services.borrow_book`, `services.return_loan` |
+ | outbox message `loan_created` | `services.borrow_book` → `repository.add_outbox_message` |
+ | who can read/edit what | `permissions.py` |
++| guardians: rights over dependants | `permissions._acts_for`, `RequestContext.dependant_ids` |
++| guardian validation (no chains), guardian delete → 409 | `services._ensure_valid_guardian`, `services.delete_member` |
+ | actions shown on detail pages | `services.book_actions`, `services.loan_actions` |
+ 
+ ## Running the tests
+@@ -105,4 +107,10 @@
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the
+   heading. The borrow form is shown when the book is available and (for members) the caller
+   is active with fewer than 3 open loans; librarians get a member picker.
++* Household guardians (`members.guardian`, migration 0002): a guardian may read a dependant's
++  record and loans, borrow for them (`{"member": id}`) and return their loans, but not edit or
++  delete them; the rights ignore `active` and follow the current `guardian` values. Only
++  librarians set `guardian`; it must be null or another existing member without a guardian, and a
++  member who is a guardian cannot get one. Deleting a guardian → 409. The borrow form offers
++  guardians their eligible dependants.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/library_app/auth.py
++++ b/library_app/auth.py
+@@ -35,6 +35,12 @@
+     def is_librarian(self) -> bool:
+         return self.user["role"] == "librarian"
+ 
++    @property
++    def dependant_ids(self) -> frozenset:
++        """Ids of the members the caller is guardian of, read from the database on each
++        access so rights follow the current ``guardian`` values."""
++        return repository.dependant_ids(self.user["id"])
++
+ 
+ def parse_now(header):
+     if not header:
+--- a/library_app/migrations/0002_member_guardian.sql
++++ b/library_app/migrations/0002_member_guardian.sql
+@@ -0,0 +1,12 @@
++-- Household guardians: a member may have another member as guardian, who can then read
++-- the dependant's record and loans, borrow for them and return their loans.
++-- No chains: a guardian has no guardian of their own (enforced by services).
++
++ALTER TABLE members ADD COLUMN guardian_id INTEGER REFERENCES members (id);
++
++CREATE INDEX members_guardian_id ON members (guardian_id);
++
++-- Existing households (all other members keep guardian_id = NULL).
++UPDATE members SET guardian_id = 4  WHERE id IN (5, 10);  -- eli, jo   -> dara
++UPDATE members SET guardian_id = 6  WHERE id = 7;         -- gus       -> fatima
++UPDATE members SET guardian_id = 11 WHERE id = 12;        -- lena      -> kemal
+--- a/library_app/permissions.py
++++ b/library_app/permissions.py
+@@ -1,6 +1,10 @@
+ """Who may do what. Pure functions of the calling member and the records involved.
+ 
+ These answer only "is this user allowed?"; state rules (409) live in ``services``.
++
++``dependants`` is the set of member ids whose ``guardian`` is the caller (see
++``RequestContext.dependant_ids``). A guardian may read a dependant's record and loans,
++borrow for them and return their loans, but not edit or delete their record.
+ """
+ 
+ MEMBER_SELF_EDITABLE = {"name"}
+@@ -12,8 +16,13 @@
+ 
+ # --- members --------------------------------------------------------------------------
+ 
+-def can_read_member(user, member):
+-    return is_librarian(user) or member["id"] == user["id"]
++def _acts_for(user, member_id, dependants):
++    """Is ``member_id`` the caller themselves or one of their dependants?"""
++    return member_id == user["id"] or member_id in dependants
++
++
++def can_read_member(user, member, dependants):
++    return is_librarian(user) or _acts_for(user, member["id"], dependants)
+ 
+ 
+ def can_create_member(user):
+@@ -42,17 +51,23 @@
+     return is_librarian(user)
+ 
+ 
+-def can_borrow_for(user, member_id):
+-    """May ``user`` borrow a book on behalf of ``member_id`` (None means themselves)?"""
+-    return member_id is None or member_id == user["id"] or is_librarian(user)
++def can_borrow_for(user, member_id, dependants):
++    """May ``user`` borrow a book on behalf of ``member_id`` (None means themselves)?
++
++    ``member_id`` is the raw request value; anything that is not a plain integer is left
++    to validation (librarians) or refused (everyone else).
++    """
++    if member_id is None or is_librarian(user):
++        return True
++    return isinstance(member_id, int) and not isinstance(member_id, bool) and _acts_for(user, member_id, dependants)
+ 
+ 
+ # --- loans ----------------------------------------------------------------------------
+ 
+-def can_read_loan(user, loan):
+-    return is_librarian(user) or loan["member"] == user["id"]
++def can_read_loan(user, loan, dependants):
++    return is_librarian(user) or _acts_for(user, loan["member"], dependants)
+ 
+ 
+-def can_return_loan(user, loan):
+-    return is_librarian(user) or loan["member"] == user["id"]
++def can_return_loan(user, loan, dependants):
++    return is_librarian(user) or _acts_for(user, loan["member"], dependants)
+ 
+--- a/library_app/repository.py
++++ b/library_app/repository.py
+@@ -10,7 +10,7 @@
+ 
+ # --- members --------------------------------------------------------------------------
+ 
+-_MEMBER_SELECT = "SELECT id, username, name, role, active FROM members"
++_MEMBER_SELECT = "SELECT id, username, name, role, active, guardian_id FROM members"
+ 
+ 
+ def _member(row):
+@@ -22,6 +22,7 @@
+         "name": row["name"],
+         "role": row["role"],
+         "active": bool(row["active"]),
++        "guardian": row["guardian_id"],
+     }
+ 
+ 
+@@ -46,19 +47,25 @@
+ 
+ def insert_member(values):
+     cur = get_db().execute(
+-        "INSERT INTO members (username, name, role, active) VALUES (?, ?, ?, ?)",
+-        (values["username"], values["name"], values["role"], int(values["active"])),
++        "INSERT INTO members (username, name, role, active, guardian_id) VALUES (?, ?, ?, ?, ?)",
++        (values["username"], values["name"], values["role"], int(values["active"]), values["guardian"]),
+     )
+     return cur.lastrowid
+ 
+ 
+ def update_member(member_id, values):
+-    columns = {"username": "username", "name": "name", "role": "role", "active": "active"}
++    columns = {"username": "username", "name": "name", "role": "role", "active": "active", "guardian": "guardian_id"}
+     _update("members", columns, member_id, values)
+ 
+ 
+ def delete_member(member_id):
+     get_db().execute("DELETE FROM members WHERE id = ?", (member_id,))
++
++
++def dependant_ids(member_id):
++    """Ids of the members whose guardian is ``member_id``."""
++    rows = get_db().execute("SELECT id FROM members WHERE guardian_id = ?", (member_id,))
++    return frozenset(row["id"] for row in rows)
+ 
+ 
+ def member_has_loans(member_id):
+--- a/library_app/routes_ui.py
++++ b/library_app/routes_ui.py
+@@ -56,13 +56,16 @@
+ 
+ @bp.get("/members/new")
+ def new_member():
+-    services.ensure_can_create_member(current_context())
+-    return render_template("members/new.html", roles=validation.MEMBER_ROLES)
++    ctx = current_context()
++    services.ensure_can_create_member(ctx)
++    # Only members without a guardian can be guardians (no chains).
++    guardians = services.list_members(ctx, {"guardian": "null"})
++    return render_template("members/new.html", roles=validation.MEMBER_ROLES, guardians=guardians)
+ 
+ 
+ @bp.post("/members")
+ def create_member():
+-    data = _form_values({"username": _text, "name": _text, "role": _text, "active": _boolean})
++    data = _form_values({"username": _text, "name": _text, "role": _text, "active": _boolean, "guardian": _optional_int})
+     member = services.create_member(current_context(), data)
+     return redirect(url_for("ui.show_member", member_id=member["id"]), 303)
+ 
+@@ -99,9 +102,11 @@
+     ctx = current_context()
+     book = services.get_book(ctx, book_id)
+     actions = services.book_actions(ctx, book)
+-    # Librarians lend to a chosen member; members always borrow for themselves.
+-    borrowers = services.list_members(ctx, {"active": "true"}) if ctx.is_librarian else []
+-    return render_template("books/detail.html", book=book, actions=actions, borrowers=borrowers)
++    # Librarians lend to a chosen member, guardians may pick a dependant; others borrow for themselves.
++    borrow_self, borrowers = services.borrow_choices(ctx)
++    return render_template(
++        "books/detail.html", book=book, actions=actions, borrow_self=borrow_self, borrowers=borrowers
++    )
+ 
+ 
+ @bp.post("/books/<int:book_id>/borrow")
+--- a/library_app/services.py
++++ b/library_app/services.py
+@@ -14,7 +14,7 @@
+ LOAN_PERIOD = timedelta(days=14)
+ MAX_OPEN_LOANS = 3
+ 
+-MEMBER_FIELDS = ("id", "username", "name", "role", "active")
++MEMBER_FIELDS = ("id", "username", "name", "role", "active", "guardian")
+ BOOK_FIELDS = ("id", "title", "author", "isbn", "year", "status")
+ LOAN_FIELDS = ("id", "book", "member", "borrowed_at", "due_at", "returned_at", "overdue")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+@@ -23,13 +23,14 @@
+ # --- members --------------------------------------------------------------------------
+ 
+ def list_members(ctx, filters=None):
+-    members = [m for m in repository.list_members() if permissions.can_read_member(ctx.user, m)]
++    dependants = ctx.dependant_ids
++    members = [m for m in repository.list_members() if permissions.can_read_member(ctx.user, m, dependants)]
+     return apply_filters(members, filters or {}, MEMBER_FIELDS)
+ 
+ 
+ def get_member(ctx, member_id):
+     member = _load_member(member_id)
+-    if not permissions.can_read_member(ctx.user, member):
++    if not permissions.can_read_member(ctx.user, member, ctx.dependant_ids):
+         raise Forbidden()
+     return member
+ 
+@@ -44,6 +45,7 @@
+     with transaction():
+         values = validation.clean_member(data, partial=False)
+         _ensure_username_free(values["username"])
++        _ensure_valid_guardian(values["guardian"], member_id=None)
+         member_id = repository.insert_member(values)
+     return repository.get_member(member_id)
+ 
+@@ -57,6 +59,8 @@
+         values = validation.clean_member(data, partial=True)
+         if "username" in values:
+             _ensure_username_free(values["username"], exclude_id=member_id)
++        if "guardian" in values:
++            _ensure_valid_guardian(values["guardian"], member_id=member_id)
+         repository.update_member(member_id, values)
+     return repository.get_member(member_id)
+ 
+@@ -68,6 +72,8 @@
+             raise Forbidden("Only librarians can delete members.")
+         if repository.member_has_loans(member_id):
+             raise Conflict("A member with loans cannot be deleted.")
++        if repository.dependant_ids(member_id):
++            raise Conflict("A member who is someone's guardian cannot be deleted; clear their dependants' guardian first.")
+         repository.delete_member(member_id)
+ 
+ 
+@@ -81,6 +87,26 @@
+ def _ensure_username_free(username, exclude_id=None):
+     if repository.username_taken(username, exclude_id):
+         raise ValidationError("Username already in use.", {"username": "already in use"})
++
++
++def _ensure_valid_guardian(guardian_id, member_id):
++    """``guardian_id`` (None allowed) may be the guardian of ``member_id`` (None: a new member).
++
++    No chains: the guardian has no guardian, and a member who is a guardian gets none.
++    """
++    if guardian_id is None:
++        return
++    if guardian_id == member_id:
++        problem = "a member cannot be their own guardian"
++    elif (guardian := repository.get_member(guardian_id)) is None:
++        problem = "no such member"
++    elif guardian["guardian"] is not None:
++        problem = "the guardian has a guardian of their own"
++    elif member_id is not None and repository.dependant_ids(member_id):
++        problem = "a member who is a guardian cannot have a guardian"
++    else:
++        return
++    raise ValidationError("Invalid guardian.", {"guardian": problem})
+ 
+ 
+ # --- books ----------------------------------------------------------------------------
+@@ -138,8 +164,8 @@
+     with transaction():
+         book = _load_book(book_id)
+         requested = params.get("member") if isinstance(params, dict) else None
+-        if not permissions.can_borrow_for(ctx.user, requested):
+-            raise Forbidden("Members can only borrow for themselves.")
++        if not permissions.can_borrow_for(ctx.user, requested, ctx.dependant_ids):
++            raise Forbidden("Members can only borrow for themselves and their dependants.")
+         if book["status"] == "on_loan":
+             raise Conflict("The book is already on loan.")
+         member_id = validation.clean_borrow_params(params)
+@@ -162,7 +188,21 @@
+         return []
+     if permissions.is_librarian(ctx.user):
+         return ["borrow"]  # librarians can lend to any eligible member
+-    return ["borrow"] if _may_borrow(ctx.user) else []
++    if _may_borrow(ctx.user) or _eligible_dependants(ctx):
++        return ["borrow"]
++    return []
++
++
++def borrow_choices(ctx):
++    """For the borrow form: (may the caller pick "myself", other members they may pick)."""
++    if permissions.is_librarian(ctx.user):
++        return True, list_members(ctx, {"active": "true"})
++    return _may_borrow(ctx.user), _eligible_dependants(ctx)
++
++
++def _eligible_dependants(ctx):
++    dependants = ctx.dependant_ids
++    return [m for m in repository.list_members() if m["id"] in dependants and _may_borrow(m)]
+ 
+ 
+ def _load_book(book_id):
+@@ -197,13 +237,14 @@
+ 
+ 
+ def list_loans(ctx, filters=None):
+-    loans = [present_loan(ctx, l) for l in repository.list_loans() if permissions.can_read_loan(ctx.user, l)]
++    dependants = ctx.dependant_ids
++    loans = [present_loan(ctx, l) for l in repository.list_loans() if permissions.can_read_loan(ctx.user, l, dependants)]
+     return apply_filters(loans, filters or {}, LOAN_FIELDS)
+ 
+ 
+ def get_loan(ctx, loan_id):
+     loan = _load_loan(loan_id)
+-    if not permissions.can_read_loan(ctx.user, loan):
++    if not permissions.can_read_loan(ctx.user, loan, ctx.dependant_ids):
+         raise Forbidden()
+     return present_loan(ctx, loan)
+ 
+@@ -234,8 +275,8 @@
+ def return_loan(ctx, loan_id, params):
+     with transaction():
+         loan = _load_loan(loan_id)
+-        if not permissions.can_return_loan(ctx.user, loan):
+-            raise Forbidden("Only the borrower or a librarian can return a loan.")
++        if not permissions.can_return_loan(ctx.user, loan, ctx.dependant_ids):
++            raise Forbidden("Only the borrower, their guardian or a librarian can return a loan.")
+         if loan["returned_at"] is not None:
+             raise Conflict("The loan has already been returned.")
+         validation.clean_no_params(params)
+@@ -244,7 +285,7 @@
+ 
+ 
+ def loan_actions(ctx, loan):
+-    if loan["returned_at"] is None and permissions.can_return_loan(ctx.user, loan):
++    if loan["returned_at"] is None and permissions.can_return_loan(ctx.user, loan, ctx.dependant_ids):
+         return ["return"]
+     return []
+ 
+--- a/library_app/templates/books/detail.html
++++ b/library_app/templates/books/detail.html
+@@ -16,7 +16,7 @@
+   {% if borrowers %}
+   <label>Lend to
+     <select name="member">
+-      <option value="">myself</option>
++      {% if borrow_self %}<option value="">myself</option>{% endif %}
+       {% for member in borrowers %}<option value="{{ member.id }}">{{ member.name }} ({{ member.username }})</option>{% endfor %}
+     </select>
+   </label>
+--- a/library_app/templates/members/detail.html
++++ b/library_app/templates/members/detail.html
+@@ -8,5 +8,6 @@
+   {{ field("name", member.name) }}
+   {{ field("role", member.role) }}
+   {{ field("active", member.active) }}
++  {{ field("guardian", member.guardian, href=url_for('ui.show_member', member_id=member.guardian) if member.guardian is not none else None) }}
+ </dl>
+ {% endblock %}
+--- a/library_app/templates/members/list.html
++++ b/library_app/templates/members/list.html
+@@ -4,7 +4,7 @@
+ <h1>Members</h1>
+ {% if ctx.is_librarian %}<p><a href="{{ url_for('ui.new_member') }}">New member</a></p>{% endif %}
+ <table>
+-  <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th></tr></thead>
++  <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th><th>Guardian</th></tr></thead>
+   <tbody>
+   {% for member in members %}
+     <tr data-id="{{ member.id }}">
+@@ -12,6 +12,7 @@
+       <td>{{ member.name }}</td>
+       <td>{{ member.role }}</td>
+       <td>{{ member.active|display }}</td>
++      <td>{{ member.guardian|display }}</td>
+     </tr>
+   {% endfor %}
+   </tbody>
+--- a/library_app/templates/members/new.html
++++ b/library_app/templates/members/new.html
+@@ -16,6 +16,12 @@
+       <option value="false">no</option>
+     </select>
+   </label>
++  <label>Guardian
++    <select name="guardian">
++      <option value="" selected>none</option>
++      {% for member in guardians %}<option value="{{ member.id }}">{{ member.name }} ({{ member.username }})</option>{% endfor %}
++    </select>
++  </label>
+   <button type="submit">Create</button>
+ </form>
+ {% endblock %}
+--- a/library_app/validation.py
++++ b/library_app/validation.py
+@@ -74,9 +74,13 @@
+     return value
+ 
+ 
++def optional_record_id(value):
++    return None if value is None else record_id(value)
++
++
+ # --- per-collection cleaning ----------------------------------------------------------
+ 
+-MEMBER_WRITABLE = ("username", "name", "role", "active")
++MEMBER_WRITABLE = ("username", "name", "role", "active", "guardian")
+ BOOK_WRITABLE = ("title", "author", "isbn", "year")
+ 
+ 
+@@ -96,6 +100,9 @@
+             values["active"] = boolean(data["active"])
+     elif not partial:
+         values["active"] = True
++    if "guardian" in data or not partial:
++        with collect(errors, "guardian"):
++            values["guardian"] = optional_record_id(data.get("guardian"))
+     raise_if_errors(errors)
+     return values
+ 
+--- a/seed.py
++++ b/seed.py
+@@ -21,6 +21,11 @@
+     conn.executemany(
+         "INSERT INTO members (id, username, name, role, active) VALUES (:id, :username, :name, :role, :active)",
+         [{**m, "active": int(m.get("active", True))} for m in seed["members"]],
++    )
++    # Guardians are set once every member exists, so a reference may point to a later id.
++    conn.executemany(
++        "UPDATE members SET guardian_id = :guardian WHERE id = :id",
++        [m for m in seed["members"] if m.get("guardian") is not None],
+     )
+     conn.executemany(
+         "INSERT INTO books (id, title, author, isbn, year) VALUES (:id, :title, :author, :isbn, :year)",
+--- a/tests/test_library_guardians.py
++++ b/tests/test_library_guardians.py
+@@ -0,0 +1,195 @@
++"""Household guardians: the guardian field, its validation, and a guardian's rights over dependants.
++
++Seed households: dara (4) guards eli (5) and jo (10); fatima (6) guards gus (7);
++kemal (11) guards lena (12, inactive).
++"""
++import os
++import sqlite3
++
++from accept_client import parse_ui
++
++NOW = "2026-03-01T10:00:00"
++GUARDIANS = {5: 4, 10: 4, 7: 6, 12: 11}
++
++
++def _loan_ids(app, user, query=""):
++    return [l["id"] for l in app.get(f"/api/loans{query}", user=user).json["items"]]
++
++
++def _loans_of(app, member_ids, query=""):
++    return [l["id"] for l in app.get(f"/api/loans{query}", user="ada").json["items"] if l["member"] in member_ids]
++
++
++# --- data and the field ---------------------------------------------------------------
++
++def test_existing_members_have_their_guardians(app):
++    members = app.get("/api/members", user="ada").json["items"]
++    assert {m["id"]: m["guardian"] for m in members} == {m: GUARDIANS.get(m) for m in range(1, 13)}
++
++
++def test_migration_keeps_other_data(app):
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    counts = [conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("members", "books", "loans", "outbox")]
++    conn.close()
++    assert counts == [12, 40, 60, 0]
++
++
++def test_guardian_filter(app):
++    assert [m["id"] for m in app.get("/api/members?guardian=4", user="ada").json["items"]] == [5, 10]
++    assert [m["id"] for m in app.get("/api/members?guardian=null", user="ada").json["items"]] == [1, 2, 3, 4, 6, 8, 9, 11]
++    assert [m["id"] for m in app.get("/api/members?guardian=null", user="dara").json["items"]] == [4]
++
++
++def test_librarian_sets_guardian_on_create_and_patch(app):
++    r = app.post("/api/members", {"username": "kid", "name": "Kid", "role": "member", "guardian": 3}, user="ada")
++    assert r.status == 201 and r.json["guardian"] == 3
++    assert app.patch("/api/members/9", {"guardian": 8}, user="ada").json["guardian"] == 8
++    assert app.patch("/api/members/5", {"guardian": None}, user="ada").json["guardian"] is None
++
++
++def test_only_librarians_set_guardian(app):
++    assert app.patch("/api/members/3", {"guardian": 4}, user="chen").status == 403
++    assert app.patch("/api/members/5", {"guardian": None}, user="eli").status == 403
++    assert app.patch("/api/members/5", {"name": "Eli N.", "guardian": 4}, user="eli").status == 403
++    assert app.patch("/api/members/5", {"name": "Eli N."}, user="eli").status == 200
++
++
++def test_guardian_validation(app):
++    def patch(member_id, guardian):
++        return app.patch(f"/api/members/{member_id}", {"guardian": guardian}, user="ada")
++
++    assert patch(3, 3).status == 400  # self
++    assert patch(3, 999).status == 400  # unknown
++    assert patch(3, "dara").status == 400
++    assert patch(3, True).status == 400
++    assert patch(3, 5).status == 400  # eli has a guardian of their own
++    r = patch(4, 3)  # dara is already a guardian
++    assert r.status == 400 and set(r.json["fields"]) == {"guardian"}
++    assert app.post("/api/members", {"username": "k", "name": "K", "role": "member", "guardian": 7},
++                    user="ada").status == 400
++    assert app.post("/api/members", {"username": "k", "name": "K", "role": "member", "guardian": 99},
++                    user="ada").status == 400
++    assert app.get("/api/members/3", user="ada").json["guardian"] is None
++    assert patch(5, 4).status == 200  # unchanged value is fine
++    assert patch(5, 6).status == 200  # moving a dependant to another guardian
++
++
++def test_deleting_a_guardian_is_409(app):
++    r = app.post("/api/members", {"username": "g", "name": "G", "role": "member"}, user="ada").json
++    kid = app.post("/api/members", {"username": "k", "name": "K", "role": "member", "guardian": r["id"]}, user="ada").json
++    assert app.delete(f"/api/members/{r['id']}", user="ada").status == 409
++    assert app.patch(f"/api/members/{kid['id']}", {"guardian": None}, user="ada").status == 200
++    assert app.delete(f"/api/members/{r['id']}", user="ada").status == 204
++
++
++# --- reading --------------------------------------------------------------------------
++
++def test_guardian_reads_dependants_records(app):
++    assert [m["id"] for m in app.get("/api/members", user="dara").json["items"]] == [4, 5, 10]
++    assert app.get("/api/members/5", user="dara").json["username"] == "eli"
++    assert app.get("/api/members/12", user="kemal").json["active"] is False
++    assert app.get("/api/members/7", user="dara").status == 403
++    # no rights the other way round
++    assert [m["id"] for m in app.get("/api/members", user="eli").json["items"]] == [5]
++    assert app.get("/api/members/4", user="eli").status == 403
++    assert app.get("/api/members/10", user="eli").status == 403  # siblings see nothing of each other
++
++
++def test_guardian_reads_dependants_loans(app):
++    assert _loan_ids(app, "dara") == _loans_of(app, {4, 5, 10})
++    assert _loan_ids(app, "dara", "?member=10&returned_at=null") == [46, 50, 57]
++    assert _loan_ids(app, "dara", "?member=7") == []
++    assert app.get("/api/loans/46", user="dara").status == 200
++    assert app.get("/api/loans/47", user="dara").status == 403  # gus is fatima's
++    assert _loan_ids(app, "eli") == _loans_of(app, {5})
++    assert app.get("/api/loans/59", user="eli").status == 403  # dara's own loan
++
++
++def test_members_without_dependants_unchanged(app):
++    assert [m["id"] for m in app.get("/api/members", user="chen").json["items"]] == [3]
++    assert _loan_ids(app, "chen") == _loans_of(app, {3})
++
++
++def test_rights_follow_current_guardian(app):
++    assert app.patch("/api/members/5", {"guardian": None}, user="ada").status == 200
++    assert [m["id"] for m in app.get("/api/members", user="dara").json["items"]] == [4, 10]
++    assert app.get("/api/loans/60", user="dara").status == 403
++    assert app.post("/api/loans/60/return", {}, user="dara").status == 403
++    assert app.post("/api/books/3/borrow", {"member": 5}, user="dara").status == 403
++    assert app.patch("/api/members/9", {"guardian": 4}, user="ada").status == 200
++    assert app.get("/api/members/9", user="dara").status == 200
++
++
++def test_guardian_rights_ignore_active_flags(app):
++    assert app.patch("/api/members/4", {"active": False}, user="ada").status == 200
++    assert app.get("/api/members/5", user="dara").status == 200
++    assert app.post("/api/books/3/borrow", {"member": 5}, user="dara", now=NOW).status == 200  # eli is active
++    assert app.post("/api/loans/60/return", {}, user="dara").status == 200
++
++
++# --- acting ---------------------------------------------------------------------------
++
++def test_guardian_borrows_for_dependant(app):
++    r = app.post("/api/books/3/borrow", {"member": 5}, user="dara", now=NOW)
++    assert r.status == 200 and r.json["status"] == "on_loan"
++    loan = app.get("/api/loans?book=3&returned_at=null", user="dara").json["items"][0]
++    assert loan["member"] == 5 and loan["borrowed_at"] == NOW and loan["due_at"] == "2026-03-15"
++    assert app.get(f"/api/loans/{loan['id']}", user="eli").status == 200
++    assert app.get("/api/_outbox", user="dara").json["items"] == [
++        {"id": 1, "channel": "loan_created", "payload": {"loan": loan["id"], "book": 3, "member": 5}, "created_at": NOW}
++    ]
++
++
++def test_guardian_borrowing_rules(app):
++    assert app.post("/api/books/3/borrow", {"member": 10}, user="dara").status == 409  # jo has 3 open loans
++    assert app.post("/api/books/3/borrow", {"member": 12}, user="kemal").status == 409  # lena is inactive
++    assert app.post("/api/books/4/borrow", {"member": 5}, user="dara").status == 409  # on loan
++    assert app.post("/api/books/3/borrow", {"member": 7}, user="dara").status == 403  # not a dependant
++    assert app.post("/api/books/4/borrow", {"member": 7}, user="dara").status == 403  # 403 before 409
++    assert app.post("/api/books/3/borrow", {"member": "eli"}, user="dara").status == 403
++    assert app.post("/api/books/3/borrow", {"member": 4}, user="eli").status == 403  # no rights over the guardian
++    assert app.post("/api/books/3/borrow", {"member": 10}, user="eli").status == 403
++    assert app.get("/api/_outbox", user="ada").json["items"] == []
++
++
++def test_guardian_returns_dependants_loans(app):
++    r = app.post("/api/loans/46/return", {}, user="dara", now=NOW)
++    assert r.status == 200 and r.json["returned_at"] == NOW
++    assert app.post("/api/loans/46/return", {}, user="dara").status == 409
++    assert app.post("/api/loans/47/return", {}, user="dara").status == 403
++    assert app.post("/api/loans/59/return", {}, user="eli").status == 403  # the guardian's loan
++    assert app.post("/api/books/3/borrow", {"member": 10}, user="dara").status == 200  # jo is below 3 again
++
++
++def test_guardian_cannot_edit_or_delete_dependant(app):
++    assert app.patch("/api/members/5", {"name": "Eli"}, user="dara").status == 403
++    assert app.delete("/api/members/5", user="dara").status == 403
++
++
++# --- UI -------------------------------------------------------------------------------
++
++def test_ui_follows_guardian_rights(app):
++    assert parse_ui(app.get("/ui/members", user="dara").text).rows == [4, 5, 10]
++    assert parse_ui(app.get("/ui/loans", user="dara").text).rows == _loans_of(app, {4, 5, 10})
++    page = parse_ui(app.get("/ui/members/5", user="dara").text)
++    assert page.fields["guardian"] == "4" and page.actions == []
++    assert parse_ui(app.get("/ui/members/4", user="dara").text).fields["guardian"] == ""
++    assert parse_ui(app.get("/ui/loans/46", user="dara").text).actions == ["return"]
++    assert app.get("/ui/loans/59", user="eli").status == 403
++    assert app.get("/ui/members/4", user="eli").status == 403
++
++
++def test_ui_new_member_form_offers_guardians(app):
++    html = app.get("/ui/members/new", user="ada").text
++    assert "guardian" in parse_ui(html).inputs
++    assert 'value="4"' in html and 'value="5"' not in html  # eli has a guardian, so cannot be one
++
++
++def test_ui_borrow_form_for_guardians(app):
++    page = parse_ui(app.get("/ui/books/2", user="dara").text)
++    assert page.actions == ["borrow"] and "member" in page.inputs
++    # kemal's only dependant (lena) is inactive: kemal borrows only for himself
++    page = parse_ui(app.get("/ui/books/2", user="kemal").text)
++    assert page.actions == ["borrow"] and "member" not in page.inputs
++    # jo has 3 open loans, but her guardian could not borrow for her either: no member choice
++    assert parse_ui(app.get("/ui/books/2", user="jo").text).actions == []
+--- a/tests/test_library_members.py
++++ b/tests/test_library_members.py
+@@ -16,7 +16,8 @@
+ def test_librarian_creates_member_with_default_active(app):
+     r = app.post("/api/members", {"username": "zed", "name": "Zed Z", "role": "member"}, user="ada")
+     assert r.status == 201
+-    assert r.json == {"id": 13, "username": "zed", "name": "Zed Z", "role": "member", "active": True}
++    assert r.json == {"id": 13, "username": "zed", "name": "Zed Z", "role": "member", "active": True,
++                      "guardian": None}
+     assert app.get("/api/members/13", user="ben").json["username"] == "zed"
+     assert app.get("/api/members", user="zed").json["items"][0]["id"] == 13
+ 
+--- a/tests/test_library_ui.py
++++ b/tests/test_library_ui.py
+@@ -44,7 +44,8 @@
+ 
+ def test_member_detail(app):
+     page = parse_ui(app.get("/ui/members/12", user="ada").text)
+-    assert page.fields == {"username": "lena", "name": "Lena Okafor", "role": "member", "active": "false"}
++    assert page.fields == {"username": "lena", "name": "Lena Okafor", "role": "member", "active": "false",
++                           "guardian": "11"}
+     assert page.actions == []
+     assert app.get("/ui/members/12", user="chen").status == 403
+ 
+@@ -53,7 +54,7 @@
+     books = parse_ui(app.get("/ui/books/new", user="ada").text)
+     assert books.creates == ["books"] and sorted(books.inputs) == ["author", "isbn", "title", "year"]
+     members = parse_ui(app.get("/ui/members/new", user="ada").text)
+-    assert members.creates == ["members"] and sorted(members.inputs) == ["active", "name", "role", "username"]
++    assert members.creates == ["members"] and sorted(members.inputs) == ["active", "guardian", "name", "role", "username"]
+     assert app.get("/ui/books/new", user="chen").status == 403
+     assert app.get("/ui/members/new", user="chen").status == 403
+     assert app.get("/ui/loans/new", user="ada").status == 403

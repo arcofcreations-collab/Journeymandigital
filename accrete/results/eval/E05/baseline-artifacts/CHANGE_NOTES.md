@@ -1,0 +1,12 @@
+# E05: self-dispatch withdrawn, workload cap kept
+
+**Interpretation.** `claim` is gone entirely: `POST /api/work_orders/{id}/claim` (and the UI POST) is now an unknown route, so it returns 404 after the usual 401 check, and no `claim` form is shown. The E03 p3/p4 rule went with it. `dispatch` is no longer a work order field. It is not in API records or UI pages, and sending it in a create/PATCH body or using it as a filter is a 400 "unknown field" (a 403 that applies still comes first). The E02 workload cap on `assign` is unchanged: 400 for an invalid technician, then 409 if the technician already has 3 or more `assigned`/`in_progress` orders, not counting this one. Re-assigning to the current assignee is always allowed.
+
+**Changes.**
+- New migration `0006_withdraw_self_dispatch.sql`. It sets every order with `dispatch = 'self'` and `status = 'assigned'` to `open` with `assignee` NULL and changes nothing else. It then drops the `dispatch` column. It creates no outbox messages, time entries or part usages. In the committed data this reopened orders 72 (sara) and 75 (olga). All other rows are identical apart from the dropped column.
+- Removed `claim` from `services` (`_authorize_claim`, `claim_work_order`, `WORK_ORDER_ACTIONS`), `permissions` (`can_claim_work_order`, `SELF_DISPATCH_PRIORITIES`) and the API/UI routes and template form.
+- Removed `dispatch` from `repository`, `validation`, `services.WORK_ORDER_FIELDS` and the detail/list templates. The assignment message is now emitted directly in `assign_work_order`.
+- `seed.py`: `seed_without_self_dispatch` replaces `seed_dispatch`, so a rebuild matches the migrated `data.db` exactly (checked table by table). Updated the README.
+- `data.db` was migrated by starting the app once.
+
+**Verification.** Replaced `tests/test_maintenance_dispatch.py` with `tests/test_maintenance_workload.py`. It covers: claim returns 404/401, no claim form, `dispatch` gives 400 in bodies and filters and is absent from records/UI, the cap and its check order, re-assignment, and the kept overload. It also covers the migration on the committed data: orders 72 and 75 reopened with other fields unchanged, other self-dispatched orders kept, requester rights regained and workloads lower. A further test applies 0006 to a database built from 0001-0005. Adjusted the priority, UI, basics and work-order tests. `python -m pytest tests` and the evaluator invocation from `harness/` both pass (124 tests).

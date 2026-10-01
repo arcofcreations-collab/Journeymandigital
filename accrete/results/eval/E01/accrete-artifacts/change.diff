@@ -1,0 +1,231 @@
+--- a/changes/0002-spare-parts.yaml
++++ b/changes/0002-spare-parts.yaml
+@@ -0,0 +1,228 @@
++request: "Spare parts inventory with atomic part consumption (maintenance)"
++interpretation: >-
++  New entity parts (sku/name/site/unit_cost/quantity/reorder_level, derived low_stock), readable by
++  everyone and writable by supervisors only; non-empty text and >= 0 numbers are constraints.
++  New entity part_usages (history): readable exactly when its work order is readable (the work
++  order read rule restated on record.work_order); create/update/delete are False so POST/PATCH/DELETE
++  give 403 for everyone; records are only created by the use_parts action. New work_orders action
++  use_parts(items: untyped list): allow = current assignee (403); guard = status in_progress AND no
++  item that names a valid part (existing, same site as the order's asset, JSON integer id) with a
++  valid quantity (JSON integer >= 1) asks for more than the part's stock (409, so it wins over any
++  400 in the same body); then fail effects with status 400 validate the items (object with exactly
++  part and quantity, valid part, valid quantity, no repeated part). JSON integer is tested with
++  str(x) != x (not a string) and str(x).isdigit() (rejects booleans, decimals, negatives, null,
++  objects). Effects, per item in list order: create the usage (unit_cost copied from the part,
++  used_by = caller, used_at = now), emit low_stock if the part goes from not-low to low, decrease the
++  part's quantity. Effects run atomically, so a failing call changes nothing. parts_cost is a computed
++  number on work_orders (sum of usage quantity*unit_cost rounded to 2) and is added to the
++  work_completed payload. Cancel is untouched (no stock return). The eight given parts are created
++  with their ids; there are no usages, so every existing work order has parts_cost 0.
++ops:
++  # ---------------------------------------------------------------- parts
++  - add_entity:
++      name: parts
++      fields:
++        sku: text required unique
++        name: text required
++        site: text required
++        unit_cost: number required
++        quantity: int required
++        reorder_level: int required
++        low_stock: {type: bool, computed: "record.quantity <= record.reorder_level"}
++      rules:
++        read: "True"
++        create: "user.role == 'supervisor'"
++        update: "user.role == 'supervisor'"
++        delete: "user.role == 'supervisor'"
++      constraints:
++        sku_nonempty: {expr: "record.sku is None or record.sku.strip() != ''", message: "must be non-empty text", field: sku}
++        name_nonempty: {expr: "record.name is None or record.name.strip() != ''", message: "must be non-empty text", field: name}
++        site_nonempty: {expr: "record.site is None or record.site.strip() != ''", message: "must be non-empty text", field: site}
++        unit_cost_nonneg: {expr: "record.unit_cost is None or record.unit_cost >= 0", message: "must be >= 0", field: unit_cost}
++        quantity_nonneg: {expr: "record.quantity is None or record.quantity >= 0", message: "must be >= 0", field: quantity}
++        reorder_level_nonneg: {expr: "record.reorder_level is None or record.reorder_level >= 0", message: "must be >= 0", field: reorder_level}
++
++  # ---------------------------------------------------------------- part usages
++  - add_entity:
++      name: part_usages
++      fields:
++        work_order: {type: ref, ref: work_orders, required: true, system: true}
++        part: {type: ref, ref: parts, required: true, system: true}
++        quantity: {type: int, required: true, system: true}
++        unit_cost: {type: number, required: true, system: true}
++        used_by: {type: ref, ref: staff, required: true, system: true}
++        used_at: {type: datetime, required: true, system: true}
++      rules:
++        read: >-
++          user.role == 'supervisor' or record.work_order.requested_by == user or record.work_order.assignee == user
++          or (user.role == 'technician' and user.site == record.work_order.asset.site)
++        create: "False"
++        update: "False"
++        delete: "False"
++
++  # ---------------------------------------------------------------- parts_cost
++  - add_field:
++      entity: work_orders
++      name: parts_cost
++      type: number
++      computed: "round(sum(u.quantity * u.unit_cost for u in find(part_usages, work_order=record)), 2)"
++
++  # ---------------------------------------------------------------- use_parts
++  - add_action:
++      entity: work_orders
++      name: use_parts
++      params: {items: {type: list, required: true}}
++      allow: "record.assignee == user"
++      guard: >-
++        record.status == 'in_progress' and not any(
++        str(i) != i and str(i).startswith('{') and 'part' in i
++        and str(i['part']) != i['part'] and str(i['part']).isdigit()
++        and count(parts, id=i['part'], site=record.asset.site) == 1
++        and 'quantity' in i and str(i['quantity']) != i['quantity'] and str(i['quantity']).isdigit()
++        and i['quantity'] >= 1 and i['quantity'] > first(parts, id=i['part']).quantity
++        for i in (params.items if str(params.items) != params.items and str(params.items).startswith('[') else []))
++      guard_message: "'parts can only be used on a work order in progress, and only up to the quantity in stock'"
++      effects:
++        - fail: "'items must be a non-empty list'"
++          status: 400
++          when: "not (str(params.items) != params.items and str(params.items).startswith('[') and len(params.items) >= 1)"
++        - fail: "'each item must be {\"part\": id of a part at the asset site, \"quantity\": integer >= 1}'"
++          status: 400
++          when: >-
++            any(not (str(i) != i and str(i).startswith('{') and len(i) == 2 and 'part' in i
++            and str(i['part']) != i['part'] and str(i['part']).isdigit()
++            and count(parts, id=i['part'], site=record.asset.site) == 1
++            and 'quantity' in i and str(i['quantity']) != i['quantity'] and str(i['quantity']).isdigit()
++            and i['quantity'] >= 1) for i in params.items)
++        - fail: "'the same part may appear only once'"
++          status: 400
++          when: "any(len([j for j in params.items if j['part'] == i['part']]) > 1 for i in params.items)"
++        - for: i
++          in: params.items
++          do:
++            - create: part_usages
++              values:
++                work_order: record
++                part: "first(parts, id=i['part'])"
++                quantity: "i['quantity']"
++                unit_cost: "first(parts, id=i['part']).unit_cost"
++                used_by: user
++                used_at: now
++            - if: "not first(parts, id=i['part']).low_stock and first(parts, id=i['part']).quantity - i['quantity'] <= first(parts, id=i['part']).reorder_level"
++              then:
++                - emit: low_stock
++                  payload:
++                    part: "first(parts, id=i['part'])"
++                    sku: "first(parts, id=i['part']).sku"
++                    quantity: "first(parts, id=i['part']).quantity - i['quantity']"
++            - update: "first(parts, id=i['part'])"
++              set: {quantity: "it.quantity - i['quantity']"}
++
++  # ---------------------------------------------------------------- work_completed payload
++  - change_action:
++      entity: work_orders
++      name: complete
++      effects:
++        - {fail: "'labor_minutes must be at least 1'", status: 400, when: "params.labor_minutes < 1"}
++        - set: {status: "'completed'", completed_at: now, resolution: params.resolution, labor_minutes: params.labor_minutes}
++        - emit: work_completed
++          payload: {work_order: record, asset: record.asset, technician: record.assignee, labor_minutes: params.labor_minutes, parts_cost: record.parts_cost}
++
++  # ---------------------------------------------------------------- data
++  - add_records:
++      entity: parts
++      records:
++        - {id: 1, sku: FLT-AHU, name: AHU filter, site: North, unit_cost: 42.5, quantity: 12, reorder_level: 4}
++        - {id: 2, sku: BELT-A40, name: V-belt A40, site: North, unit_cost: 18.0, quantity: 3, reorder_level: 2}
++        - {id: 3, sku: FUSE-10A, name: Fuse 10A, site: North, unit_cost: 1.25, quantity: 50, reorder_level: 10}
++        - {id: 4, sku: BRG-6204, name: Bearing 6204, site: South, unit_cost: 9.8, quantity: 6, reorder_level: 2}
++        - {id: 5, sku: BELT-A40-S, name: V-belt A40, site: South, unit_cost: 18.0, quantity: 2, reorder_level: 2}
++        - {id: 6, sku: SEAL-KIT, name: Pump seal kit, site: South, unit_cost: 64.0, quantity: 1, reorder_level: 0}
++        - {id: 7, sku: LAMP-LED, name: LED lamp, site: East, unit_cost: 7.4, quantity: 20, reorder_level: 5}
++        - {id: 8, sku: REMOTE-DK, name: Dock door remote, site: North, unit_cost: 23.9, quantity: 0, reorder_level: 1}
++
++expect:
++  # parts: reading and data
++  - {as: ruth, do: "GET /api/parts", count: 8}
++  - {as: ruth, do: "GET /api/parts/2", status: 200, json: {sku: BELT-A40, quantity: 3, reorder_level: 2, low_stock: false, unit_cost: 18.0}}
++  - {as: ruth, do: "GET /api/parts?low_stock=true", count: 2}
++  - {as: ruth, do: "GET /api/work_orders/74", json: {parts_cost: 0}}
++  # parts: writing
++  - {as: ruth, do: "POST /api/parts", body: {sku: X, name: X, site: North, unit_cost: 1, quantity: 1, reorder_level: 0}, status: 403}
++  - {as: nils, do: "POST /api/parts", body: {sku: "", name: X, site: North, unit_cost: -1, quantity: 1, reorder_level: 0}, status: 403}
++  - {as: sofia, do: "POST /api/parts", body: {sku: X, name: X, site: North, unit_cost: 1, quantity: 1, reorder_level: 0}, status: 201, json: {id: 9, low_stock: false}}
++  - {as: sofia, do: "POST /api/parts", body: {sku: X, name: X, site: North, unit_cost: 1, quantity: 1, reorder_level: 0, low_stock: true}, status: 400}
++  - {as: sofia, do: "POST /api/parts", body: {sku: FLT-AHU, name: X, site: North, unit_cost: 1, quantity: 1, reorder_level: 0}, status: 400}
++  - {as: sofia, do: "POST /api/parts", body: {sku: X, name: X, site: North, unit_cost: -0.5, quantity: 1, reorder_level: 0}, status: 400}
++  - {as: sofia, do: "POST /api/parts", body: {sku: X, name: X, site: North, unit_cost: "1", quantity: 1, reorder_level: 0}, status: 400}
++  - {as: sofia, do: "POST /api/parts", body: {sku: X, name: X, site: North, unit_cost: true, quantity: 1, reorder_level: 0}, status: 400}
++  - {as: sofia, do: "POST /api/parts", body: {sku: X, name: X, site: North, unit_cost: 1, quantity: 1.5, reorder_level: 0}, status: 400}
++  - {as: sofia, do: "POST /api/parts", body: {sku: X, name: X, site: North, unit_cost: 1, quantity: true, reorder_level: 0}, status: 400}
++  - {as: sofia, do: "POST /api/parts", body: {sku: X, name: X, site: North, unit_cost: 1, quantity: 1, reorder_level: -1}, status: 400}
++  - {as: sofia, do: "POST /api/parts", body: {sku: X, name: " ", site: North, unit_cost: 1, quantity: 1, reorder_level: 0}, status: 400}
++  - {as: sofia, do: "PATCH /api/parts/1", body: {quantity: 3}, status: 200, json: {quantity: 3, low_stock: true}}
++  - {as: sofia, do: "PATCH /api/parts/1", body: {id: 3}, status: 400}
++  - {as: sofia, do: "PATCH /api/parts/1", body: {sku: BELT-A40}, status: 400}
++  - {as: olga, do: "PATCH /api/parts/1", body: {quantity: 3}, status: 403}
++  - {as: olga, do: "DELETE /api/parts/1", status: 403}
++  - {as: sofia, do: "DELETE /api/parts/1", status: 204}
++  # part_usages are read-only
++  - {as: sofia, do: "POST /api/part_usages", body: {}, status: 403}
++  - {as: sofia, do: "GET /api/part_usages", count: 0}
++  # use_parts
++  - {as: olga, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 1, quantity: 1}]}, status: 403}
++  - {as: nils, do: "POST /api/work_orders/77/use_parts", body: {items: [{part: 1, quantity: 1}]}, status: 409}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 2, quantity: 4}, {part: 99, quantity: 1}]}, status: 409}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 2, quantity: 4}, {part: 1, quantity: true}]}, status: 409}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 8, quantity: 1}]}, status: 409}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 8, quantity: 1.5}]}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 8, quantity: true}]}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 4, quantity: 100}]}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: []}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: "x"}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [1]}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 1, quantity: 1, x: 1}]}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 1}]}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: "1", quantity: 1}]}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 1, quantity: "1"}]}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 1, quantity: 0}]}, status: 400}
++  - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 1, quantity: 1}, {part: 1, quantity: 1}]}, status: 400}
++  - name: "atomic failure leaves nothing behind"
++    steps:
++      - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 2, quantity: 1}, {part: 1, quantity: 0}]}, status: 400}
++      - {as: nils, do: "GET /api/parts/2", json: {quantity: 3}}
++      - {as: nils, do: "GET /api/part_usages", count: 0}
++      - {as: nils, do: "GET /api/_outbox?channel=low_stock", count: 0}
++  - name: "use parts, low stock, complete"
++    steps:
++      - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 2, quantity: 1}, {part: 1, quantity: 2}, {part: 3, quantity: 3}]}, status: 200, json: {id: 49, parts_cost: 106.75}}
++      - {as: nils, do: "GET /api/parts/2", json: {quantity: 2, low_stock: true}}
++      - {as: nils, do: "GET /api/parts/1", json: {quantity: 10, low_stock: false}}
++      - {as: nils, do: "GET /api/_outbox?channel=low_stock", count: 1}
++      - {as: nils, do: "GET /api/_outbox?channel=low_stock", json: {items: [{payload: {part: 2, sku: BELT-A40, quantity: 2}}]}}
++      - {as: nils, do: "GET /api/part_usages", count: 3}
++      - {as: nils, do: "GET /api/part_usages/1", json: {work_order: 49, part: 2, quantity: 1, unit_cost: 18.0, used_by: 8}}
++      - {as: ravi, do: "GET /api/part_usages", count: 0}
++      - {as: ravi, do: "GET /api/part_usages/1", status: 403}
++      - {as: ruth, do: "GET /api/part_usages", count: 3}
++      - {as: sofia, do: "PATCH /api/part_usages/1", body: {quantity: 5}, status: 403}
++      - {as: sofia, do: "DELETE /api/part_usages/1", status: 403}
++      - {as: sofia, do: "DELETE /api/parts/2", status: 409}
++      - {as: sofia, do: "PATCH /api/parts/2", body: {unit_cost: 100}, status: 200}
++      - {as: nils, do: "GET /api/work_orders/49", json: {parts_cost: 106.75}}
++      - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 2, quantity: 1}]}, status: 200, json: {parts_cost: 206.75}}
++      - {as: nils, do: "GET /api/_outbox?channel=low_stock", count: 1}
++      - {as: nils, do: "POST /api/work_orders/49/complete", body: {resolution: ok, labor_minutes: 30}, status: 200}
++      - {as: nils, do: "GET /api/_outbox?channel=work_completed", json: {items: [{payload: {work_order: 49, asset: 6, technician: 8, labor_minutes: 30, parts_cost: 206.75}}]}}
++      - {as: nils, do: "POST /api/work_orders/49/use_parts", body: {items: [{part: 1, quantity: 1}]}, status: 409}
++  - name: "cancel keeps usages"
++    steps:
++      - {as: ravi, do: "POST /api/work_orders/53/use_parts", body: {items: [{part: 6, quantity: 1}, {part: 5, quantity: 1}]}, status: 200, json: {parts_cost: 82.0}}
++      - {as: ravi, do: "GET /api/_outbox?channel=low_stock", count: 1}
++      - {as: ravi, do: "GET /api/_outbox?channel=low_stock", json: {items: [{payload: {part: 6, sku: SEAL-KIT, quantity: 0}}]}}
++      - {as: tomas, do: "POST /api/work_orders/53/cancel", body: {reason: x}, status: 200, json: {status: cancelled, parts_cost: 82.0}}
++      - {as: ravi, do: "GET /api/parts/6", json: {quantity: 0}}
++      - {as: ravi, do: "GET /api/part_usages", count: 2}
++  - {as: ravi, do: "POST /api/work_orders/53/use_parts", body: {items: [{part: 1, quantity: 1}]}, status: 400}
++  - {as: ravi, do: "POST /api/work_orders/53/use_parts", body: {items: [{part: 6, quantity: 2}]}, status: 409}

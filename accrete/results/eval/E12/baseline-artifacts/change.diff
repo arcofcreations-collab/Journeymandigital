@@ -1,0 +1,645 @@
+--- a/README.md
++++ b/README.md
+@@ -57,7 +57,16 @@
+ | who can read/edit/decide/pay | `permissions.py` (manager = the claimant's direct `manager`) |
+ | fields clients may set / never set | `validation.CLAIM_WRITABLE`, `validation.CLAIM_READ_ONLY` |
+ | amount range, categories, roles | `validation.MAX_CLAIM_AMOUNT`, `CLAIM_CATEGORIES`, `EMPLOYEE_ROLES` |
+-| actions shown on detail pages | `services.claim_actions` |
++| actions shown on detail pages | `services.claim_actions`, `services.employee_actions` |
++
++### Employee offboarding
++
++`POST /api/employees/{id}/offboard {"successor": id}` (finance only) runs `services.offboard_employee`
++in one transaction: `active` becomes false, the employee's reports move to the successor, their
++draft claims are deleted and an `employee_offboarded` outbox message is emitted. It is refused (409)
++for an inactive employee or one with `submitted`/`approved` claims. Inactive employees keep their
++read rights, but every write permission in `permissions.py` requires an active caller, and an
++inactive employee cannot be anyone's `manager`.
+ 
+ ## Running the tests
+ 
+@@ -111,4 +120,6 @@
+ * Employee `manager` must be an existing employee and must not create a reporting loop → else 400.
+   Deleting an employee who has claims, decided claims or reports → 409.
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the heading.
++* `active` is read-only (sending it → 400). A successor must not report to the offboarded employee
++  directly *or indirectly* (either would create a reporting loop) → else 400.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/expenses_app/migrations/0002_add_employee_active.sql
++++ b/expenses_app/migrations/0002_add_employee_active.sql
+@@ -0,0 +1,4 @@
++-- Employees can be offboarded: `active` (boolean, 1/0) is maintained by the offboard action only.
++-- Every existing employee is active.
++
++ALTER TABLE employees ADD COLUMN active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1));
+--- a/expenses_app/permissions.py
++++ b/expenses_app/permissions.py
+@@ -2,11 +2,18 @@
+ 
+ ``claimant`` is the employee record a claim belongs to (needed to find their manager).
+ These answer only "is this user allowed?"; state rules (409) live in ``services``.
++
++Inactive (offboarded) employees keep their read rights but may not write anything:
++every create/update/delete and every action requires an active caller.
+ """
+ 
+ 
+ def is_finance(user):
+     return user["role"] == "finance"
++
++
++def is_active(user):
++    return user["active"]
+ 
+ 
+ def is_manager_of(user, employee):
+@@ -22,13 +29,17 @@
+ 
+ def can_manage_employees(user):
+     """Create, update and delete employees."""
+-    return is_finance(user)
++    return is_active(user) and is_finance(user)
++
++
++def can_offboard_employee(user):
++    return is_active(user) and is_finance(user)
+ 
+ 
+ # --- claims ---------------------------------------------------------------------------
+ 
+ def can_create_claim(user):
+-    return True
++    return is_active(user)
+ 
+ 
+ def can_read_claim(user, claim, claimant):
+@@ -37,17 +48,17 @@
+ 
+ def can_edit_claim(user, claim):
+     """PATCH and DELETE: only the claim's own employee."""
+-    return claim["employee"] == user["id"]
++    return is_active(user) and claim["employee"] == user["id"]
+ 
+ 
+ def can_submit_claim(user, claim):
+-    return claim["employee"] == user["id"]
++    return is_active(user) and claim["employee"] == user["id"]
+ 
+ 
+ def can_decide_claim(user, claimant):
+     """Approve or reject: the claimant's manager."""
+-    return is_manager_of(user, claimant)
++    return is_active(user) and is_manager_of(user, claimant)
+ 
+ 
+ def can_pay_claim(user, claim):
+-    return is_finance(user)
++    return is_active(user) and is_finance(user)
+--- a/expenses_app/repository.py
++++ b/expenses_app/repository.py
+@@ -10,7 +10,7 @@
+ 
+ # --- employees ------------------------------------------------------------------------
+ 
+-_EMPLOYEE_SELECT = "SELECT id, username, name, role, manager_id, department FROM employees"
++_EMPLOYEE_SELECT = "SELECT id, username, name, role, manager_id, department, active FROM employees"
+ 
+ 
+ def _employee(row):
+@@ -23,6 +23,7 @@
+         "role": row["role"],
+         "manager": row["manager_id"],
+         "department": row["department"],
++        "active": bool(row["active"]),
+     }
+ 
+ 
+@@ -46,6 +47,7 @@
+ 
+ 
+ def insert_employee(values):
++    """Insert a new employee; ``active`` takes its column default (true)."""
+     cur = get_db().execute(
+         "INSERT INTO employees (username, name, role, manager_id, department) VALUES (?, ?, ?, ?, ?)",
+         (values["username"], values["name"], values["role"], values["manager"], values["department"]),
+@@ -61,6 +63,20 @@
+ 
+ def delete_employee(employee_id):
+     get_db().execute("DELETE FROM employees WHERE id = ?", (employee_id,))
++
++
++def report_ids(employee_id):
++    """Ids of the employees whose ``manager`` is ``employee_id``, ascending."""
++    rows = get_db().execute("SELECT id FROM employees WHERE manager_id = ? ORDER BY id", (employee_id,))
++    return [row["id"] for row in rows]
++
++
++def reassign_reports(employee_id, new_manager_id):
++    get_db().execute("UPDATE employees SET manager_id = ? WHERE manager_id = ?", (new_manager_id, employee_id))
++
++
++def mark_employee_inactive(employee_id):
++    get_db().execute("UPDATE employees SET active = 0 WHERE id = ?", (employee_id,))
+ 
+ 
+ def employee_is_referenced(employee_id):
+@@ -127,6 +143,20 @@
+     get_db().execute("DELETE FROM claims WHERE id = ?", (claim_id,))
+ 
+ 
++def claim_ids_of_employee(employee_id, statuses):
++    """Ids of the employee's claims whose status is one of ``statuses``, ascending."""
++    placeholders = ", ".join("?" for _ in statuses)
++    rows = get_db().execute(
++        f"SELECT id FROM claims WHERE employee_id = ? AND status IN ({placeholders}) ORDER BY id",
++        (employee_id, *statuses),
++    )
++    return [row["id"] for row in rows]
++
++
++def delete_claims(claim_ids):
++    get_db().executemany("DELETE FROM claims WHERE id = ?", [(claim_id,) for claim_id in claim_ids])
++
++
+ def mark_claim_submitted(claim_id, submitted_at):
+     get_db().execute(
+         "UPDATE claims SET status = 'submitted', submitted_at = ? WHERE id = ?", (submitted_at, claim_id)
+--- a/expenses_app/routes_api.py
++++ b/expenses_app/routes_api.py
+@@ -57,6 +57,11 @@
+     return "", 204
+ 
+ 
++@bp.post("/employees/<int:employee_id>/offboard")
++def offboard_employee(employee_id):
++    return services.offboard_employee(current_context(), employee_id, _body())
++
++
+ # --- claims ---------------------------------------------------------------------------
+ 
+ @bp.get("/claims")
+--- a/expenses_app/routes_ui.py
++++ b/expenses_app/routes_ui.py
+@@ -66,8 +66,8 @@
+ def new_employee():
+     ctx = current_context()
+     services.ensure_can_create_employee(ctx)
+-    return render_template("employees/new.html", roles=validation.EMPLOYEE_ROLES,
+-                           managers=services.list_employees(ctx))
++    managers = [e for e in services.list_employees(ctx) if e["active"]]
++    return render_template("employees/new.html", roles=validation.EMPLOYEE_ROLES, managers=managers)
+ 
+ 
+ @bp.post("/employees")
+@@ -80,8 +80,17 @@
+ 
+ @bp.get("/employees/<int:employee_id>")
+ def show_employee(employee_id):
+-    employee = services.get_employee(current_context(), employee_id)
+-    return render_template("employees/detail.html", employee=employee)
++    ctx = current_context()
++    employee = services.get_employee(ctx, employee_id)
++    actions = services.employee_actions(ctx, employee)
++    successors = services.offboard_successor_candidates(employee) if "offboard" in actions else []
++    return render_template("employees/detail.html", employee=employee, actions=actions, successors=successors)
++
++
++@bp.post("/employees/<int:employee_id>/offboard")
++def offboard_employee(employee_id):
++    services.offboard_employee(current_context(), employee_id, _form_values({"successor": _optional_int}))
++    return redirect(url_for("ui.show_employee", employee_id=employee_id), 303)
+ 
+ 
+ # --- claims ---------------------------------------------------------------------------
+--- a/expenses_app/services.py
++++ b/expenses_app/services.py
+@@ -8,16 +8,21 @@
+ 
+     draft --submit--> submitted --approve--> approved --pay--> paid
+                                 \\--reject--> rejected
++
++Employees are offboarded (``active`` = false) by finance with ``offboard_employee``; inactive
++employees keep their read rights but every write is refused (see ``permissions``).
+ """
+ from . import permissions, repository, validation
+ from .db import transaction
+ from .errors import Conflict, Forbidden, NotFound, ValidationError
+ from .filters import apply_filters
+ 
+-EMPLOYEE_FIELDS = ("id", "username", "name", "role", "manager", "department")
++EMPLOYEE_FIELDS = ("id", "username", "name", "role", "manager", "department", "active")
+ CLAIM_FIELDS = ("id", "employee", "amount", "category", "description", "status",
+                 "submitted_at", "decided_at", "decided_by", "rejection_reason")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
++# Claims with money in flight: an employee who has any cannot be offboarded.
++OFFBOARD_BLOCKING_STATUSES = ("submitted", "approved")
+ 
+ 
+ # --- employees ------------------------------------------------------------------------
+@@ -69,6 +74,83 @@
+         repository.delete_employee(employee_id)
+ 
+ 
++def offboard_employee(ctx, employee_id, params):
++    """Deactivate an employee in one step: their reports move to ``successor``, their draft
++    claims are deleted and an ``employee_offboarded`` message is emitted. All or nothing."""
++    with transaction():
++        employee = _load_employee(employee_id)
++        if not permissions.can_offboard_employee(ctx.user):
++            raise Forbidden("Only finance can offboard employees.")
++        _require_offboardable(employee)
++        successor_id = validation.clean_offboard_params(params)
++        _check_successor(successor_id, employee_id)
++        reassigned = repository.report_ids(employee_id)
++        deleted_claims = repository.claim_ids_of_employee(employee_id, ("draft",))
++        repository.reassign_reports(employee_id, successor_id)
++        repository.delete_claims(deleted_claims)
++        repository.mark_employee_inactive(employee_id)
++        repository.add_outbox_message(
++            "employee_offboarded",
++            {"employee": employee_id, "successor": successor_id, "reassigned": reassigned,
++             "deleted_claims": deleted_claims},
++            ctx.now_text,
++        )
++    return repository.get_employee(employee_id)
++
++
++def employee_actions(ctx, employee):
++    """Names of the actions the caller could start on ``employee`` right now (ignoring parameters)."""
++    actions = []
++    if permissions.can_offboard_employee(ctx.user) and _offboard_conflict(employee) is None:
++        actions.append("offboard")
++    return actions
++
++
++def offboard_successor_candidates(employee):
++    """Employees that would be accepted as ``successor`` when offboarding ``employee``."""
++    return [e for e in repository.list_employees() if _successor_error(e, employee["id"]) is None]
++
++
++def _offboard_conflict(employee):
++    """Why ``employee`` cannot be offboarded in their current state, or None."""
++    if not employee["active"]:
++        return "The employee is already inactive."
++    if repository.claim_ids_of_employee(employee["id"], OFFBOARD_BLOCKING_STATUSES):
++        return "The employee has submitted or approved claims; settle them first."
++    return None
++
++
++def _require_offboardable(employee):
++    message = _offboard_conflict(employee)
++    if message:
++        raise Conflict(message)
++
++
++def _check_successor(successor_id, employee_id):
++    error = _successor_error(repository.get_employee(successor_id), employee_id)
++    if error:
++        raise ValidationError("Invalid successor.", {"successor": error})
++
++
++def _successor_error(successor, employee_id):
++    """Why ``successor`` cannot take over the reports of ``employee_id``, or None.
++
++    Besides the successor themselves, nobody who reports to the offboarded employee (directly
++    or indirectly) qualifies: moving the reports under them would create a reporting loop.
++    """
++    if successor is None:
++        return "no such employee"
++    if not successor["active"]:
++        return "must be an active employee"
++    if successor["role"] != "manager":
++        return "must be a manager"
++    if successor["id"] == employee_id:
++        return "cannot be the offboarded employee"
++    if _is_same_or_reports_to(successor["manager"], employee_id):
++        return "must not report to the offboarded employee"
++    return None
++
++
+ def _load_employee(employee_id):
+     employee = repository.get_employee(employee_id)
+     if employee is None:
+@@ -77,14 +159,18 @@
+ 
+ 
+ def _check_employee_references(values, employee_id=None):
+-    """Username must be unique; ``manager`` must exist and not create a reporting loop."""
++    """Username must be unique; ``manager`` must be an existing, active employee and must
++    not create a reporting loop."""
+     errors = {}
+     if "username" in values and repository.username_taken(values["username"], employee_id):
+         errors["username"] = "already in use"
+     manager_id = values.get("manager")
+     if manager_id is not None:
+-        if repository.get_employee(manager_id) is None:
++        manager = repository.get_employee(manager_id)
++        if manager is None:
+             errors["manager"] = "no such employee"
++        elif not manager["active"]:
++            errors["manager"] = "must be an active employee"
+         elif employee_id is not None and _is_same_or_reports_to(manager_id, employee_id):
+             errors["manager"] = "would make the employee their own manager"
+     if errors:
+--- a/expenses_app/templates/employees/detail.html
++++ b/expenses_app/templates/employees/detail.html
+@@ -9,5 +9,17 @@
+   {{ field("role", employee.role) }}
+   {{ field("manager", employee.manager, href=employee.manager and url_for('ui.show_employee', employee_id=employee.manager)) }}
+   {{ field("department", employee.department) }}
++  {{ field("active", employee.active) }}
+ </dl>
++
++{% if "offboard" in actions %}
++<form data-action="offboard" method="post" action="{{ url_for('ui.offboard_employee', employee_id=employee.id) }}">
++  <label>Successor manager
++    <select name="successor" required>
++      {% for successor in successors %}<option value="{{ successor.id }}">{{ successor.name }} ({{ successor.username }})</option>{% endfor %}
++    </select>
++  </label>
++  <button type="submit">Offboard</button>
++</form>
++{% endif %}
+ {% endblock %}
+--- a/expenses_app/templates/employees/list.html
++++ b/expenses_app/templates/employees/list.html
+@@ -2,9 +2,9 @@
+ {% block title %}Employees{% endblock %}
+ {% block content %}
+ <h1>Employees</h1>
+-{% if ctx.role == "finance" %}<p><a href="{{ url_for('ui.new_employee') }}">New employee</a></p>{% endif %}
++{% if ctx.role == "finance" and ctx.user.active %}<p><a href="{{ url_for('ui.new_employee') }}">New employee</a></p>{% endif %}
+ <table>
+-  <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Manager</th><th>Department</th></tr></thead>
++  <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Manager</th><th>Department</th><th>Active</th></tr></thead>
+   <tbody>
+   {% for employee in employees %}
+     <tr data-id="{{ employee.id }}">
+@@ -13,6 +13,7 @@
+       <td>{{ employee.role }}</td>
+       <td>{{ employee.manager|display }}</td>
+       <td>{{ employee.department }}</td>
++      <td>{{ employee.active|display }}</td>
+     </tr>
+   {% endfor %}
+   </tbody>
+--- a/expenses_app/validation.py
++++ b/expenses_app/validation.py
+@@ -84,6 +84,8 @@
+ # --- per-collection cleaning ----------------------------------------------------------
+ 
+ EMPLOYEE_WRITABLE = ("username", "name", "role", "manager", "department")
++# Clients sending these get a 400 (`active` is maintained by the offboard action).
++EMPLOYEE_READ_ONLY = ("id", "active")
+ 
+ CLAIM_WRITABLE = ("amount", "category", "description")
+ # Maintained by the workflow actions; clients sending them get a 400.
+@@ -92,7 +94,7 @@
+ 
+ def clean_employee(data, *, partial):
+     data = require_object(data)
+-    errors = unknown_field_errors(data, EMPLOYEE_WRITABLE, read_only=("id",))
++    errors = unknown_field_errors(data, EMPLOYEE_WRITABLE, read_only=EMPLOYEE_READ_ONLY)
+     values = {}
+     for name in ("username", "name", "department"):
+         if name in data or not partial:
+@@ -135,6 +137,19 @@
+     return reason
+ 
+ 
++def clean_offboard_params(data):
++    """``{"successor": <employee id>}``; returns the successor id (existence is checked by services)."""
++    data = require_object(data)
++    errors = unknown_field_errors(data, ("successor",))
++    successor = None
++    with collect(errors, "successor"):
++        successor = optional_record_id(data.get("successor"))
++        if successor is None:
++            raise FieldInvalid("required")
++    raise_if_errors(errors)
++    return successor
++
++
+ def clean_no_params(data):
+     data = require_object(data)
+     raise_if_errors(unknown_field_errors(data, ()))
+--- a/seed.py
++++ b/seed.py
+@@ -20,8 +20,8 @@
+ def load_seed(conn, seed):
+     # Managers come before their reports in the seed file, so foreign keys hold row by row.
+     conn.executemany(
+-        "INSERT INTO employees (id, username, name, role, manager_id, department)"
+-        " VALUES (:id, :username, :name, :role, :manager, :department)",
++        "INSERT INTO employees (id, username, name, role, manager_id, department, active)"
++        " VALUES (:id, :username, :name, :role, :manager, :department, :active)",
+         seed["employees"],
+     )
+     conn.executemany(
+--- a/tests/test_expenses_employees.py
++++ b/tests/test_expenses_employees.py
+@@ -10,7 +10,7 @@
+ 
+ def test_finance_creates_employee(app):
+     r = app.post("/api/employees", NEW, user="fiona")
+-    assert r.status == 201 and r.json == {"id": 16, **NEW}
++    assert r.status == 201 and r.json == {"id": 16, **NEW, "active": True}
+     no_manager = dict(NEW, username="bo")
+     del no_manager["manager"]
+     assert app.post("/api/employees", no_manager, user="fiona").json["manager"] is None
+--- a/tests/test_expenses_offboarding.py
++++ b/tests/test_expenses_offboarding.py
+@@ -0,0 +1,169 @@
++"""Employee offboarding: the `active` flag, the offboard action and what inactive employees may do."""
++from accept_client import parse_ui
++
++NOW = "2026-03-02T09:30:00"
++CLAIM = {"amount": 42.5, "category": "meals", "description": "Team lunch"}
++
++
++def _employee(app, username, role="employee", manager=3):
++    body = {"username": username, "name": username.title(), "role": role, "manager": manager, "department": "Ops"}
++    r = app.post("/api/employees", body, user="fiona")
++    assert r.status == 201, r
++    return r.json["id"]
++
++
++def _claim(app, user):
++    r = app.post("/api/claims", CLAIM, user=user)
++    assert r.status == 201, r
++    return r.json["id"]
++
++
++def _offboarded(app, username, successor=2):
++    """Create an employee, offboard them and return their id."""
++    employee_id = _employee(app, username)
++    assert app.post(f"/api/employees/{employee_id}/offboard", {"successor": successor}, user="fiona").status == 200
++    return employee_id
++
++
++def test_active_field(app):
++    assert all(e["active"] is True for e in app.get("/api/employees", user="zoe").json["items"])
++    assert _employee(app, "ann") == 16
++    assert app.get("/api/employees/16", user="zoe").json["active"] is True
++    new = {"username": "bo", "name": "Bo", "role": "employee", "department": "Ops"}
++    r = app.post("/api/employees", dict(new, active=True), user="fiona")
++    assert r.status == 400 and "active" in r.json["fields"]
++    assert app.patch("/api/employees/5", {"active": False}, user="fiona").status == 400
++    assert app.patch("/api/employees/5", {"active": False}, user="marco").status == 403  # 403 beats 400
++    assert app.get("/api/employees?active=false", user="zoe").json["items"] == []
++    assert len(app.get("/api/employees?active=true", user="zoe").json["items"]) == 16
++
++
++def test_offboard_moves_reports_and_deletes_drafts(app):
++    mia = _employee(app, "mia", role="manager")
++    ned = _employee(app, "ned", manager=mia)
++    lou = _employee(app, "lou", manager=mia)
++    drafts = [_claim(app, "mia"), _claim(app, "mia")]
++    rejected = _claim(app, "mia")
++    app.post(f"/api/claims/{rejected}/submit", {}, user="mia")
++    assert app.post(f"/api/claims/{rejected}/reject", {"reason": "No"}, user="nadia").status == 200
++    ned_draft = _claim(app, "ned")
++
++    r = app.post(f"/api/employees/{mia}/offboard", {"successor": 2}, user="fiona", now=NOW)
++    assert r.status == 200
++    assert r.json == {"id": mia, "username": "mia", "name": "Mia", "role": "manager", "manager": 3,
++                      "department": "Ops", "active": False}
++    assert [app.get(f"/api/employees/{e}", user="zoe").json["manager"] for e in (ned, lou)] == [2, 2]
++    assert all(app.get(f"/api/claims/{c}", user="fiona").status == 404 for c in drafts)
++    assert app.get(f"/api/claims/{rejected}", user="fiona").json["status"] == "rejected"
++    assert app.get(f"/api/claims/{ned_draft}", user="fiona").status == 200  # only mia's drafts go
++    assert app.get("/api/_outbox", user="zoe").json["items"] == [
++        {"id": 1, "channel": "employee_offboarded", "created_at": NOW,
++         "payload": {"employee": mia, "successor": 2, "reassigned": [ned, lou], "deleted_claims": drafts}}
++    ]
++    assert app.get("/api/employees?active=false", user="zoe").json["items"] == [r.json]
++
++
++def test_offboarded_manager_hands_over_approvals(app):
++    r = app.post("/api/employees/3/offboard", {"successor": 2}, user="fiona")
++    assert r.status == 200 and r.json["active"] is False
++    payload = app.get("/api/_outbox", user="zoe").json["items"][0]["payload"]
++    assert payload == {"employee": 3, "successor": 2, "reassigned": [7, 10, 13], "deleted_claims": []}
++    assert app.post("/api/claims/58/approve", {}, user="nadia").status == 403
++    assert app.get("/api/claims/58", user="nadia").status == 403  # no longer rosa's manager
++    assert app.get("/api/claims/58", user="marco").status == 200
++    assert app.post("/api/claims/58/approve", {}, user="marco").json["decided_by"] == 2
++    app.post("/api/claims/4/pay", {}, user="fiona", now=NOW)
++    assert app.get("/api/_outbox?channel=payment", user="zoe").json["items"][0]["payload"] == {
++        "claim": 4, "employee": 10, "amount": 558.67}
++
++
++def test_offboard_precedence_and_state(app):
++    assert app.post("/api/employees/99/offboard", {}, user="marco").status == 404
++    assert app.post("/api/employees/2/offboard", {"successor": 3}, user="marco").status == 403
++    assert app.post("/api/employees/2/offboard", {}, user="priya").status == 403  # 403 beats 400
++    assert app.post("/api/employees/4/offboard", {"successor": 3}, user="fiona").status == 409  # submitted/approved
++    assert app.post("/api/employees/5/offboard", {}, user="fiona").status == 409  # approved claims; 409 beats 400
++    ann = _offboarded(app, "ann")
++    assert app.post(f"/api/employees/{ann}/offboard", {"successor": 2}, user="fiona").status == 409  # inactive
++
++
++def test_offboard_successor_validation(app):
++    inactive = _offboarded(app, "ann")
++    under_omar = _employee(app, "kim", role="manager", manager=4)  # reports to marco indirectly
++    for body in ({}, {"successor": None}, {"successor": "3"}, {"successor": True}, {"successor": 99},
++                 {"successor": inactive}, {"successor": 5}, {"successor": 1}, {"successor": 2},
++                 {"successor": 4}, {"successor": under_omar}, {"successor": 3, "extra": 1}, []):
++        r = app.post("/api/employees/2/offboard", body, user="fiona")
++        assert r.status == 400, body
++    assert app.get("/api/employees/2", user="zoe").json["active"] is True
++    assert app.get("/api/employees/4", user="zoe").json["manager"] == 2
++    assert app.get("/api/_outbox?channel=employee_offboarded", user="zoe").json["items"][-1]["payload"]["employee"] == inactive
++    assert app.post("/api/employees/2/offboard", {"successor": 3}, user="fiona").status == 200
++
++
++def test_failed_offboard_changes_nothing(app):
++    employees = app.get("/api/employees", user="fiona").json["items"]
++    claims = app.get("/api/claims", user="fiona").json["items"]
++    for employee_id, body in ((12, {"successor": 4}), (12, {"successor": 12}), (4, {"successor": 3})):
++        assert app.post(f"/api/employees/{employee_id}/offboard", body, user="fiona").status in (400, 409)
++    assert app.get("/api/employees", user="fiona").json["items"] == employees
++    assert app.get("/api/claims", user="fiona").json["items"] == claims
++    assert app.get("/api/_outbox", user="fiona").json["items"] == []
++
++
++def test_inactive_employee_reads_but_cannot_write(app):
++    ann = _employee(app, "ann")
++    draft = _claim(app, "ann")
++    kept = _claim(app, "ann")
++    app.post(f"/api/claims/{kept}/submit", {}, user="ann")
++    app.post(f"/api/claims/{kept}/reject", {"reason": "No"}, user="nadia")
++    assert app.post(f"/api/employees/{ann}/offboard", {"successor": 2}, user="fiona").status == 200
++
++    assert app.get("/api/claims", user="ann").json["items"] == [app.get(f"/api/claims/{kept}", user="fiona").json]
++    assert app.get(f"/api/claims/{draft}", user="ann").status == 404
++    assert app.get("/api/employees", user="ann").status == 200
++    assert app.post("/api/claims", CLAIM, user="ann").status == 403
++    assert app.post("/api/claims", {}, user="ann").status == 403  # 403 beats 400
++    assert app.patch(f"/api/claims/{kept}", {"amount": 1}, user="ann").status == 403  # 403 beats 409
++    assert app.delete(f"/api/claims/{kept}", user="ann").status == 403
++    assert app.get("/ui/claims/new", user="ann").status == 403
++    assert parse_ui(app.get(f"/ui/claims/{kept}", user="ann").text).actions == []
++
++
++def test_inactive_finance_and_manager_cannot_act(app):
++    fay = _employee(app, "fay", role="finance", manager=None)
++    assert app.post(f"/api/employees/{fay}/offboard", {"successor": 2}, user="fiona").status == 200
++    assert len(app.get("/api/claims", user="fay").json["items"]) == 80  # finance still reads everything
++    assert app.post("/api/claims/4/pay", {}, user="fay").status == 403
++    assert app.post("/api/claims/999/pay", {}, user="fay").status == 404
++    assert app.post("/api/employees", {}, user="fay").status == 403
++    assert app.patch("/api/employees/5", {"name": "P"}, user="fay").status == 403
++    assert app.delete(f"/api/employees/{fay}", user="fay").status == 403
++    assert app.post("/api/employees/2/offboard", {"successor": 3}, user="fay").status == 403
++    assert app.get("/ui/employees/new", user="fay").status == 403
++    assert parse_ui(app.get("/ui/claims/4", user="fay").text).actions == []
++    assert parse_ui(app.get("/ui/employees/2", user="fay").text).actions == []
++
++
++def test_inactive_employee_cannot_become_manager(app):
++    ann = _offboarded(app, "ann")
++    new = {"username": "bo", "name": "Bo", "role": "employee", "department": "Ops"}
++    r = app.post("/api/employees", dict(new, manager=ann), user="fiona")
++    assert r.status == 400 and "manager" in r.json["fields"]
++    assert app.patch("/api/employees/5", {"manager": ann}, user="fiona").status == 400
++    assert app.patch(f"/api/employees/{ann}", {"department": "Gone"}, user="fiona").status == 200
++
++
++def test_offboard_ui(app):
++    def page(employee_id, user):
++        return parse_ui(app.get(f"/ui/employees/{employee_id}", user=user).text)
++
++    assert page(2, "fiona").actions == ["offboard"]
++    assert "successor" in page(2, "fiona").inputs
++    assert page(2, "marco").actions == []  # not finance
++    assert page(4, "fiona").actions == []  # money in flight
++    assert page(2, "zoe").fields["active"] == "true"
++    ann = _offboarded(app, "ann")
++    assert page(ann, "fiona").actions == []  # already inactive
++    assert page(ann, "fiona").fields["active"] == "false"
++    assert parse_ui(app.get("/ui/employees", user="zoe").text).rows == list(range(1, ann + 1))
+--- a/tests/test_expenses_ui.py
++++ b/tests/test_expenses_ui.py
+@@ -63,7 +63,7 @@
+ def test_employee_detail(app):
+     page = parse_ui(app.get("/ui/employees/5", user="zoe").text)
+     assert page.fields == {"username": "priya", "name": "Priya Kim", "role": "employee", "manager": "4",
+-                           "department": "Engineering"}
++                           "department": "Engineering", "active": "true"}
+     assert parse_ui(app.get("/ui/employees/1", user="zoe").text).fields["manager"] == ""
+ 
+ 
+@@ -88,3 +88,12 @@
+     status, _, _ = _post_form(app, "/ui/employees", {"username": "ann", "name": "Ann", "role": "employee",
+                                                      "manager": "", "department": "Ops"}, "fiona")
+     assert status == 303 and app.get("/api/employees/16", user="ann").json["manager"] is None
++
++
++def test_offboard_form_posts_through_service(app):
++    assert _post_form(app, "/ui/employees/2/offboard", {"successor": ""}, "fiona")[0] == 400
++    assert _post_form(app, "/ui/employees/2/offboard", {"successor": "3"}, "marco")[0] == 403
++    status, headers, _ = _post_form(app, "/ui/employees/2/offboard", {"successor": "3"}, "fiona")
++    assert status == 303 and headers["Location"].endswith("/ui/employees/2")
++    assert app.get("/api/employees/2", user="fiona").json["active"] is False
++    assert app.get("/api/employees/4", user="fiona").json["manager"] == 3

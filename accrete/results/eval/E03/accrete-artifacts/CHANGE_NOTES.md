@@ -1,0 +1,7 @@
+# E03 - Priority scale p1-p4
+
+Interpretation: `priority` is now the enum p1|p2|p3|p4 (old values and other spellings -> 400 on create/PATCH; a list filter with an old value matches nothing). due_date = created_at date + 1/3/7/30 days (still derived; overdue unchanged). A create or PATCH that sends/sets p4 on an order whose asset has criticality high -> 400, even if the order already has p4; the 403 rules and the finished-order 409 still win because the check runs after rules and guards. claim additionally requires the current priority to be p3 or p4 (403 otherwise, so it wins over the 409s; UI claim form follows). assign unchanged.
+
+Changed (one accrete change, changes/0004-priority-p1-p4.yaml, ledger #4): change_field priority with convert (urgent->p1; normal->p2 on high-criticality asset else p3; low->p4, including the 5 low orders on high assets, which keep p4 and stay editable); new due_date expression; create/update triggers with a 400 fail for p4 on high-criticality assets; claim allow extended.
+
+Verified: dry-run + commit (replay 3025 requests: 185 changed as intended, 0 unexplained/consequences), 50 expectations (migration counts 16/12/27/27, old-value 400s, due dates, p4 rule incl. 403/409 precedence, claim 403 on p1/p2, assign still works), `accrete check`, and through app_entry.py with the harness client: UI claim forms, create form inputs, filters, and a diff showing no field other than priority/due_date/overdue changed on any of the 82 orders.

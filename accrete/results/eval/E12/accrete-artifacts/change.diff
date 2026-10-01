@@ -1,0 +1,73 @@
+--- a/changes/0002-offboarding.yaml
++++ b/changes/0002-offboarding.yaml
+@@ -0,0 +1,70 @@
++request: "Atomic employee offboarding (expenses): employees gain read-only boolean `active` (new = true, sending it -> 400, filterable); POST /api/employees/{id}/offboard {successor} by finance only (403), 409 if already inactive or any submitted/approved claim, 400 unless successor is an existing active manager other than the employee and not managed by them; atomically deactivate, move direct reports to the successor, delete the employee's drafts and emit employee_offboarded {employee, successor, reassigned, deleted_claims}. Inactive employees keep read rights but every write and action is 403; an inactive employee cannot be anyone's manager (400). Existing employees get active = true."
++interpretation: >
++  `active` is a system bool (default True, backfill True). Every write rule and action allow
++  additionally requires `user.active` (inactive callers get 403, also on /ui/*/new).
++  The offboard action: allow = finance and active caller; guard = record active and no
++  submitted/approved claims; successor validation is a 400 `fail` effect run before any other
++  effect, so a failing check changes nothing. Reports are re-managed before the employee is
++  deactivated. A constraint on employees requires that a set manager is active (400 on
++  create/patch); no existing record violates it and offboarding never leaves a report on an
++  inactive manager. Lists in the payload are ascending ids.
++ops:
++  - add_field: {entity: employees, name: active, type: bool, required: true, system: true, default: "True", backfill: "True"}
++  - set_rule: {entity: employees, rule: create, expr: "user.role == 'finance' and user.active"}
++  - set_rule: {entity: employees, rule: update, expr: "user.role == 'finance' and user.active"}
++  - set_rule: {entity: employees, rule: delete, expr: "user.role == 'finance' and user.active"}
++  - add_constraint: {entity: employees, name: manager_active, expr: "record.manager is None or record.manager.active", message: "manager must be an active employee", field: manager, existing: enforce}
++  - set_rule: {entity: claims, rule: create, expr: "user.active"}
++  - set_rule: {entity: claims, rule: update, expr: "record.employee == user and user.active"}
++  - set_rule: {entity: claims, rule: delete, expr: "record.employee == user and user.active"}
++  - change_action: {entity: claims, name: submit, allow: "record.employee == user and user.active"}
++  - change_action: {entity: claims, name: approve, allow: "record.employee.manager == user and user.active"}
++  - change_action: {entity: claims, name: reject, allow: "record.employee.manager == user and user.active"}
++  - change_action: {entity: claims, name: pay, allow: "user.role == 'finance' and user.active"}
++  - add_action:
++      entity: employees
++      name: offboard
++      params: {successor: ref employees required}
++      allow: "user.role == 'finance' and user.active"
++      guard: "record.active and count(claims, employee=record, status='submitted') == 0 and count(claims, employee=record, status='approved') == 0"
++      guard_message: "'employee is inactive or has submitted/approved claims'"
++      effects:
++        - fail: "'successor must be an active manager other than the employee and not reporting to them'"
++          status: 400
++          when: "params.successor is None or not params.successor.active or params.successor.role != 'manager' or params.successor == record or params.successor.manager == record"
++        - emit: employee_offboarded
++          payload:
++            employee: record
++            successor: params.successor
++            reassigned: "sorted([e.id for e in employees if e.manager == record])"
++            deleted_claims: "sorted([c.id for c in claims if c.employee == record and c.status == 'draft'])"
++        - update: "find(employees, manager=record)"
++          set: {manager: params.successor}
++        - delete: "find(claims, employee=record, status='draft')"
++        - set: {active: "False"}
++expect:
++  - {as: fiona, do: "GET /api/employees/5", status: 200, json: {active: true}}
++  - {as: fiona, do: "GET /api/employees?active=true", count: 15}
++  - {as: fiona, do: "POST /api/employees", body: {username: new1, name: N, role: employee, department: D, active: false}, status: 400}
++  - {as: fiona, do: "PATCH /api/employees/5", body: {active: false}, status: 400}
++  - {as: fiona, do: "POST /api/employees", body: {username: new1, name: N, role: employee, department: D}, status: 201, json: {active: true}}
++  - {as: nadia, do: "POST /api/employees/2/offboard", body: {successor: 3}, status: 403}
++  - {as: fiona, do: "POST /api/employees/99/offboard", body: {successor: 3}, status: 404}
++  - {as: fiona, do: "POST /api/employees/4/offboard", body: {successor: 3}, status: 409}
++  - {as: fiona, do: "POST /api/employees/4/offboard", body: {}, status: 409}
++  - {as: fiona, do: "POST /api/employees/2/offboard", body: {}, status: 400}
++  - {as: fiona, do: "POST /api/employees/2/offboard", body: {successor: 99}, status: 400}
++  - {as: fiona, do: "POST /api/employees/2/offboard", body: {successor: 2}, status: 400}
++  - {as: fiona, do: "POST /api/employees/2/offboard", body: {successor: 5}, status: 400}
++  - {as: fiona, do: "POST /api/employees/2/offboard", body: {successor: 4}, status: 400}
++  - name: "offboard marco to nadia"
++    steps:
++      - {as: fiona, do: "POST /api/employees/2/offboard", body: {successor: 3}, status: 200, json: {id: 2, active: false}}
++      - {as: fiona, do: "GET /api/employees?manager=3", count: 8}
++      - {as: fiona, do: "GET /api/_outbox?channel=employee_offboarded", count: 1, json: {items: [{payload: {employee: 2, successor: 3, reassigned: [4, 6, 9, 12, 15], deleted_claims: []}}]}}
++      - {as: fiona, do: "POST /api/employees/2/offboard", body: {successor: 3}, status: 409}
++      - {as: marco, do: "GET /api/employees", status: 200}
++      - {as: marco, do: "POST /api/claims", body: {amount: 10, category: travel, description: x}, status: 403}
++      - {as: fiona, do: "PATCH /api/employees/5", body: {manager: 2}, status: 400}
++      - {as: fiona, do: "POST /api/employees", body: {username: new2, name: N, role: employee, department: D, manager: 2}, status: 400}
++      - {as: nadia, do: "POST /api/claims/3/approve", status: 200}

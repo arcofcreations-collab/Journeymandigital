@@ -1,0 +1,113 @@
+--- a/changes/0004-priority-p1-p4.yaml
++++ b/changes/0004-priority-p1-p4.yaml
+@@ -0,0 +1,110 @@
++request: "Priority scale p1-p4 (maintenance, applied after E02)"
++interpretation: >-
++  work_orders.priority becomes enum p1|p2|p3|p4 (required); every other value, including the old
++  urgent/normal/low and other spellings such as P1, is rejected with 400 on create and PATCH by the
++  enum validation; a list filter with an old value stays a valid filter that matches nothing.
++  Existing orders (all statuses) are migrated with convert: urgent -> p1; normal -> p2 when the
++  order's asset has criticality high, else p3; low -> p4 (also on high-criticality assets, which
++  keep p4). due_date = created_at date + 1/3/7/30 days for p1/p2/p3/p4 (still computed, so it
++  follows the current priority; overdue unchanged). New rule: a create or PATCH whose result sets
++  priority p4 on an order whose asset has criticality high is 400 - implemented as fail effects in
++  create/update triggers (create: candidate priority p4 on a high asset; update: 'priority' sent in
++  the body with value p4 on a high asset, even when the order already has p4), which run after the
++  403 rules and 409 guards, so the requester/technician site 403 and the finished-order PATCH 409
++  still win. A PATCH that does not send priority (e.g. title on an existing p4 order on a high
++  asset) is unaffected. claim: allow additionally requires the current priority to be p3 or p4,
++  so claiming p1/p2 is 403 (wins over the state and workload 409s) and the UI claim form follows
++  it. assign is unchanged (any priority, same cap). No other field of any record changes.
++ops:
++  - change_field:
++      entity: work_orders
++      name: priority
++      values: [p1, p2, p3, p4]
++      convert: "'p1' if value == 'urgent' else (('p2' if record.asset.criticality == 'high' else 'p3') if value == 'normal' else ('p4' if value == 'low' else value))"
++
++  - change_field:
++      entity: work_orders
++      name: due_date
++      computed: "record.created_at.date() + days(1 if record.priority == 'p1' else 3 if record.priority == 'p2' else 7 if record.priority == 'p3' else 30)"
++
++  - add_trigger:
++      entity: work_orders
++      name: no_p4_on_high_criticality_create
++      on: create
++      effects:
++        - fail: "'priority p4 is not allowed for a high-criticality asset'"
++          status: 400
++          when: "record.priority == 'p4' and record.asset is not None and record.asset.criticality == 'high'"
++
++  - add_trigger:
++      entity: work_orders
++      name: no_p4_on_high_criticality_update
++      on: update
++      effects:
++        - fail: "'priority p4 is not allowed for a high-criticality asset'"
++          status: 400
++          when: "'priority' in input and record.priority == 'p4' and record.asset.criticality == 'high'"
++
++  - change_action:
++      entity: work_orders
++      name: claim
++      allow: "user.role == 'technician' and user.active and user.site == record.asset.site and record.priority in ['p3', 'p4']"
++
++expect:
++  # ---- migration
++  - {as: sofia, do: "GET /api/work_orders?priority=p1", count: 16}
++  - {as: sofia, do: "GET /api/work_orders?priority=p2", count: 12}
++  - {as: sofia, do: "GET /api/work_orders?priority=p3", count: 27}
++  - {as: sofia, do: "GET /api/work_orders?priority=p4", count: 27}
++  - {as: sofia, do: "GET /api/work_orders?priority=urgent", status: 200, count: 0}
++  - {as: sofia, do: "GET /api/work_orders?priority=normal", status: 200, count: 0}
++  - {as: sofia, do: "GET /api/work_orders?priority=low", status: 200, count: 0}
++  - {as: sofia, do: "GET /api/work_orders/1", json: {priority: p3, due_date: "2025-10-14", status: cancelled, cancel_reason: "Not a maintenance issue"}}
++  - {as: sofia, do: "GET /api/work_orders/54", json: {priority: p2}}
++  - {as: sofia, do: "GET /api/work_orders/64", json: {priority: p4, status: assigned}}
++  - {as: sofia, do: "GET /api/work_orders/6", json: {priority: p4}}
++  - {as: sofia, do: "GET /api/work_orders/52", json: {priority: p3}}
++  - {as: sofia, do: "GET /api/work_orders/76", json: {priority: p1}}
++  # ---- validation
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 9, title: "t", priority: normal}, status: 400}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 9, title: "t", priority: urgent}, status: 400}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 9, title: "t", priority: low}, status: 400}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 9, title: "t", priority: P1}, status: 400}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 9, title: "t", priority: p5}, status: 400}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 9, title: "t", priority: p4}, status: 201, json: {priority: p4, due_date: "2026-01-31"}, now: "2026-01-01T10:00:00"}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 9, title: "t", priority: p1}, status: 201, json: {due_date: "2026-01-02"}, now: "2026-01-01T10:00:00"}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 9, title: "t", priority: p2}, status: 201, json: {due_date: "2026-01-04"}, now: "2026-01-01T10:00:00"}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 9, title: "t", priority: p3}, status: 201, json: {due_date: "2026-01-08"}, now: "2026-01-01T10:00:00"}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 1, title: "t", priority: p4}, status: 400}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 1, title: "t", priority: p3}, status: 201}
++  - {as: sofia, do: "POST /api/work_orders", body: {asset: 14, title: "t", priority: p4}, status: 400}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 14, title: "t", priority: p4}, status: 403}
++  - {as: nils, do: "POST /api/work_orders", body: {asset: 14, title: "t", priority: p4}, status: 403}
++  - {as: sofia, do: "PATCH /api/work_orders/65", body: {priority: p4}, status: 400}
++  - {as: sofia, do: "PATCH /api/work_orders/65", body: {priority: urgent}, status: 400}
++  - {as: sofia, do: "PATCH /api/work_orders/65", body: {priority: p1}, status: 200, json: {priority: p1}}
++  - {as: sofia, do: "PATCH /api/work_orders/52", body: {priority: p4}, status: 200, json: {priority: p4}}
++  - {as: tomas, do: "PATCH /api/work_orders/64", body: {priority: p4}, status: 400}
++  - {as: tomas, do: "PATCH /api/work_orders/64", body: {title: "renamed"}, status: 200, json: {title: renamed, priority: p4}}
++  - {as: tomas, do: "PATCH /api/work_orders/64", body: {priority: p3}, status: 200, json: {priority: p3}}
++  - {as: sofia, do: "PATCH /api/work_orders/4", body: {priority: p4}, status: 409}
++  - {as: sofia, do: "PATCH /api/work_orders/6", body: {priority: p4}, status: 409}
++  # ---- claim
++  - {as: wade, do: "POST /api/work_orders/54/claim", body: {}, status: 403}
++  - {as: ravi, do: "POST /api/work_orders/54/claim", body: {}, status: 403}
++  - {as: nils, do: "POST /api/work_orders/74/claim", body: {}, status: 403}
++  - {as: olga, do: "POST /api/work_orders/82/claim", body: {}, status: 403}
++  - {as: olga, do: "POST /api/work_orders/38/claim", body: {}, status: 200, json: {assignee: 9, dispatch: self, priority: p4}}
++  - {as: olga, do: "POST /api/work_orders/52/claim", body: {}, status: 200, json: {priority: p3}}
++  - {as: nils, do: "POST /api/work_orders/38/claim", body: {}, status: 409}
++  - {as: ravi, do: "POST /api/work_orders/60/claim", body: {}, status: 409}
++  - {as: wade, do: "POST /api/work_orders/60/claim", body: {}, status: 200}
++  - {as: olga, do: "POST /api/work_orders/4/claim", body: {}, status: 403}
++  - {as: olga, do: "POST /api/work_orders/37/claim", body: {}, status: 409}
++  - {as: tomas, do: "POST /api/work_orders/54/assign", body: {technician: 15}, status: 200, json: {assignee: 15, dispatch: supervisor}}
++  - {as: sofia, do: "POST /api/work_orders/82/assign", body: {technician: 9}, status: 200}
++  - name: "claim allowed after priority lowered"
++    steps:
++      - {as: wade, do: "POST /api/work_orders/54/claim", body: {}, status: 403}
++      - {as: tomas, do: "PATCH /api/work_orders/54", body: {priority: p3}, status: 200}
++      - {as: wade, do: "POST /api/work_orders/54/claim", body: {}, status: 200, json: {assignee: 15, dispatch: self}}

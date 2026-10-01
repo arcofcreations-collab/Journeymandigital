@@ -1,0 +1,526 @@
+--- a/README.md
++++ b/README.md
+@@ -48,11 +48,15 @@
+ ```
+ draft --submit (owner)--> submitted --approve (manager)--> approved --pay (finance)--> paid
+                                     \--reject (manager, reason)--> rejected
++
++submitted --withdraw (owner, at most 7 days after submitted_at)--> draft   (submitted_at cleared)
++rejected  --revise (owner, while revision < 2)--> draft   (decision cleared, revision + 1)
+ ```
+ 
+ | Rule | Location |
+ |---|---|
+ | transitions, timestamps, `decided_by` | `services.submit_claim/approve_claim/reject_claim/pay_claim` |
++| withdraw window, revision limit | `services.withdraw_claim/revise_claim`, `WITHDRAW_WINDOW`, `MAX_REVISIONS` |
+ | outbox message `payment` | `services.pay_claim` → `repository.add_outbox_message` |
+ | who can read/edit/decide/pay | `permissions.py` (manager = the claimant's direct `manager`) |
+ | fields clients may set / never set | `validation.CLAIM_WRITABLE`, `validation.CLAIM_READ_ONLY` |
+@@ -104,10 +108,13 @@
+   regardless of role; managers do not see or decide claims of indirect reports.
+ * Managers and finance users can create claims for themselves like anyone else.
+ * Sending a workflow field (`employee`, `status`, `submitted_at`, `decided_at`, `decided_by`,
+-  `rejection_reason`) or `id` or an unknown field in a create/PATCH body → 400 (after 403/409 checks).
++  `rejection_reason`, `revision`, `previous_rejection_reason`) or `id` or an unknown field in a create/PATCH body → 400 (after 403/409 checks).
+   Unknown `?field=` filters → 400. Filters on null match `null` or an empty value.
+ * `amount` must be a JSON number (not a string or boolean); any precision is accepted.
+ * `pay` leaves `decided_at`/`decided_by` unchanged.
++* `withdraw` is allowed up to and including exactly 7 days after the claim's current `submitted_at`
++  (compared to `X-Now`); `withdraw` and `revise` emit no outbox message and don't change who
++  may read the claim. Rejecting a revised claim leaves `revision`/`previous_rejection_reason` as they are.
+ * Employee `manager` must be an existing employee and must not create a reporting loop → else 400.
+   Deleting an employee who has claims, decided claims or reports → 409.
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the heading.
+--- a/expenses_app/migrations/0002_claim_revisions.sql
++++ b/expenses_app/migrations/0002_claim_revisions.sql
+@@ -0,0 +1,7 @@
++-- Claims can be withdrawn (submitted -> draft) and revised (rejected -> draft).
++-- revision counts how often a rejected claim was revised (at most 2); the reason of the
++-- rejection that was revised is kept in previous_rejection_reason.
++-- Existing claims get revision = 0 and previous_rejection_reason = NULL via the defaults.
++
++ALTER TABLE claims ADD COLUMN revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0);
++ALTER TABLE claims ADD COLUMN previous_rejection_reason TEXT;
+--- a/expenses_app/permissions.py
++++ b/expenses_app/permissions.py
+@@ -44,6 +44,14 @@
+     return claim["employee"] == user["id"]
+ 
+ 
++def can_withdraw_claim(user, claim):
++    return claim["employee"] == user["id"]
++
++
++def can_revise_claim(user, claim):
++    return claim["employee"] == user["id"]
++
++
+ def can_decide_claim(user, claimant):
+     """Approve or reject: the claimant's manager."""
+     return is_manager_of(user, claimant)
+--- a/expenses_app/repository.py
++++ b/expenses_app/repository.py
+@@ -79,7 +79,8 @@
+ 
+ _CLAIM_SELECT = """
+     SELECT id, employee_id, amount, category, description, status,
+-           submitted_at, decided_at, decided_by_id, rejection_reason
++           submitted_at, decided_at, decided_by_id, rejection_reason,
++           revision, previous_rejection_reason
+     FROM claims
+ """
+ 
+@@ -98,6 +99,8 @@
+         "decided_at": row["decided_at"],
+         "decided_by": row["decided_by_id"],
+         "rejection_reason": row["rejection_reason"],
++        "revision": row["revision"],
++        "previous_rejection_reason": row["previous_rejection_reason"],
+     }
+ 
+ 
+@@ -130,6 +133,24 @@
+ def mark_claim_submitted(claim_id, submitted_at):
+     get_db().execute(
+         "UPDATE claims SET status = 'submitted', submitted_at = ? WHERE id = ?", (submitted_at, claim_id)
++    )
++
++
++def mark_claim_withdrawn(claim_id):
++    """Take a submitted claim back to ``draft``."""
++    get_db().execute("UPDATE claims SET status = 'draft', submitted_at = NULL WHERE id = ?", (claim_id,))
++
++
++def mark_claim_revised(claim_id):
++    """Reopen a rejected claim as ``draft``, keeping its rejection reason as the previous one."""
++    get_db().execute(
++        """
++        UPDATE claims
++        SET status = 'draft', previous_rejection_reason = rejection_reason, rejection_reason = NULL,
++            decided_at = NULL, decided_by_id = NULL, submitted_at = NULL, revision = revision + 1
++        WHERE id = ?
++        """,
++        (claim_id,),
+     )
+ 
+ 
+--- a/expenses_app/routes_api.py
++++ b/expenses_app/routes_api.py
+@@ -90,6 +90,16 @@
+     return services.submit_claim(current_context(), claim_id, _body())
+ 
+ 
++@bp.post("/claims/<int:claim_id>/withdraw")
++def withdraw_claim(claim_id):
++    return services.withdraw_claim(current_context(), claim_id, _body())
++
++
++@bp.post("/claims/<int:claim_id>/revise")
++def revise_claim(claim_id):
++    return services.revise_claim(current_context(), claim_id, _body())
++
++
+ @bp.post("/claims/<int:claim_id>/approve")
+ def approve_claim(claim_id):
+     return services.approve_claim(current_context(), claim_id, _body())
+--- a/expenses_app/routes_ui.py
++++ b/expenses_app/routes_ui.py
+@@ -118,6 +118,18 @@
+     return redirect(url_for("ui.show_claim", claim_id=claim_id), 303)
+ 
+ 
++@bp.post("/claims/<int:claim_id>/withdraw")
++def withdraw_claim(claim_id):
++    services.withdraw_claim(current_context(), claim_id, {})
++    return redirect(url_for("ui.show_claim", claim_id=claim_id), 303)
++
++
++@bp.post("/claims/<int:claim_id>/revise")
++def revise_claim(claim_id):
++    services.revise_claim(current_context(), claim_id, {})
++    return redirect(url_for("ui.show_claim", claim_id=claim_id), 303)
++
++
+ @bp.post("/claims/<int:claim_id>/approve")
+ def approve_claim(claim_id):
+     services.approve_claim(current_context(), claim_id, {})
+--- a/expenses_app/services.py
++++ b/expenses_app/services.py
+@@ -8,16 +8,28 @@
+ 
+     draft --submit--> submitted --approve--> approved --pay--> paid
+                                 \\--reject--> rejected
++
++    submitted --withdraw--> draft   (owner, at most WITHDRAW_WINDOW after submitted_at)
++    rejected  --revise-->   draft   (owner, while revision < MAX_REVISIONS)
+ """
++from datetime import datetime, timedelta
++
+ from . import permissions, repository, validation
++from .auth import DATETIME_FORMAT
+ from .db import transaction
+ from .errors import Conflict, Forbidden, NotFound, ValidationError
+ from .filters import apply_filters
+ 
+ EMPLOYEE_FIELDS = ("id", "username", "name", "role", "manager", "department")
+ CLAIM_FIELDS = ("id", "employee", "amount", "category", "description", "status",
+-                "submitted_at", "decided_at", "decided_by", "rejection_reason")
++                "submitted_at", "decided_at", "decided_by", "rejection_reason",
++                "revision", "previous_rejection_reason")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
++
++# A submitted claim can be withdrawn until exactly this long after its submitted_at.
++WITHDRAW_WINDOW = timedelta(days=7)
++# A rejected claim can be revised this many times in total.
++MAX_REVISIONS = 2
+ 
+ 
+ # --- employees ------------------------------------------------------------------------
+@@ -165,6 +177,34 @@
+     return repository.get_claim(claim_id)
+ 
+ 
++def withdraw_claim(ctx, claim_id, params):
++    """Take a submitted claim back to draft, within WITHDRAW_WINDOW of its submission."""
++    with transaction():
++        claim = _load_claim(claim_id)
++        if not permissions.can_withdraw_claim(ctx.user, claim):
++            raise Forbidden("Only the claim's employee can withdraw it.")
++        _require_status(claim, "submitted", "Only submitted claims can be withdrawn.")
++        if not _within_withdraw_window(ctx, claim):
++            raise Conflict("Claims can only be withdrawn within 7 days of submission.")
++        validation.clean_no_params(params)
++        repository.mark_claim_withdrawn(claim_id)
++    return repository.get_claim(claim_id)
++
++
++def revise_claim(ctx, claim_id, params):
++    """Reopen a rejected claim as a draft, at most MAX_REVISIONS times."""
++    with transaction():
++        claim = _load_claim(claim_id)
++        if not permissions.can_revise_claim(ctx.user, claim):
++            raise Forbidden("Only the claim's employee can revise it.")
++        _require_status(claim, "rejected", "Only rejected claims can be revised.")
++        if not _can_be_revised_again(claim):
++            raise Conflict(f"A claim can be revised at most {MAX_REVISIONS} times.")
++        validation.clean_no_params(params)
++        repository.mark_claim_revised(claim_id)
++    return repository.get_claim(claim_id)
++
++
+ def approve_claim(ctx, claim_id, params):
+     with transaction():
+         claim = _load_claim(claim_id)
+@@ -207,8 +247,12 @@
+     actions = []
+     if status == "draft" and permissions.can_submit_claim(user, claim):
+         actions.append("submit")
++    if status == "submitted" and permissions.can_withdraw_claim(user, claim) and _within_withdraw_window(ctx, claim):
++        actions.append("withdraw")
+     if status == "submitted" and permissions.can_decide_claim(user, _claimant(claim)):
+         actions += ["approve", "reject"]
++    if status == "rejected" and permissions.can_revise_claim(user, claim) and _can_be_revised_again(claim):
++        actions.append("revise")
+     if status == "approved" and permissions.can_pay_claim(user, claim):
+         actions.append("pay")
+     return actions
+@@ -225,6 +269,17 @@
+     return repository.get_employee(claim["employee"])
+ 
+ 
++def _within_withdraw_window(ctx, claim):
++    submitted_at = claim["submitted_at"]
++    if submitted_at is None:
++        return False
++    return ctx.now <= datetime.strptime(submitted_at, DATETIME_FORMAT) + WITHDRAW_WINDOW
++
++
++def _can_be_revised_again(claim):
++    return claim["revision"] < MAX_REVISIONS
++
++
+ def _require_status(claim, status, message):
+     if claim["status"] != status:
+         raise Conflict(message)
+--- a/expenses_app/templates/claims/detail.html
++++ b/expenses_app/templates/claims/detail.html
+@@ -13,11 +13,18 @@
+   {{ field("decided_at", claim.decided_at) }}
+   {{ field("decided_by", claim.decided_by, href=claim.decided_by and url_for('ui.show_employee', employee_id=claim.decided_by)) }}
+   {{ field("rejection_reason", claim.rejection_reason) }}
++  {{ field("revision", claim.revision) }}
++  {{ field("previous_rejection_reason", claim.previous_rejection_reason) }}
+ </dl>
+ 
+ {% if "submit" in actions %}
+ <form data-action="submit" method="post" action="{{ url_for('ui.submit_claim', claim_id=claim.id) }}">
+   <button type="submit">Submit for approval</button>
++</form>
++{% endif %}
++{% if "withdraw" in actions %}
++<form data-action="withdraw" method="post" action="{{ url_for('ui.withdraw_claim', claim_id=claim.id) }}">
++  <button type="submit">Withdraw to draft</button>
+ </form>
+ {% endif %}
+ {% if "approve" in actions %}
+@@ -31,6 +38,11 @@
+   <button type="submit">Reject</button>
+ </form>
+ {% endif %}
++{% if "revise" in actions %}
++<form data-action="revise" method="post" action="{{ url_for('ui.revise_claim', claim_id=claim.id) }}">
++  <button type="submit">Revise (reopen as draft)</button>
++</form>
++{% endif %}
+ {% if "pay" in actions %}
+ <form data-action="pay" method="post" action="{{ url_for('ui.pay_claim', claim_id=claim.id) }}">
+   <button type="submit">Pay</button>
+--- a/expenses_app/validation.py
++++ b/expenses_app/validation.py
+@@ -87,7 +87,8 @@
+ 
+ CLAIM_WRITABLE = ("amount", "category", "description")
+ # Maintained by the workflow actions; clients sending them get a 400.
+-CLAIM_READ_ONLY = ("id", "employee", "status", "submitted_at", "decided_at", "decided_by", "rejection_reason")
++CLAIM_READ_ONLY = ("id", "employee", "status", "submitted_at", "decided_at", "decided_by", "rejection_reason",
++                   "revision", "previous_rejection_reason")
+ 
+ 
+ def clean_employee(data, *, partial):
+--- a/tests/test_expenses_basics.py
++++ b/tests/test_expenses_basics.py
+@@ -22,7 +22,9 @@
+ 
+ def test_seed_data_is_loaded_with_same_ids(app, seed):
+     assert app.get("/api/employees", user="zoe").json["items"] == seed["employees"]
+-    assert app.get("/api/claims", user="fiona").json["items"] == seed["claims"]
++    # Claims in the seed predate revisions: they all start unrevised.
++    unrevised = {"revision": 0, "previous_rejection_reason": None}
++    assert app.get("/api/claims", user="fiona").json["items"] == [{**c, **unrevised} for c in seed["claims"]]
+ 
+ 
+ def test_database_is_fully_migrated(app):
+--- a/tests/test_expenses_claims.py
++++ b/tests/test_expenses_claims.py
+@@ -8,12 +8,14 @@
+         r = app.post("/api/claims", NEW, user=user)
+         assert r.status == 201
+         assert r.json == {"id": r.json["id"], **NEW, "employee": employee_id, "status": "draft",
+-                          "submitted_at": None, "decided_at": None, "decided_by": None, "rejection_reason": None}
++                          "submitted_at": None, "decided_at": None, "decided_by": None, "rejection_reason": None,
++                          "revision": 0, "previous_rejection_reason": None}
+ 
+ 
+ def test_workflow_fields_cannot_be_set(app):
+     for field, value in (("employee", 6), ("status", "approved"), ("submitted_at", "2026-01-01T00:00:00"),
+-                         ("decided_at", None), ("decided_by", 2), ("rejection_reason", "x")):
++                         ("decided_at", None), ("decided_by", 2), ("rejection_reason", "x"),
++                         ("revision", 1), ("previous_rejection_reason", "x")):
+         r = app.post("/api/claims", dict(NEW, **{field: value}), user="priya")
+         assert r.status == 400 and field in r.json["fields"], field
+         assert app.patch("/api/claims/1", {field: value}, user="wen").status == 400
+--- a/tests/test_expenses_revisions.py
++++ b/tests/test_expenses_revisions.py
+@@ -0,0 +1,188 @@
++"""Withdrawing submitted claims and revising rejected ones; the 0002 migration."""
++import os
++import sqlite3
++
++from accept_client import fresh_app, parse_ui
++
++# Claim 3: quinn's, submitted 2026-02-24T14:00:00, manager marco.
++SUBMITTED_AT = "2026-02-24T14:00:00"
++WINDOW_END = "2026-03-03T14:00:00"  # exactly 7 days later
++NEW = {"amount": 50, "category": "travel", "description": "Bus"}
++
++
++def _actions(app, claim_id, user, now="2026-03-01T12:00:00"):
++    return parse_ui(app.get(f"/ui/claims/{claim_id}", user=user, now=now).text).actions
++
++
++# --- withdraw -------------------------------------------------------------------------
++
++def test_withdraw_returns_claim_to_draft(app):
++    r = app.post("/api/claims/3/withdraw", {}, user="quinn")
++    assert r.status == 200
++    assert r.json["status"] == "draft" and r.json["submitted_at"] is None
++    assert (r.json["revision"], r.json["previous_rejection_reason"]) == (0, None)
++    # Now an ordinary draft: editable, re-submittable with a fresh submitted_at.
++    assert app.patch("/api/claims/3", {"amount": 10}, user="quinn").status == 200
++    r = app.post("/api/claims/3/submit", {}, user="quinn", now="2026-03-02T08:00:00")
++    assert r.status == 200 and r.json["submitted_at"] == "2026-03-02T08:00:00"
++    assert app.get("/api/_outbox", user="quinn").json["items"] == []
++
++
++def test_withdrawn_claim_can_be_deleted_and_manager_still_reads_it(app):
++    assert app.post("/api/claims/3/withdraw", {}, user="quinn").status == 200
++    assert app.get("/api/claims/3", user="marco").json["status"] == "draft"
++    assert app.post("/api/claims/3/approve", {}, user="marco").status == 409
++    assert app.delete("/api/claims/3", user="quinn").status == 204
++
++
++def test_withdraw_window_is_seven_days_inclusive(app):
++    assert app.post("/api/claims/3/withdraw", {}, user="quinn", now="2026-03-03T14:00:01").status == 409
++    assert app.post("/api/claims/3/withdraw", {}, user="quinn", now=WINDOW_END).status == 200
++
++
++def test_withdraw_window_restarts_on_resubmit(app):
++    assert app.post("/api/claims/3/withdraw", {}, user="quinn", now=WINDOW_END).status == 200
++    assert app.post("/api/claims/3/submit", {}, user="quinn", now="2026-03-05T09:00:00").status == 200
++    assert app.post("/api/claims/3/withdraw", {}, user="quinn", now="2026-03-12T09:00:01").status == 409
++    assert app.post("/api/claims/3/withdraw", {}, user="quinn", now="2026-03-12T09:00:00").status == 200
++
++
++def test_withdraw_permissions_and_states(app):
++    assert app.post("/api/claims/3/withdraw", {}, user="marco").status == 403  # manager
++    assert app.post("/api/claims/3/withdraw", {}, user="fiona").status == 403  # finance
++    assert app.post("/api/claims/999/withdraw", {}, user="quinn").status == 404
++    assert app.post("/api/claims/1/withdraw", {}, user="wen").status == 409  # draft
++    assert app.post("/api/claims/7/withdraw", {}, user="yusuf").status == 409  # rejected
++    assert app.post("/api/claims/12/withdraw", {}, user="tariq").status == 409  # approved
++    assert app.post("/api/claims/3/withdraw", {"x": 1}, user="quinn").status == 400
++    assert app.post("/api/claims/1/withdraw", {"x": 1}, user="marco").status == 403  # 403 beats 409/400
++    late = "2026-03-10T00:00:00"
++    assert app.post("/api/claims/3/withdraw", {"x": 1}, user="quinn", now=late).status == 409  # 409 beats 400
++    assert app.get("/api/claims/3", user="quinn").json["status"] == "submitted"
++
++
++# --- revise ---------------------------------------------------------------------------
++
++def _reject(app, claim_id, reason, manager="omar"):
++    r = app.post(f"/api/claims/{claim_id}/reject", {"reason": reason}, user=manager, now="2026-03-02T10:00:00")
++    assert r.status == 200
++    return r.json
++
++
++def test_revise_reopens_rejected_claim(app):
++    r = app.post("/api/claims/7/revise", {}, user="yusuf")
++    assert r.status == 200
++    assert {k: r.json[k] for k in ("status", "submitted_at", "decided_at", "decided_by", "rejection_reason",
++                                   "previous_rejection_reason", "revision")} == {
++        "status": "draft", "submitted_at": None, "decided_at": None, "decided_by": None,
++        "rejection_reason": None, "previous_rejection_reason": "Missing receipt", "revision": 1}
++    assert (r.json["amount"], r.json["description"]) == (613.88, "Hotel night #7")
++    assert app.get("/api/claims/7", user="omar").json["revision"] == 1  # manager still reads it
++    assert app.get("/api/_outbox", user="yusuf").json["items"] == []
++
++
++def test_revise_at_most_twice(app):
++    assert app.post("/api/claims/7/revise", {}, user="yusuf").status == 200
++    assert app.post("/api/claims/7/submit", {}, user="yusuf").status == 200
++    claim = _reject(app, 7, "Wrong amount")
++    assert (claim["revision"], claim["previous_rejection_reason"]) == (1, "Missing receipt")
++    r = app.post("/api/claims/7/revise", {}, user="yusuf")
++    assert r.status == 200 and r.json["revision"] == 2 and r.json["previous_rejection_reason"] == "Wrong amount"
++    assert app.post("/api/claims/7/submit", {}, user="yusuf").status == 200
++    claim = _reject(app, 7, "Still wrong")
++    assert (claim["status"], claim["rejection_reason"], claim["revision"]) == ("rejected", "Still wrong", 2)
++    assert app.post("/api/claims/7/revise", {}, user="yusuf").status == 409
++    assert app.get("/api/claims/7", user="yusuf").json["status"] == "rejected"
++
++
++def test_revised_claim_follows_normal_workflow(app):
++    assert app.post("/api/claims/7/revise", {}, user="yusuf").status == 200
++    assert app.patch("/api/claims/7", {"amount": 600}, user="yusuf").status == 200
++    assert app.post("/api/claims/7/submit", {}, user="yusuf", now="2026-03-02T09:00:00").status == 200
++    r = app.post("/api/claims/7/approve", {}, user="omar", now="2026-03-03T09:00:00")
++    assert r.status == 200 and r.json["decided_by"] == 4 and r.json["previous_rejection_reason"] == "Missing receipt"
++    assert app.post("/api/claims/7/pay", {}, user="fiona").status == 200
++    assert app.get("/api/_outbox", user="fiona").json["items"][0]["payload"] == {"claim": 7, "employee": 14,
++                                                                                 "amount": 600}
++
++
++def test_revise_permissions_and_states(app):
++    assert app.post("/api/claims/7/revise", {}, user="omar").status == 403  # manager
++    assert app.post("/api/claims/7/revise", {}, user="fiona").status == 403
++    assert app.post("/api/claims/999/revise", {}, user="yusuf").status == 404
++    assert app.post("/api/claims/5/revise", {}, user="yusuf").status == 409  # submitted
++    assert app.post("/api/claims/1/revise", {}, user="wen").status == 409  # draft
++    assert app.post("/api/claims/7/revise", {"x": 1}, user="yusuf").status == 400
++    assert app.post("/api/claims/5/revise", {"x": 1}, user="yusuf").status == 409  # 409 beats 400
++    assert app.get("/api/claims/7", user="yusuf").json["status"] == "rejected"
++
++
++def test_new_fields_filterable(app):
++    assert app.post("/api/claims/7/revise", {}, user="yusuf").status == 200
++    assert [c["id"] for c in app.get("/api/claims?revision=1", user="fiona").json["items"]] == [7]
++    items = app.get("/api/claims?previous_rejection_reason=Missing%20receipt", user="fiona").json["items"]
++    assert [c["id"] for c in items] == [7]
++
++
++# --- UI -------------------------------------------------------------------------------
++
++def test_ui_withdraw_form_follows_permission_and_window(app):
++    assert _actions(app, 3, "quinn") == ["withdraw"]
++    assert _actions(app, 3, "quinn", now=WINDOW_END) == ["withdraw"]
++    assert _actions(app, 3, "quinn", now="2026-03-03T14:00:01") == []
++    assert _actions(app, 3, "marco") == ["approve", "reject"]
++    assert _actions(app, 2, "victor") == []  # submitted more than 7 days ago
++
++
++def test_ui_revise_form_follows_permission_and_limit(app):
++    assert _actions(app, 7, "yusuf") == ["revise"]
++    assert _actions(app, 7, "omar") == []
++    for reason in ("Again", "And again"):
++        app.post("/api/claims/7/revise", {}, user="yusuf")
++        app.post("/api/claims/7/submit", {}, user="yusuf")
++        _reject(app, 7, reason)
++    page = parse_ui(app.get("/ui/claims/7", user="yusuf").text)
++    assert page.actions == []
++    assert page.fields["revision"] == "2" and page.fields["previous_rejection_reason"] == "Again"
++
++
++def test_ui_forms_post_withdraw_and_revise(app):
++    assert app.request("POST", "/ui/claims/3/withdraw", user="quinn").status == 303
++    assert app.get("/api/claims/3", user="quinn").json["status"] == "draft"
++    assert app.request("POST", "/ui/claims/7/revise", user="yusuf").status == 303
++    assert app.get("/api/claims/7", user="yusuf").json["revision"] == 1
++    assert app.request("POST", "/ui/claims/7/revise", user="omar").status == 403
++
++
++# --- migration ------------------------------------------------------------------------
++
++def test_migration_gives_existing_claims_defaults_and_keeps_data(app):
++    """Rebuild a database as it was before 0002, then let startup migrate it."""
++    path = os.path.join(app.workdir, "data.db")
++    conn = sqlite3.connect(path)
++    old_columns = ("id, employee_id, amount, category, description, status, submitted_at, decided_at,"
++                   " decided_by_id, rejection_reason")
++    employees = conn.execute("SELECT * FROM employees ORDER BY id").fetchall()
++    claims = conn.execute(f"SELECT {old_columns} FROM claims ORDER BY id").fetchall()
++    conn.close()
++    os.remove(path)
++
++    with open(os.path.join(app.workdir, "expenses_app", "migrations", "0001_initial.sql")) as fh:
++        initial = fh.read()
++    conn = sqlite3.connect(path)
++    conn.executescript(initial)
++    conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL,"
++                 " applied_at TEXT NOT NULL)")
++    conn.execute("INSERT INTO schema_version VALUES (1, 'initial', '2026-01-01T00:00:00')")
++    conn.executemany("INSERT INTO employees VALUES (?, ?, ?, ?, ?, ?)", employees)
++    conn.executemany(f"INSERT INTO claims ({old_columns}) VALUES ({', '.join('?' * 10)})", claims)
++    conn.commit()
++    conn.close()
++
++    upgraded = fresh_app(app.workdir)
++    conn = sqlite3.connect(os.path.join(upgraded.workdir, "data.db"))
++    assert conn.execute(f"SELECT {old_columns} FROM claims ORDER BY id").fetchall() == claims
++    assert conn.execute("SELECT DISTINCT revision, previous_rejection_reason FROM claims").fetchall() == [(0, None)]
++    assert 2 in [row[0] for row in conn.execute("SELECT version FROM schema_version")]
++    conn.close()
++    assert upgraded.get("/api/claims/7", user="yusuf").json["revision"] == 0
+--- a/tests/test_expenses_ui.py
++++ b/tests/test_expenses_ui.py
+@@ -39,8 +39,9 @@
+     assert page.fields == {"employee": "14", "amount": "613.88", "category": "equipment",
+                            "description": "Hotel night #7", "status": "rejected",
+                            "submitted_at": "2026-01-28T11:00:00", "decided_at": "2026-01-30T09:00:00",
+-                           "decided_by": "4", "rejection_reason": "Missing receipt"}
+-    assert page.actions == []
++                           "decided_by": "4", "rejection_reason": "Missing receipt",
++                           "revision": "0", "previous_rejection_reason": ""}
++    assert page.actions == ["revise"]
+     assert app.get("/ui/claims/7", user="priya").status == 403
+     assert app.get("/ui/claims/999", user="priya").status == 404
+ 

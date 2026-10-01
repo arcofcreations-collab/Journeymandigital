@@ -1,0 +1,1280 @@
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,8 @@
+ 
+ A facilities team at three sites tracks its staff, the assets it maintains and the work orders
+ raised against those assets. Requesters raise orders, supervisors assign them to technicians,
+-technicians start and complete them. Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External
++technicians start and complete them, recording the spare parts they use (stock is kept per
++site; part usages are read-only history). Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External
+ behaviour follows `spec/CONTRACT.md` and `spec/apps/maintenance.md`.
+ 
+ ## Layout
+@@ -54,6 +55,8 @@
+ | `assets.open_orders` | SQL sub-select in `repository._ASSET_SELECT` (counts `validation.UNFINISHED_STATUSES`) |
+ | `work_orders.due_date` | `services.due_date` (`created_at` date + `services.DUE_DAYS[priority]`) |
+ | `work_orders.overdue` | `services.present_work_order` (unfinished and `ctx.today > due_date`) |
++| `work_orders.parts_cost` | SQL sub-select in `repository._WORK_ORDER_SELECT` (sum of usages' `quantity * unit_cost`), rounded to 2 decimals in `repository._work_order` |
++| `parts.low_stock` | `repository._part` (`quantity <= reorder_level`) |
+ 
+ Derived fields are part of the API records, so list filters (`?overdue=true`, `?open_orders=0`)
+ work on them too.
+@@ -64,6 +67,7 @@
+ open --assign--> assigned --start--> in_progress --complete--> completed
+                  assigned --assign--> assigned               (re-assignment)
+ open | assigned | in_progress --cancel--> cancelled          (a non-supervisor requester: only from open)
++in_progress --use_parts--> in_progress                       (assignee only; consumes stock)
+ ```
+ 
+ | Rule | Location |
+@@ -72,6 +76,8 @@
+ | who may run an action, from which statuses | `services._authorize_<action>` (+ `permissions.py`, `*_STATUSES` constants) |
+ | technician eligibility for `assign` | `services._assignment_problem` |
+ | outbox messages `assignment`, `work_completed` | `services.assign_work_order`, `services.complete_work_order` |
++| `use_parts`: usages, stock, `low_stock` messages | `services.use_parts_on_work_order` (shape checks in `validation.clean_use_parts_params`) |
++| who may manage parts / read and write part usages | `permissions.can_manage_parts`, `can_read_part_usage`, `can_write_part_usages` |
+ | who can read/create/edit an order | `permissions.can_read_work_order`, `can_create_work_order_for`, `can_edit_work_order` |
+ | PATCH status rules | `services._authorize_edit` |
+ | fields clients may set / never set | `validation.WORK_ORDER_CREATABLE/EDITABLE/READ_ONLY`, `STAFF_WRITABLE`, `ASSET_WRITABLE` |
+@@ -140,4 +146,12 @@
+ * The detail page's `data-field` elements cover every field including derived ones; the `id` is
+   shown in the heading. The `assign` form lists the eligible technicians; it is shown whenever
+   the caller may assign right now, even if no technician is eligible.
++* `use_parts`: after 404/403/409 (assignee, `in_progress`), any item whose `part` is an existing
++  part at the order's asset's site and whose `quantity` is an integer >= 1 but more than the part's
++  stock makes the whole call a 409, even if other items (or extra keys) are invalid. A part at
++  another site is not a valid part, so asking too much of it is a 400. Field errors are reported
++  as `items[i].part` / `items[i].quantity`. Cancelling keeps usages and stock as they are.
++* `POST /api/part_usages` is 403; `PATCH`/`DELETE /api/part_usages/{id}` are 404 for an unknown
++  id, otherwise 403. Changing parts through PATCH never emits `low_stock`.
++* The starting parts (ids 1-8) are data in migration `0002_spare_parts.sql`, not in `seed_data.json`.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/maintenance_app/migrations/0002_spare_parts.sql
++++ b/maintenance_app/migrations/0002_spare_parts.sql
+@@ -0,0 +1,37 @@
++-- Spare parts inventory and the history of parts used on work orders.
++
++CREATE TABLE parts (
++    id            INTEGER PRIMARY KEY AUTOINCREMENT,
++    sku           TEXT    NOT NULL UNIQUE,
++    name          TEXT    NOT NULL,
++    site          TEXT    NOT NULL,
++    unit_cost     REAL    NOT NULL CHECK (unit_cost >= 0),
++    quantity      INTEGER NOT NULL CHECK (quantity >= 0),
++    reorder_level INTEGER NOT NULL CHECK (reorder_level >= 0)
++);
++
++-- One row per part line of a use_parts action; unit_cost is the part's price at that moment.
++CREATE TABLE part_usages (
++    id            INTEGER PRIMARY KEY AUTOINCREMENT,
++    work_order_id INTEGER NOT NULL REFERENCES work_orders (id),
++    part_id       INTEGER NOT NULL REFERENCES parts (id),
++    quantity      INTEGER NOT NULL CHECK (quantity >= 1),
++    unit_cost     REAL    NOT NULL CHECK (unit_cost >= 0),
++    used_by_id    INTEGER NOT NULL REFERENCES staff (id),
++    used_at       TEXT    NOT NULL  -- YYYY-MM-DDTHH:MM:SS (UTC)
++);
++
++CREATE INDEX part_usages_work_order_id ON part_usages (work_order_id);
++CREATE INDEX part_usages_part_id ON part_usages (part_id);
++CREATE INDEX part_usages_used_by_id ON part_usages (used_by_id);
++
++-- Starting stock (ids are fixed; new parts continue after 8).
++INSERT INTO parts (id, sku, name, site, unit_cost, quantity, reorder_level) VALUES
++    (1, 'FLT-AHU',    'AHU filter',       'North', 42.5, 12, 4),
++    (2, 'BELT-A40',   'V-belt A40',       'North', 18.0,  3, 2),
++    (3, 'FUSE-10A',   'Fuse 10A',         'North', 1.25, 50, 10),
++    (4, 'BRG-6204',   'Bearing 6204',     'South', 9.8,   6, 2),
++    (5, 'BELT-A40-S', 'V-belt A40',       'South', 18.0,  2, 2),
++    (6, 'SEAL-KIT',   'Pump seal kit',    'South', 64.0,  1, 0),
++    (7, 'LAMP-LED',   'LED lamp',         'East',  7.4,  20, 5),
++    (8, 'REMOTE-DK',  'Dock door remote', 'North', 23.9,  0, 1);
+--- a/maintenance_app/permissions.py
++++ b/maintenance_app/permissions.py
+@@ -89,3 +89,29 @@
+ 
+ def can_cancel_work_order(user, order):
+     return is_supervisor(user) or is_requester_of(user, order)
++
++
++def can_use_parts_on_work_order(user, order):
++    """``use_parts``: only the current assignee."""
++    return is_assignee_of(user, order)
++
++
++# --- parts and part usages ------------------------------------------------------------
++
++def can_read_part(user, part):
++    return True
++
++
++def can_manage_parts(user):
++    """Create, update and delete parts."""
++    return is_supervisor(user)
++
++
++def can_read_part_usage(user, order, asset):
++    """A usage is readable exactly by those who can read its work order."""
++    return can_read_work_order(user, order, asset)
++
++
++def can_write_part_usages(user):
++    """Usages are history: created only by ``use_parts``, never through the API."""
++    return False
+--- a/maintenance_app/repository.py
++++ b/maintenance_app/repository.py
+@@ -4,9 +4,9 @@
+ field name, booleans as ``bool``). Values passed to insert/update functions have already
+ been validated by ``services``.
+ 
+-Derived values that depend only on stored data (``assets.open_orders``) are computed in
+-SQL here; those that depend on the request's clock (``work_orders.due_date``/``overdue``)
+-are added by ``services.present_work_order``.
++Derived values that depend only on stored data (``assets.open_orders``,
++``work_orders.parts_cost``, ``parts.low_stock``) are computed here; those that depend on the
++request's clock (``work_orders.due_date``/``overdue``) are added by ``services.present_work_order``.
+ """
+ import json
+ 
+@@ -138,9 +138,12 @@
+ # --- work orders ----------------------------------------------------------------------
+ 
+ _WORK_ORDER_SELECT = """
+-    SELECT id, asset_id, title, description, priority, status, requested_by_id, created_at,
+-           assignee_id, started_at, completed_at, resolution, labor_minutes, cancel_reason
+-    FROM work_orders
++    SELECT w.id, w.asset_id, w.title, w.description, w.priority, w.status, w.requested_by_id,
++           w.created_at, w.assignee_id, w.started_at, w.completed_at, w.resolution, w.labor_minutes,
++           w.cancel_reason,
++           (SELECT COALESCE(SUM(u.quantity * u.unit_cost), 0) FROM part_usages u
++             WHERE u.work_order_id = w.id) AS parts_cost
++    FROM work_orders w
+ """
+ 
+ 
+@@ -162,15 +165,16 @@
+         "resolution": row["resolution"],
+         "labor_minutes": row["labor_minutes"],
+         "cancel_reason": row["cancel_reason"],
++        "parts_cost": round(row["parts_cost"], 2),
+     }
+ 
+ 
+ def list_work_orders():
+-    return [_work_order(row) for row in get_db().execute(f"{_WORK_ORDER_SELECT} ORDER BY id")]
++    return [_work_order(row) for row in get_db().execute(f"{_WORK_ORDER_SELECT} ORDER BY w.id")]
+ 
+ 
+ def get_work_order(work_order_id):
+-    return _work_order(get_db().execute(f"{_WORK_ORDER_SELECT} WHERE id = ?", (work_order_id,)).fetchone())
++    return _work_order(get_db().execute(f"{_WORK_ORDER_SELECT} WHERE w.id = ?", (work_order_id,)).fetchone())
+ 
+ 
+ def insert_work_order(values, requested_by, created_at):
+@@ -212,6 +216,102 @@
+     get_db().execute(
+         "UPDATE work_orders SET status = 'cancelled', cancel_reason = ? WHERE id = ?", (reason, work_order_id)
+     )
++
++
++# --- parts ----------------------------------------------------------------------------
++
++_PART_SELECT = "SELECT id, sku, name, site, unit_cost, quantity, reorder_level FROM parts"
++
++
++def _part(row):
++    if row is None:
++        return None
++    return {
++        "id": row["id"],
++        "sku": row["sku"],
++        "name": row["name"],
++        "site": row["site"],
++        "unit_cost": row["unit_cost"],
++        "quantity": row["quantity"],
++        "reorder_level": row["reorder_level"],
++        "low_stock": row["quantity"] <= row["reorder_level"],
++    }
++
++
++def list_parts():
++    return [_part(row) for row in get_db().execute(f"{_PART_SELECT} ORDER BY id")]
++
++
++def get_part(part_id):
++    return _part(get_db().execute(f"{_PART_SELECT} WHERE id = ?", (part_id,)).fetchone())
++
++
++def sku_taken(sku, exclude_id=None):
++    row = get_db().execute("SELECT 1 FROM parts WHERE sku = ? AND id IS NOT ?", (sku, exclude_id)).fetchone()
++    return row is not None
++
++
++def insert_part(values):
++    cur = get_db().execute(
++        "INSERT INTO parts (sku, name, site, unit_cost, quantity, reorder_level) VALUES (?, ?, ?, ?, ?, ?)",
++        (values["sku"], values["name"], values["site"], values["unit_cost"], values["quantity"],
++         values["reorder_level"]),
++    )
++    return cur.lastrowid
++
++
++def update_part(part_id, values):
++    columns = {name: name for name in ("sku", "name", "site", "unit_cost", "quantity", "reorder_level")}
++    _update("parts", columns, part_id, values)
++
++
++def set_part_quantity(part_id, quantity):
++    get_db().execute("UPDATE parts SET quantity = ? WHERE id = ?", (quantity, part_id))
++
++
++def delete_part(part_id):
++    get_db().execute("DELETE FROM parts WHERE id = ?", (part_id,))
++
++
++def part_has_usages(part_id):
++    row = get_db().execute("SELECT 1 FROM part_usages WHERE part_id = ? LIMIT 1", (part_id,)).fetchone()
++    return row is not None
++
++
++# --- part usages ----------------------------------------------------------------------
++
++_PART_USAGE_SELECT = "SELECT id, work_order_id, part_id, quantity, unit_cost, used_by_id, used_at FROM part_usages"
++
++
++def _part_usage(row):
++    if row is None:
++        return None
++    return {
++        "id": row["id"],
++        "work_order": row["work_order_id"],
++        "part": row["part_id"],
++        "quantity": row["quantity"],
++        "unit_cost": row["unit_cost"],
++        "used_by": row["used_by_id"],
++        "used_at": row["used_at"],
++    }
++
++
++def list_part_usages():
++    return [_part_usage(row) for row in get_db().execute(f"{_PART_USAGE_SELECT} ORDER BY id")]
++
++
++def get_part_usage(usage_id):
++    return _part_usage(get_db().execute(f"{_PART_USAGE_SELECT} WHERE id = ?", (usage_id,)).fetchone())
++
++
++def insert_part_usage(work_order_id, part_id, quantity, unit_cost, used_by, used_at):
++    cur = get_db().execute(
++        "INSERT INTO part_usages (work_order_id, part_id, quantity, unit_cost, used_by_id, used_at)"
++        " VALUES (?, ?, ?, ?, ?, ?)",
++        (work_order_id, part_id, quantity, unit_cost, used_by, used_at),
++    )
++    return cur.lastrowid
+ 
+ 
+ # --- outbox ---------------------------------------------------------------------------
+--- a/maintenance_app/routes_api.py
++++ b/maintenance_app/routes_api.py
+@@ -133,6 +133,61 @@
+     return services.cancel_work_order(current_context(), work_order_id, _body())
+ 
+ 
++@bp.post("/work_orders/<int:work_order_id>/use_parts")
++def use_parts_on_work_order(work_order_id):
++    return services.use_parts_on_work_order(current_context(), work_order_id, _body())
++
++
++# --- parts ----------------------------------------------------------------------------
++
++@bp.get("/parts")
++def list_parts():
++    return _items(services.list_parts(current_context(), _filters()))
++
++
++@bp.post("/parts")
++def create_part():
++    return services.create_part(current_context(), _body()), 201
++
++
++@bp.get("/parts/<int:part_id>")
++def get_part(part_id):
++    return services.get_part(current_context(), part_id)
++
++
++@bp.patch("/parts/<int:part_id>")
++def update_part(part_id):
++    return services.update_part(current_context(), part_id, _body())
++
++
++@bp.delete("/parts/<int:part_id>")
++def delete_part(part_id):
++    services.delete_part(current_context(), part_id)
++    return "", 204
++
++
++# --- part usages (read-only) ----------------------------------------------------------
++
++@bp.get("/part_usages")
++def list_part_usages():
++    return _items(services.list_part_usages(current_context(), _filters()))
++
++
++@bp.get("/part_usages/<int:usage_id>")
++def get_part_usage(usage_id):
++    return services.get_part_usage(current_context(), usage_id)
++
++
++@bp.post("/part_usages")
++def create_part_usage():
++    services.ensure_can_write_part_usages(current_context())
++
++
++@bp.route("/part_usages/<int:usage_id>", methods=["PATCH", "DELETE"])
++def change_part_usage(usage_id):
++    services.ensure_can_write_part_usages(current_context(), usage_id)
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ @bp.get("/_outbox")
+--- a/maintenance_app/routes_ui.py
++++ b/maintenance_app/routes_ui.py
+@@ -44,6 +44,18 @@
+         return int(value)
+     except ValueError:
+         return value
++
++
++def _number(value):
++    value = value.strip()
++    if value == "":
++        return None
++    for convert in (int, float):
++        try:
++            return convert(value)
++        except ValueError:
++            pass
++    return value
+ 
+ 
+ def _boolean(value):
+@@ -139,10 +151,11 @@
+     ctx = current_context()
+     order = services.get_work_order(ctx, work_order_id)
+     actions = services.work_order_actions(ctx, order)
+-    technicians = []
+-    if "assign" in actions:
+-        technicians = services.eligible_technicians(services.get_asset(ctx, order["asset"]))
+-    return render_template("work_orders/detail.html", order=order, actions=actions, technicians=technicians)
++    asset = services.get_asset(ctx, order["asset"])
++    technicians = services.eligible_technicians(asset) if "assign" in actions else []
++    parts = services.usable_parts(asset) if "use_parts" in actions else []
++    return render_template("work_orders/detail.html", order=order, actions=actions, technicians=technicians,
++                           parts=parts)
+ 
+ 
+ @bp.post("/work_orders/<int:work_order_id>/assign")
+@@ -168,3 +181,55 @@
+ def cancel_work_order(work_order_id):
+     services.cancel_work_order(current_context(), work_order_id, _form_values({"reason": _text}))
+     return _redirect_to_work_order(work_order_id)
++
++
++@bp.post("/work_orders/<int:work_order_id>/use_parts")
++def use_parts_on_work_order(work_order_id):
++    # The form may repeat the part/quantity pair; each pair is one item.
++    parts = [_integer(value) for value in request.form.getlist("part")]
++    quantities = [_integer(value) for value in request.form.getlist("quantity")]
++    items = [{"part": part, "quantity": quantity} for part, quantity in zip(parts, quantities)]
++    services.use_parts_on_work_order(current_context(), work_order_id, {"items": items})
++    return _redirect_to_work_order(work_order_id)
++
++
++# --- parts ----------------------------------------------------------------------------
++
++@bp.get("/parts")
++def list_parts():
++    parts = services.list_parts(current_context(), request.args.to_dict())
++    return render_template("parts/list.html", parts=parts)
++
++
++@bp.get("/parts/new")
++def new_part():
++    services.ensure_can_create_part(current_context())
++    return render_template("parts/new.html")
++
++
++@bp.post("/parts")
++def create_part():
++    data = _form_values({"sku": _text, "name": _text, "site": _text, "unit_cost": _number,
++                         "quantity": _integer, "reorder_level": _integer})
++    part = services.create_part(current_context(), data)
++    return redirect(url_for("ui.show_part", part_id=part["id"]), 303)
++
++
++@bp.get("/parts/<int:part_id>")
++def show_part(part_id):
++    part = services.get_part(current_context(), part_id)
++    return render_template("parts/detail.html", part=part)
++
++
++# --- part usages ----------------------------------------------------------------------
++
++@bp.get("/part_usages")
++def list_part_usages():
++    usages = services.list_part_usages(current_context(), request.args.to_dict())
++    return render_template("part_usages/list.html", usages=usages)
++
++
++@bp.get("/part_usages/<int:usage_id>")
++def show_part_usage(usage_id):
++    usage = services.get_part_usage(current_context(), usage_id)
++    return render_template("part_usages/detail.html", usage=usage)
+--- a/maintenance_app/services.py
++++ b/maintenance_app/services.py
+@@ -9,6 +9,7 @@
+     open --assign--> assigned --start--> in_progress --complete--> completed
+                      assigned --assign--> assigned               (re-assignment)
+     open | assigned | in_progress --cancel--> cancelled          (requester: only from open)
++    in_progress --use_parts--> in_progress                       (consumes stock, records part usages)
+ """
+ from datetime import date, timedelta
+ 
+@@ -25,6 +26,7 @@
+ ASSIGNABLE_STATUSES = ("open", "assigned")
+ STARTABLE_STATUSES = ("assigned",)
+ COMPLETABLE_STATUSES = ("in_progress",)
++PARTS_USABLE_STATUSES = ("in_progress",)
+ REQUESTER_EDITABLE_STATUSES = ("open",)
+ REQUESTER_CANCELLABLE_STATUSES = ("open",)
+ SUPERVISOR_EDITABLE_STATUSES = UNFINISHED_STATUSES
+@@ -34,7 +36,9 @@
+ ASSET_FIELDS = ("id", "tag", "name", "site", "criticality", "retired", "open_orders")
+ WORK_ORDER_FIELDS = ("id", "asset", "title", "description", "priority", "status", "requested_by",
+                      "created_at", "assignee", "started_at", "completed_at", "resolution",
+-                     "labor_minutes", "cancel_reason", "due_date", "overdue")
++                     "labor_minutes", "cancel_reason", "parts_cost", "due_date", "overdue")
++PART_FIELDS = ("id", "sku", "name", "site", "unit_cost", "quantity", "reorder_level", "low_stock")
++PART_USAGE_FIELDS = ("id", "work_order", "part", "quantity", "unit_cost", "used_by", "used_at")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -275,11 +279,18 @@
+         _require_status(order, REQUESTER_CANCELLABLE_STATUSES, "Requesters can only cancel open work orders.")
+ 
+ 
++def _authorize_use_parts(user, order):
++    if not permissions.can_use_parts_on_work_order(user, order):
++        raise Forbidden("Only the assignee can use parts on the work order.")
++    _require_status(order, PARTS_USABLE_STATUSES, "Parts can only be used on work orders in progress.")
++
++
+ WORK_ORDER_ACTIONS = {
+     "assign": _authorize_assign,
+     "start": _authorize_start,
+     "complete": _authorize_complete,
+     "cancel": _authorize_cancel,
++    "use_parts": _authorize_use_parts,
+ }
+ 
+ 
+@@ -330,7 +341,7 @@
+         repository.add_outbox_message(
+             "work_completed",
+             {"work_order": work_order_id, "asset": order["asset"], "technician": order["assignee"],
+-             "labor_minutes": values["labor_minutes"]},
++             "labor_minutes": values["labor_minutes"], "parts_cost": order["parts_cost"]},
+             ctx.now_text,
+         )
+     return present_work_order(ctx, repository.get_work_order(work_order_id))
+@@ -343,6 +354,60 @@
+         reason = validation.clean_cancel_params(params)
+         repository.mark_work_order_cancelled(work_order_id, reason)
+     return present_work_order(ctx, repository.get_work_order(work_order_id))
++
++
++def use_parts_on_work_order(ctx, work_order_id, params):
++    """Record the parts the assignee used and take them out of stock, all or nothing.
++
++    One part usage per item, in list order, priced at the part's current ``unit_cost``. A part
++    whose stock drops to its reorder level or below (and was not low before) emits ``low_stock``.
++    """
++    with transaction():
++        order = _load_work_order(work_order_id)
++        _authorize_use_parts(ctx.user, order)
++        items, errors = validation.clean_use_parts_params(params)
++        site = repository.get_asset(order["asset"])["site"]
++        parts = [_usable_part(item["part"], site, index, errors) for index, item in enumerate(items)]
++        # Not enough stock is a 409 and so wins over any 400 in the same request.
++        for item, part in zip(items, parts):
++            if part is not None and item["quantity"] is not None and item["quantity"] > part["quantity"]:
++                raise Conflict(f"Only {part['quantity']} of part {part['sku']} in stock.")
++        seen = set()
++        for index, item in enumerate(items):
++            if item["part"] is not None and item["part"] in seen:
++                errors[f"items[{index}].part"] = "part listed more than once"
++            seen.add(item["part"])
++        validation.raise_if_errors(errors)
++        for item, part in zip(items, parts):
++            repository.insert_part_usage(
++                work_order_id, part["id"], item["quantity"], part["unit_cost"], ctx.user["id"], ctx.now_text
++            )
++            remaining = part["quantity"] - item["quantity"]
++            repository.set_part_quantity(part["id"], remaining)
++            if not part["low_stock"] and remaining <= part["reorder_level"]:
++                repository.add_outbox_message(
++                    "low_stock", {"part": part["id"], "sku": part["sku"], "quantity": remaining}, ctx.now_text
++                )
++    return present_work_order(ctx, repository.get_work_order(work_order_id))
++
++
++def _usable_part(part_id, site, index, errors):
++    """The part an item names if it exists at ``site``; otherwise record a 400 and return None."""
++    if part_id is None:
++        return None
++    part = repository.get_part(part_id)
++    if part is None:
++        errors[f"items[{index}].part"] = "no such part"
++    elif part["site"] != site:
++        errors[f"items[{index}].part"] = "part is stocked at another site"
++    else:
++        return part
++    return None
++
++
++def usable_parts(asset):
++    """Parts ``use_parts`` accepts for orders on ``asset``: those stocked at its site."""
++    return [p for p in repository.list_parts() if p["site"] == asset["site"]]
+ 
+ 
+ def eligible_technicians(asset):
+@@ -393,6 +458,105 @@
+         raise Conflict(message)
+ 
+ 
++# --- parts ----------------------------------------------------------------------------
++
++def list_parts(ctx, filters=None):
++    parts = [p for p in repository.list_parts() if permissions.can_read_part(ctx.user, p)]
++    return apply_filters(parts, filters or {}, PART_FIELDS)
++
++
++def get_part(ctx, part_id):
++    part = _load_part(part_id)
++    if not permissions.can_read_part(ctx.user, part):
++        raise Forbidden()
++    return part
++
++
++def ensure_can_create_part(ctx):
++    if not permissions.can_manage_parts(ctx.user):
++        raise Forbidden("Only supervisors can create parts.")
++
++
++def create_part(ctx, data):
++    ensure_can_create_part(ctx)
++    with transaction():
++        values = validation.clean_part(data, partial=False)
++        _ensure_sku_free(values["sku"])
++        part_id = repository.insert_part(values)
++    return repository.get_part(part_id)
++
++
++def update_part(ctx, part_id, data):
++    with transaction():
++        _load_part(part_id)
++        if not permissions.can_manage_parts(ctx.user):
++            raise Forbidden("Only supervisors can update parts.")
++        values = validation.clean_part(data, partial=True)
++        if "sku" in values:
++            _ensure_sku_free(values["sku"], exclude_id=part_id)
++        repository.update_part(part_id, values)
++    return repository.get_part(part_id)
++
++
++def delete_part(ctx, part_id):
++    with transaction():
++        _load_part(part_id)
++        if not permissions.can_manage_parts(ctx.user):
++            raise Forbidden("Only supervisors can delete parts.")
++        if repository.part_has_usages(part_id):
++            raise Conflict("A part that has been used on work orders cannot be deleted.")
++        repository.delete_part(part_id)
++
++
++def _load_part(part_id):
++    part = repository.get_part(part_id)
++    if part is None:
++        raise NotFound("No such part.")
++    return part
++
++
++def _ensure_sku_free(sku, exclude_id=None):
++    if repository.sku_taken(sku, exclude_id):
++        raise ValidationError("SKU already in use.", {"sku": "already in use"})
++
++
++# --- part usages (read-only history, written by ``use_parts``) -------------------------
++
++def list_part_usages(ctx, filters=None):
++    assets = {a["id"]: a for a in repository.list_assets()}
++    orders = {o["id"]: o for o in repository.list_work_orders()}
++
++    def readable(usage):
++        order = orders[usage["work_order"]]
++        return permissions.can_read_part_usage(ctx.user, order, assets[order["asset"]])
++
++    usages = [u for u in repository.list_part_usages() if readable(u)]
++    return apply_filters(usages, filters or {}, PART_USAGE_FIELDS)
++
++
++def get_part_usage(ctx, usage_id):
++    usage = _load_part_usage(usage_id)
++    order = repository.get_work_order(usage["work_order"])
++    if not permissions.can_read_part_usage(ctx.user, order, repository.get_asset(order["asset"])):
++        raise Forbidden()
++    return usage
++
++
++def ensure_can_write_part_usages(ctx, usage_id=None):
++    """POST, PATCH and DELETE on part usages: 404 for an unknown usage, else always 403."""
++    if usage_id is not None:
++        _load_part_usage(usage_id)
++    if not permissions.can_write_part_usages(ctx.user):
++        raise Forbidden("Part usages are recorded by the use_parts action and cannot be changed.")
++
++
++def _load_part_usage(usage_id):
++    usage = repository.get_part_usage(usage_id)
++    if usage is None:
++        raise NotFound("No such part usage.")
++    return usage
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def list_outbox(ctx, filters=None):
+--- a/maintenance_app/templates/base.html
++++ b/maintenance_app/templates/base.html
+@@ -20,6 +20,8 @@
+     <a href="{{ url_for('ui.list_work_orders') }}">Work orders</a>
+     <a href="{{ url_for('ui.list_assets') }}">Assets</a>
+     <a href="{{ url_for('ui.list_staff') }}">Staff</a>
++    <a href="{{ url_for('ui.list_parts') }}">Parts</a>
++    <a href="{{ url_for('ui.list_part_usages') }}">Part usages</a>
+     {% if ctx %}<span>Signed in as {{ ctx.user.username }} ({{ ctx.user.role }}, {{ ctx.user.site }})</span>{% endif %}
+   </nav>
+   <main>
+--- a/maintenance_app/templates/part_usages/detail.html
++++ b/maintenance_app/templates/part_usages/detail.html
+@@ -0,0 +1,14 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}Part usage #{{ usage.id }}{% endblock %}
++{% block content %}
++<h1>Part usage #{{ usage.id }}</h1>
++<dl>
++  {{ field("work_order", usage.work_order, href=url_for('ui.show_work_order', work_order_id=usage.work_order)) }}
++  {{ field("part", usage.part, href=url_for('ui.show_part', part_id=usage.part)) }}
++  {{ field("quantity", usage.quantity) }}
++  {{ field("unit_cost", usage.unit_cost) }}
++  {{ field("used_by", usage.used_by, href=url_for('ui.show_staff', staff_id=usage.used_by)) }}
++  {{ field("used_at", usage.used_at) }}
++</dl>
++{% endblock %}
+--- a/maintenance_app/templates/part_usages/list.html
++++ b/maintenance_app/templates/part_usages/list.html
+@@ -0,0 +1,21 @@
++{% extends "base.html" %}
++{% block title %}Part usages{% endblock %}
++{% block content %}
++<h1>Part usages</h1>
++<table>
++  <thead><tr><th>Usage</th><th>Work order</th><th>Part</th><th>Quantity</th><th>Unit cost</th><th>Used by</th><th>Used at</th></tr></thead>
++  <tbody>
++  {% for usage in usages %}
++    <tr data-id="{{ usage.id }}">
++      <td><a href="{{ url_for('ui.show_part_usage', usage_id=usage.id) }}">#{{ usage.id }}</a></td>
++      <td><a href="{{ url_for('ui.show_work_order', work_order_id=usage.work_order) }}">#{{ usage.work_order }}</a></td>
++      <td><a href="{{ url_for('ui.show_part', part_id=usage.part) }}">{{ usage.part }}</a></td>
++      <td>{{ usage.quantity }}</td>
++      <td>{{ usage.unit_cost|display }}</td>
++      <td>{{ usage.used_by }}</td>
++      <td>{{ usage.used_at }}</td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/maintenance_app/templates/parts/detail.html
++++ b/maintenance_app/templates/parts/detail.html
+@@ -0,0 +1,16 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}{{ part.sku }}{% endblock %}
++{% block content %}
++<h1>Part #{{ part.id }}</h1>
++<dl>
++  {{ field("sku", part.sku, label="SKU") }}
++  {{ field("name", part.name) }}
++  {{ field("site", part.site) }}
++  {{ field("unit_cost", part.unit_cost) }}
++  {{ field("quantity", part.quantity) }}
++  {{ field("reorder_level", part.reorder_level) }}
++  {{ field("low_stock", part.low_stock) }}
++</dl>
++<p><a href="{{ url_for('ui.list_part_usages', part=part.id) }}">Usages of this part</a></p>
++{% endblock %}
+--- a/maintenance_app/templates/parts/list.html
++++ b/maintenance_app/templates/parts/list.html
+@@ -0,0 +1,22 @@
++{% extends "base.html" %}
++{% block title %}Parts{% endblock %}
++{% block content %}
++<h1>Parts</h1>
++{% if ctx.role == "supervisor" %}<p><a href="{{ url_for('ui.new_part') }}">New part</a></p>{% endif %}
++<table>
++  <thead><tr><th>SKU</th><th>Name</th><th>Site</th><th>Unit cost</th><th>Quantity</th><th>Reorder level</th><th>Low stock</th></tr></thead>
++  <tbody>
++  {% for part in parts %}
++    <tr data-id="{{ part.id }}">
++      <td><a href="{{ url_for('ui.show_part', part_id=part.id) }}">{{ part.sku }}</a></td>
++      <td>{{ part.name }}</td>
++      <td>{{ part.site }}</td>
++      <td>{{ part.unit_cost|display }}</td>
++      <td>{{ part.quantity }}</td>
++      <td>{{ part.reorder_level }}</td>
++      <td>{{ part.low_stock|display }}</td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/maintenance_app/templates/parts/new.html
++++ b/maintenance_app/templates/parts/new.html
+@@ -0,0 +1,14 @@
++{% extends "base.html" %}
++{% block title %}New part{% endblock %}
++{% block content %}
++<h1>New part</h1>
++<form data-create="parts" method="post" action="{{ url_for('ui.create_part') }}">
++  <label>SKU <input name="sku" required></label>
++  <label>Name <input name="name" required></label>
++  <label>Site <input name="site" required></label>
++  <label>Unit cost <input name="unit_cost" type="number" min="0" step="0.01" required></label>
++  <label>Quantity <input name="quantity" type="number" min="0" step="1" required></label>
++  <label>Reorder level <input name="reorder_level" type="number" min="0" step="1" required></label>
++  <button type="submit">Create</button>
++</form>
++{% endblock %}
+--- a/maintenance_app/templates/work_orders/detail.html
++++ b/maintenance_app/templates/work_orders/detail.html
+@@ -17,6 +17,7 @@
+   {{ field("resolution", order.resolution) }}
+   {{ field("labor_minutes", order.labor_minutes) }}
+   {{ field("cancel_reason", order.cancel_reason) }}
++  {{ field("parts_cost", order.parts_cost, href=url_for('ui.list_part_usages', work_order=order.id)) }}
+   {{ field("due_date", order.due_date) }}
+   {{ field("overdue", order.overdue) }}
+ </dl>
+@@ -45,6 +46,17 @@
+   <button type="submit">Complete</button>
+ </form>
+ {% endif %}
++{% if "use_parts" in actions %}
++<form data-action="use_parts" method="post" action="{{ url_for('ui.use_parts_on_work_order', work_order_id=order.id) }}">
++  <label>Part
++    <select name="part" required>
++      {% for part in parts %}<option value="{{ part.id }}">{{ part.sku }} · {{ part.name }} ({{ part.quantity }} in stock)</option>{% endfor %}
++    </select>
++  </label>
++  <label>Quantity <input name="quantity" type="number" min="1" step="1" required></label>
++  <button type="submit">Use parts</button>
++</form>
++{% endif %}
+ {% if "cancel" in actions %}
+ <form data-action="cancel" method="post" action="{{ url_for('ui.cancel_work_order', work_order_id=order.id) }}">
+   <label>Reason <textarea name="reason" required></textarea></label>
+--- a/maintenance_app/validation.py
++++ b/maintenance_app/validation.py
+@@ -6,6 +6,7 @@
+ 
+ Field checkers raise ``FieldInvalid``; ``collect`` records that message against a field.
+ """
++import math
+ from contextlib import contextmanager
+ 
+ from .errors import ValidationError
+@@ -98,6 +99,23 @@
+     return value
+ 
+ 
++def non_negative_integer(value):
++    if value is None:
++        raise FieldInvalid("required")
++    if not is_integer(value) or value < 0:
++        raise FieldInvalid("must be an integer of at least 0")
++    return value
++
++
++def non_negative_number(value):
++    """A JSON number (integer or decimal, not a boolean or string) >= 0."""
++    if value is None:
++        raise FieldInvalid("required")
++    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
++        raise FieldInvalid("must be a number of at least 0")
++    return value
++
++
+ def _clean_boolean_with_default(data, values, errors, name, default, partial):
+     if name in data:
+         with collect(errors, name):
+@@ -117,7 +135,10 @@
+ # Maintained by the system and the workflow actions; clients sending them get a 400.
+ WORK_ORDER_READ_ONLY = ("id", "status", "requested_by", "created_at", "assignee", "started_at",
+                         "completed_at", "resolution", "labor_minutes", "cancel_reason",
+-                        "due_date", "overdue")
++                        "due_date", "overdue", "parts_cost")
++
++PART_WRITABLE = ("sku", "name", "site", "unit_cost", "quantity", "reorder_level")
++PART_READ_ONLY = ("id", "low_stock")
+ 
+ 
+ def clean_staff(data, *, partial):
+@@ -175,6 +196,20 @@
+     return values
+ 
+ 
++def clean_part(data, *, partial):
++    data = require_object(data)
++    errors = unknown_field_errors(data, PART_WRITABLE, read_only=PART_READ_ONLY)
++    values = {}
++    for name, check in (("sku", required_text), ("name", required_text), ("site", required_text),
++                        ("unit_cost", non_negative_number), ("quantity", non_negative_integer),
++                        ("reorder_level", non_negative_integer)):
++        if name in data or not partial:
++            with collect(errors, name):
++                values[name] = check(data.get(name))
++    raise_if_errors(errors)
++    return values
++
++
+ # --- action parameters ----------------------------------------------------------------
+ 
+ def clean_assign_params(data):
+@@ -213,3 +248,38 @@
+ def clean_no_params(data):
+     data = require_object(data)
+     raise_if_errors(unknown_field_errors(data, ()))
++
++
++USE_PARTS_ITEM_KEYS = ("part", "quantity")
++
++
++def clean_use_parts_params(data):
++    """Shape-check a ``use_parts`` body: ``{"items": [{"part": id, "quantity": n}, ...]}``.
++
++    Returns ``(items, errors)`` instead of raising, because a stock shortage (409) on any item
++    with a valid part and quantity wins over every 400 in the same request: ``services`` checks
++    stock first and then raises these errors. Each item is ``{"part": id, "quantity": n}`` with
++    ``None`` where that value is invalid. Part existence, site and duplicates need the database
++    and are checked in ``services``.
++    """
++    data = require_object(data)
++    errors = unknown_field_errors(data, ("items",))
++    raw_items = data.get("items")
++    if not isinstance(raw_items, list) or not raw_items:
++        errors["items"] = "must be a non-empty list"
++        raw_items = raw_items if isinstance(raw_items, list) else []
++    items = []
++    for index, raw in enumerate(raw_items):
++        prefix = f"items[{index}]"
++        item = {"part": None, "quantity": None}
++        if not isinstance(raw, dict):
++            errors[prefix] = "must be an object with part and quantity"
++        else:
++            for name, problem in unknown_field_errors(raw, USE_PARTS_ITEM_KEYS).items():
++                errors[f"{prefix}.{name}"] = problem
++            with collect(errors, f"{prefix}.part"):
++                item["part"] = record_id(raw.get("part"))
++            with collect(errors, f"{prefix}.quantity"):
++                item["quantity"] = positive_integer(raw.get("quantity"))
++        items.append(item)
++    return items, errors
+--- a/seed.py
++++ b/seed.py
+@@ -2,7 +2,8 @@
+ 
+     python seed.py            # from this directory
+ 
+-Seed records keep their ids. Any existing database file is replaced.
++Seed records keep their ids. Any existing database file is replaced. The starting spare
++parts are data in migration ``0002_spare_parts.sql``, so they are created by ``db.migrate``.
+ """
+ import json
+ import os
+--- a/tests/test_maintenance_actions.py
++++ b/tests/test_maintenance_actions.py
+@@ -81,7 +81,8 @@
+     assert r.json["overdue"] is False
+     assert _outbox(app) == [
+         {"id": 1, "channel": "work_completed",
+-         "payload": {"work_order": 79, "asset": 13, "technician": 9, "labor_minutes": 45}, "created_at": NOW}
++         "payload": {"work_order": 79, "asset": 13, "technician": 9, "labor_minutes": 45, "parts_cost": 0},
++         "created_at": NOW}
+     ]
+     assert app.post("/api/work_orders/79/complete", body, user="olga").status == 409
+ 
+--- a/tests/test_maintenance_basics.py
++++ b/tests/test_maintenance_basics.py
+@@ -4,7 +4,7 @@
+ 
+ from accept_client import fresh_app
+ 
+-DERIVED = {"assets": ("open_orders",), "work_orders": ("due_date", "overdue")}
++DERIVED = {"assets": ("open_orders",), "work_orders": ("due_date", "overdue", "parts_cost")}
+ 
+ 
+ def _without_derived(collection, items):
+--- a/tests/test_maintenance_parts.py
++++ b/tests/test_maintenance_parts.py
+@@ -0,0 +1,304 @@
++"""Spare parts: the parts collection, read-only part usages and the use_parts action."""
++import os
++import sqlite3
++
++from accept_client import parse_ui
++
++NOW = "2026-03-02T09:30:00"
++NEW_PART = {"sku": "GSKT-01", "name": "Gasket", "site": "East", "unit_cost": 3.5, "quantity": 10,
++            "reorder_level": 2}
++SEED_PARTS = [
++    (1, "FLT-AHU", "AHU filter", "North", 42.5, 12, 4),
++    (2, "BELT-A40", "V-belt A40", "North", 18.0, 3, 2),
++    (3, "FUSE-10A", "Fuse 10A", "North", 1.25, 50, 10),
++    (4, "BRG-6204", "Bearing 6204", "South", 9.8, 6, 2),
++    (5, "BELT-A40-S", "V-belt A40", "South", 18.0, 2, 2),
++    (6, "SEAL-KIT", "Pump seal kit", "South", 64.0, 1, 0),
++    (7, "LAMP-LED", "LED lamp", "East", 7.4, 20, 5),
++    (8, "REMOTE-DK", "Dock door remote", "North", 23.9, 0, 1),
++]
++# Work order 79: in progress, asset 13 (North), assignee olga. Order 80: in progress, asset 22 (South), wade.
++
++
++def _use(app, order_id, items, user="olga", now=NOW):
++    return app.post(f"/api/work_orders/{order_id}/use_parts", {"items": items}, user=user, now=now)
++
++
++def _part(app, part_id):
++    return app.get(f"/api/parts/{part_id}", user="ruth").json
++
++
++def _outbox(app):
++    return app.get("/api/_outbox", user="ruth").json["items"]
++
++
++# --- parts ----------------------------------------------------------------------------
++
++def test_seed_parts(app):
++    items = app.get("/api/parts", user="mei").json["items"]
++    expected = [
++        {"id": i, "sku": sku, "name": name, "site": site, "unit_cost": cost, "quantity": qty,
++         "reorder_level": level, "low_stock": qty <= level}
++        for i, sku, name, site, cost, qty, level in SEED_PARTS
++    ]
++    assert items == expected
++    assert [p["id"] for p in app.get("/api/parts?low_stock=true", user="nils").json["items"]] == [5, 8]
++    assert [p["id"] for p in app.get("/api/parts?site=South", user="nils").json["items"]] == [4, 5, 6]
++    assert app.get("/api/part_usages", user="sofia").json == {"items": []}
++    assert all(o["parts_cost"] == 0 for o in app.get("/api/work_orders", user="sofia").json["items"])
++
++
++def test_create_update_delete_part(app):
++    r = app.post("/api/parts", NEW_PART, user="yara")
++    assert r.status == 201 and r.json == {"id": 9, **NEW_PART, "low_stock": False}
++    r = app.patch("/api/parts/9", {"quantity": 2, "unit_cost": 4}, user="sofia")
++    assert r.status == 200 and (r.json["quantity"], r.json["unit_cost"], r.json["low_stock"]) == (2, 4, True)
++    assert app.patch("/api/parts/9", {"sku": "GSKT-01"}, user="sofia").status == 200  # own sku is fine
++    assert app.delete("/api/parts/9", user="sofia").status == 204
++    assert app.get("/api/parts/9", user="sofia").status == 404
++    assert app.delete("/api/parts/9", user="sofia").status == 404
++    assert _outbox(app) == []  # editing stock never emits
++
++
++def test_only_supervisors_manage_parts(app):
++    for user in ("ruth", "nils"):
++        assert app.post("/api/parts", NEW_PART, user=user).status == 403
++        assert app.post("/api/parts", {"bogus": 1}, user=user).status == 403  # 403 beats 400
++        assert app.patch("/api/parts/1", {"quantity": 1}, user=user).status == 403
++        assert app.patch("/api/parts/1", {"quantity": -1}, user=user).status == 403
++        assert app.delete("/api/parts/1", user=user).status == 403
++    assert app.patch("/api/parts/99", {"quantity": 1}, user="ruth").status == 404  # 404 beats 403
++
++
++def test_part_validation(app):
++    def create(**changes):
++        return app.post("/api/parts", {**NEW_PART, **changes}, user="sofia").status
++
++    assert create(sku="FLT-AHU") == 400
++    for field in ("sku", "name", "site"):
++        assert create(**{field: "  "}) == 400, field
++        assert create(**{field: None}) == 400, field
++    for value in (-0.01, "3.5", True, None):
++        assert create(unit_cost=value) == 400, value
++    for field in ("quantity", "reorder_level"):
++        for value in (-1, 1.5, 2.0, "3", False, None):
++            assert create(**{field: value}) == 400, (field, value)
++    for field, value in (("id", 9), ("low_stock", False), ("colour", "red")):
++        assert create(**{field: value}) == 400, field
++    for field in NEW_PART:
++        body = {k: v for k, v in NEW_PART.items() if k != field}
++        assert app.post("/api/parts", body, user="sofia").status == 400, field
++    assert app.post("/api/parts", [1], user="sofia").status == 400
++    assert create(unit_cost=0, quantity=0, reorder_level=0) == 201
++    assert app.patch("/api/parts/2", {"sku": "FLT-AHU"}, user="sofia").status == 400
++    assert app.patch("/api/parts/2", {"low_stock": True}, user="sofia").status == 400
++    assert app.patch("/api/parts/2", {"quantity": -2}, user="sofia").status == 400
++    assert _part(app, 2)["quantity"] == 3
++
++
++# --- use_parts ------------------------------------------------------------------------
++
++def test_use_parts(app):
++    r = _use(app, 79, [{"part": 3, "quantity": 4}, {"part": 1, "quantity": 2}])
++    assert r.status == 200 and r.json["id"] == 79 and r.json["parts_cost"] == 90.0  # 4*1.25 + 2*42.5
++    assert (_part(app, 3)["quantity"], _part(app, 1)["quantity"]) == (46, 10)
++    usages = app.get("/api/part_usages", user="olga").json["items"]
++    assert usages == [
++        {"id": 1, "work_order": 79, "part": 3, "quantity": 4, "unit_cost": 1.25, "used_by": 9, "used_at": NOW},
++        {"id": 2, "work_order": 79, "part": 1, "quantity": 2, "unit_cost": 42.5, "used_by": 9, "used_at": NOW},
++    ]
++    assert app.get("/api/part_usages/2", user="olga").json == usages[1]
++    assert _outbox(app) == []
++    # Later price changes do not touch recorded usages or the order's parts_cost.
++    app.patch("/api/parts/1", {"unit_cost": 50}, user="sofia")
++    assert app.get("/api/work_orders/79", user="olga").json["parts_cost"] == 90.0
++    assert app.get("/api/part_usages/2", user="olga").json["unit_cost"] == 42.5
++    assert [o["id"] for o in app.get("/api/work_orders?parts_cost=90", user="sofia").json["items"]] == [79]
++
++
++def test_parts_cost_rounds_to_cents(app):
++    _use(app, 79, [{"part": 3, "quantity": 3}])
++    app.patch("/api/parts/3", {"unit_cost": 0.1}, user="sofia")
++    _use(app, 79, [{"part": 3, "quantity": 3}])
++    assert app.get("/api/work_orders/79", user="olga").json["parts_cost"] == 4.05  # 3*1.25 + 3*0.1
++
++
++def test_low_stock_messages(app):
++    # Part 1: 12 -> 4 crosses reorder level 4; part 3: 50 -> 49 stays above 10; part 2: 3 -> 2 crosses 2.
++    items = [{"part": 1, "quantity": 8}, {"part": 3, "quantity": 1}, {"part": 2, "quantity": 1}]
++    assert _use(app, 79, items).status == 200
++    assert [(m["channel"], m["payload"], m["created_at"]) for m in _outbox(app)] == [
++        ("low_stock", {"part": 1, "sku": "FLT-AHU", "quantity": 4}, NOW),
++        ("low_stock", {"part": 2, "sku": "BELT-A40", "quantity": 2}, NOW),
++    ]
++    assert _use(app, 79, [{"part": 1, "quantity": 1}]).status == 200  # already low: no message
++    assert len(_outbox(app)) == 2
++    assert _part(app, 1)["low_stock"] is True
++
++
++def test_use_parts_permission_and_state(app):
++    item = [{"part": 1, "quantity": 1}]
++    for user in ("nils", "sofia", "ruth"):  # site technician, supervisor, requester
++        assert _use(app, 79, item, user=user).status == 403
++    assert _use(app, 79, [], user="nils").status == 403  # 403 beats 400
++    assert _use(app, 77, item, user="nils").status == 409  # assigned, not started
++    assert _use(app, 77, [{"part": 1, "quantity": 999}], user="nils").status == 409
++    assert _use(app, 77, [], user="nils").status == 409  # 409 beats 400
++    assert app.post("/api/work_orders/999/use_parts", {"items": item}, user="olga").status == 404
++    assert app.post("/api/work_orders/79/complete", {"resolution": "Done", "labor_minutes": 5},
++                    user="olga").status == 200
++    assert _use(app, 79, item).status == 409  # completed
++    assert _part(app, 1)["quantity"] == 12
++
++
++def test_use_parts_validation(app):
++    bad_bodies = [
++        {}, {"items": []}, {"items": None}, {"items": {"part": 1, "quantity": 1}},
++        {"items": [{"part": 1, "quantity": 1}], "note": "x"},
++        {"items": [[1, 1]]}, {"items": [{"part": 1}]}, {"items": [{"quantity": 1}]},
++        {"items": [{"part": 1, "quantity": 1, "note": "x"}]},
++        {"items": [{"part": 4, "quantity": 1}]},  # South part on a North order
++        {"items": [{"part": 99, "quantity": 1}]},
++        {"items": [{"part": "1", "quantity": 1}]},
++        {"items": [{"part": 1, "quantity": 1}, {"part": 1, "quantity": 1}]},  # duplicate
++    ] + [{"items": [{"part": 1, "quantity": q}]} for q in (0, -1, 1.5, 2.0, "2", True, None)]
++    for body in bad_bodies:
++        assert app.post("/api/work_orders/79/use_parts", body, user="olga").status == 400, body
++    assert app.post("/api/work_orders/79/use_parts", [1], user="olga").status == 400
++    assert _part(app, 1)["quantity"] == 12
++    assert app.get("/api/part_usages", user="sofia").json["items"] == []
++    assert _outbox(app) == []
++
++
++def test_stock_shortage_is_409_and_wins_over_400(app):
++    assert _use(app, 79, [{"part": 2, "quantity": 4}]).status == 409
++    assert _use(app, 79, [{"part": 8, "quantity": 1}]).status == 409  # none in stock
++    assert _use(app, 79, [{"part": 1, "quantity": 1}, {"part": 2, "quantity": 4}]).status == 409
++    assert _use(app, 79, [{"part": "x", "quantity": 1}, {"part": 2, "quantity": 4}]).status == 409
++    assert _use(app, 79, [{"part": 2, "quantity": 4}, {"part": 4, "quantity": 1}]).status == 409
++    # A part at another site is not a valid part, so its shortage is not a conflict.
++    assert _use(app, 79, [{"part": 6, "quantity": 5}]).status == 400
++    assert (_part(app, 1)["quantity"], _part(app, 2)["quantity"]) == (12, 3)
++    assert app.get("/api/part_usages", user="sofia").json["items"] == []
++    assert _outbox(app) == []
++    assert _use(app, 79, [{"part": 2, "quantity": 3}]).status == 200  # exactly the stock
++    assert _part(app, 2)["quantity"] == 0
++
++
++def test_completion_and_cancellation_keep_parts(app):
++    _use(app, 80, [{"part": 4, "quantity": 2}, {"part": 6, "quantity": 1}], user="wade")
++    r = app.post("/api/work_orders/80/complete", {"resolution": "Fixed", "labor_minutes": 30}, user="wade", now=NOW)
++    assert r.status == 200 and r.json["parts_cost"] == 83.6  # 2*9.8 + 64
++    completed = [m for m in _outbox(app) if m["channel"] == "work_completed"]
++    assert [m["payload"] for m in completed] == [
++        {"work_order": 80, "asset": 22, "technician": 15, "labor_minutes": 30, "parts_cost": 83.6}
++    ]
++    _use(app, 79, [{"part": 1, "quantity": 1}])
++    assert app.post("/api/work_orders/79/cancel", {"reason": "Dup"}, user="sofia").status == 200
++    assert _part(app, 1)["quantity"] == 11
++    assert app.get("/api/work_orders/79", user="sofia").json["parts_cost"] == 42.5
++    assert len(app.get("/api/part_usages?work_order=79", user="sofia").json["items"]) == 1
++
++
++def test_parts_cost_cannot_be_sent(app):
++    assert app.post("/api/work_orders", {"asset": 1, "title": "x", "priority": "low", "parts_cost": 0},
++                    user="ruth").status == 400
++    assert app.patch("/api/work_orders/74", {"parts_cost": 0}, user="sofia").status == 400
++
++
++def test_part_in_use_cannot_be_deleted(app):
++    _use(app, 79, [{"part": 3, "quantity": 1}])
++    assert app.delete("/api/parts/3", user="sofia").status == 409
++    assert app.delete("/api/parts/3", user="ruth").status == 403  # 403 beats 409
++    assert app.delete("/api/parts/7", user="sofia").status == 204
++
++
++# --- part usages ----------------------------------------------------------------------
++
++def test_part_usages_follow_work_order_read_rules(app):
++    _use(app, 79, [{"part": 3, "quantity": 1}])  # North order requested by sofia
++    _use(app, 80, [{"part": 4, "quantity": 1}], user="wade")  # South order requested by lina
++    assert [u["id"] for u in app.get("/api/part_usages", user="tomas").json["items"]] == [1, 2]
++    assert [u["id"] for u in app.get("/api/part_usages", user="nils").json["items"]] == [1]
++    assert [u["id"] for u in app.get("/api/part_usages", user="lina").json["items"]] == [2]
++    assert app.get("/api/part_usages", user="ruth").json["items"] == []
++    assert app.get("/api/part_usages/1", user="ruth").status == 403
++    assert app.get("/api/part_usages/2", user="nils").status == 403
++    assert app.get("/api/part_usages/2", user="lina").status == 200
++    assert app.get("/api/part_usages/9", user="lina").status == 404
++    assert app.get("/api/part_usages?used_by=15", user="sofia").json["items"][0]["id"] == 2
++    assert app.get("/api/part_usages?colour=red", user="sofia").status == 400
++
++
++def test_part_usages_are_read_only(app):
++    _use(app, 79, [{"part": 3, "quantity": 1}])
++    body = {"work_order": 79, "part": 3, "quantity": 1}
++    for user in ("sofia", "olga"):
++        assert app.post("/api/part_usages", body, user=user).status == 403
++        assert app.patch("/api/part_usages/1", {"quantity": 5}, user=user).status == 403
++        assert app.delete("/api/part_usages/1", user=user).status == 403
++    assert app.patch("/api/part_usages/9", {}, user="sofia").status == 404
++    assert app.get("/api/part_usages/1", user="sofia").json["quantity"] == 1
++
++
++# --- UI -------------------------------------------------------------------------------
++
++def test_parts_ui(app):
++    assert parse_ui(app.get("/ui/parts", user="ruth").text).rows == list(range(1, 9))
++    assert parse_ui(app.get("/ui/parts/5", user="ruth").text).fields == {
++        "sku": "BELT-A40-S", "name": "V-belt A40", "site": "South", "unit_cost": "18.0", "quantity": "2",
++        "reorder_level": "2", "low_stock": "true"}
++    assert app.get("/ui/parts/99", user="ruth").status == 404
++    page = parse_ui(app.get("/ui/parts/new", user="sofia").text)
++    assert page.creates == ["parts"]
++    assert sorted(page.inputs) == ["name", "quantity", "reorder_level", "site", "sku", "unit_cost"]
++    for user in ("ruth", "nils"):
++        assert app.get("/ui/parts/new", user=user).status == 403
++
++
++def test_part_usages_ui(app):
++    _use(app, 79, [{"part": 3, "quantity": 2}])
++    assert parse_ui(app.get("/ui/part_usages", user="nils").text).rows == [1]
++    assert parse_ui(app.get("/ui/part_usages", user="ruth").text).rows == []
++    assert parse_ui(app.get("/ui/part_usages/1", user="nils").text).fields == {
++        "work_order": "79", "part": "3", "quantity": "2", "unit_cost": "1.25", "used_by": "9", "used_at": NOW}
++    assert app.get("/ui/part_usages/1", user="ruth").status == 403
++    assert parse_ui(app.get("/ui/work_orders/79", user="olga").text).fields["parts_cost"] == "2.5"
++
++
++def test_use_parts_form(app):
++    def actions(order_id, user):
++        return parse_ui(app.get(f"/ui/work_orders/{order_id}", user=user).text).actions
++
++    assert "use_parts" in actions(79, "olga")
++    assert "use_parts" not in actions(79, "sofia")
++    assert "use_parts" not in actions(79, "nils")
++    assert "use_parts" not in actions(77, "nils")  # assigned, not started
++    page = parse_ui(app.get("/ui/work_orders/79", user="olga").text)
++    assert {"part", "quantity"} <= set(page.inputs)
++
++
++def test_migration_keeps_existing_records(app):
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    parts = conn.execute("SELECT id, sku, name, site, unit_cost, quantity, reorder_level FROM parts ORDER BY id")
++    assert parts.fetchall() == SEED_PARTS
++    assert conn.execute("SELECT COUNT(*) FROM part_usages").fetchone()[0] == 0
++    conn.close()
++
++
++def test_ui_forms_post_through_services(app):
++    from test_maintenance_ui import _post_form
++
++    status, headers, _ = _post_form(app, "/ui/parts", {"sku": "X-1", "name": "X", "site": "North",
++                                                       "unit_cost": "2.25", "quantity": "5", "reorder_level": "1"},
++                                    "sofia")
++    assert status == 303 and headers["Location"].endswith("/ui/parts/9")
++    assert _part(app, 9)["unit_cost"] == 2.25
++    assert _post_form(app, "/ui/parts", {**NEW_PART, "quantity": "x"}, "sofia")[0] == 400
++    assert _post_form(app, "/ui/parts", {**NEW_PART}, "ruth")[0] == 403
++    status, headers, _ = _post_form(app, "/ui/work_orders/79/use_parts", {"part": "9", "quantity": "2"}, "olga")
++    assert status == 303 and headers["Location"].endswith("/ui/work_orders/79")
++    assert _part(app, 9)["quantity"] == 3
++    assert _post_form(app, "/ui/work_orders/79/use_parts", {"part": "9", "quantity": "9"}, "olga")[0] == 409
++    assert _post_form(app, "/ui/work_orders/79/use_parts", {"part": "9", "quantity": "0"}, "olga")[0] == 400
++    assert _post_form(app, "/ui/work_orders/79/use_parts", {"part": "9", "quantity": "1"}, "nils")[0] == 403
+--- a/tests/test_maintenance_ui.py
++++ b/tests/test_maintenance_ui.py
+@@ -46,9 +46,9 @@
+         "asset": "13", "title": "Zone 3 fault", "description": "", "priority": "urgent", "status": "in_progress",
+         "requested_by": "1", "created_at": "2026-02-28T15:00:00", "assignee": "9",
+         "started_at": "2026-02-28T16:00:00", "completed_at": "", "resolution": "", "labor_minutes": "",
+-        "cancel_reason": "", "due_date": "2026-03-01", "overdue": "false",
++        "cancel_reason": "", "parts_cost": "0", "due_date": "2026-03-01", "overdue": "false",
+     }
+-    assert page.actions == ["complete"]
++    assert page.actions == ["complete", "use_parts"]
+     assert app.get("/ui/work_orders/79", user="ruth").status == 403
+     assert app.get("/ui/work_orders/999", user="ruth").status == 404
+ 
+@@ -70,7 +70,7 @@
+     assert _actions(app, 77, "ruth") == []  # requester, no longer open
+     assert _actions(app, 77, "nils") == ["start"]
+     assert _actions(app, 79, "sofia") == ["cancel"]  # in progress
+-    assert _actions(app, 79, "olga") == ["complete"]
++    assert _actions(app, 79, "olga") == ["complete", "use_parts"]
+     assert _actions(app, 2, "sofia") == []  # completed
+     assign = parse_ui(app.get("/ui/work_orders/74", user="sofia").text)
+     assert {"technician", "reason"} <= set(assign.inputs)
+--- a/tests/test_maintenance_work_orders.py
++++ b/tests/test_maintenance_work_orders.py
+@@ -79,7 +79,7 @@
+         "id": 83, "asset": 1, "title": "Rattling fan", "description": None, "priority": "normal",
+         "status": "open", "requested_by": 3, "created_at": "2026-03-03T08:15:00", "assignee": None,
+         "started_at": None, "completed_at": None, "resolution": None, "labor_minutes": None,
+-        "cancel_reason": None, "due_date": "2026-03-10", "overdue": False,
++        "cancel_reason": None, "due_date": "2026-03-10", "overdue": False, "parts_cost": 0,
+     }
+     assert app.get("/api/work_orders/83", user="ruth").json == r.json
+     assert app.get("/api/_outbox", user="ruth").json["items"] == []

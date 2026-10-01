@@ -1,0 +1,1025 @@
+--- a/README.md
++++ b/README.md
+@@ -3,7 +3,8 @@
+ A facilities team at three sites tracks its staff, the assets it maintains and the work orders
+ raised against those assets. Requesters raise orders, supervisors assign them to technicians
+ (or technicians claim open low-priority orders themselves, up to a workload cap), technicians start and complete them, recording the spare parts they use (stock is kept per
+-site; part usages are read-only history). Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External
++site; part usages are read-only history) and logging their working time (time entries, also
++read-only history; an order's `labor_minutes` is their sum). Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External
+ behaviour follows `spec/CONTRACT.md` and `spec/apps/maintenance.md`.
+ 
+ ## Layout
+@@ -56,6 +57,7 @@
+ | `work_orders.due_date` | `services.due_date` (`created_at` date + `services.DUE_DAYS[priority]`) |
+ | `work_orders.overdue` | `services.present_work_order` (unfinished and `ctx.today > due_date`) |
+ | `work_orders.parts_cost` | SQL sub-select in `repository._WORK_ORDER_SELECT` (sum of usages' `quantity * unit_cost`), rounded to 2 decimals in `repository._work_order` |
++| `work_orders.labor_minutes` | SQL sub-select in `repository._WORK_ORDER_SELECT` (sum of the order's time entries' `minutes`; `null` without entries) |
+ | `parts.low_stock` | `repository._part` (`quantity <= reorder_level`) |
+ 
+ Derived fields are part of the API records, so list filters (`?overdue=true`, `?open_orders=0`)
+@@ -69,7 +71,10 @@
+                  assigned --assign--> assigned               (re-assignment)
+ open | assigned | in_progress --cancel--> cancelled          (a non-supervisor requester: only from open)
+ in_progress --use_parts--> in_progress                       (assignee only; consumes stock)
+-```
++in_progress --log_time---> in_progress                       (assignee only; adds a time entry)
++```
++
++`complete` additionally needs at least one time entry on the order.
+ 
+ | Rule | Location |
+ |---|---|
+@@ -82,6 +87,9 @@
+ | `dispatch` (`"supervisor"` / `"self"` / `null`) | set by `services._assign` (shared by `assign` and `claim`) |
+ | outbox messages `assignment`, `work_completed` | `services._assign` (assign and claim), `services.complete_work_order` |
+ | `use_parts`: usages, stock, `low_stock` messages | `services.use_parts_on_work_order` (shape checks in `validation.clean_use_parts_params`) |
++| `log_time`: one time entry (caller, now), no message | `services.log_time_on_work_order` (body checks in `validation.clean_log_time_params`, `LOG_TIME_MIN/MAX_MINUTES`) |
++| `complete` requires a time entry | `services._authorize_complete` (`repository.work_order_has_time_entries`) |
++| who may read / write time entries | `permissions.can_read_time_entry` (= can read the order), `can_write_time_entries` (nobody) |
+ | who may manage parts / read and write part usages | `permissions.can_manage_parts`, `can_read_part_usage`, `can_write_part_usages` |
+ | who can read/create/edit an order | `permissions.can_read_work_order`, `can_create_work_order_for`, `can_edit_work_order` |
+ | PATCH status rules | `services._authorize_edit` |
+@@ -180,4 +188,15 @@
+ * `POST /api/part_usages` is 403; `PATCH`/`DELETE /api/part_usages/{id}` are 404 for an unknown
+   id, otherwise 403. Changing parts through PATCH never emits `low_stock`.
+ * The starting parts (ids 1-8) are data in migration `0002_spare_parts.sql`, not in `seed_data.json`.
++* Time logging: `log_time` takes `{"minutes": 1..600, "note": text or null}` (`note` optional); 403 for
++  anyone but the assignee, then 409 unless `in_progress`, then 400 for the body (unknown keys too).
++  `complete` takes exactly `{"resolution"}` (sending `labor_minutes` is a 400) and is a 409 while the
++  order has no time entry (403, then 409 for status or missing time, then 400). The `work_completed`
++  payload's `labor_minutes` is the derived total at completion. `labor_minutes` is derived and
++  stays read-only (400 in create/PATCH bodies). Cancelling keeps the entries. `POST /api/time_entries`
++  is 403; `PATCH`/`DELETE /api/time_entries/{id}` are 404 for an unknown id, otherwise 403.
++  The stored column was dropped by migration `0005_time_entries.sql`, which gave every order that had
++  a value one entry (assignee, `minutes` = the value, `logged_at` = `completed_at`, note `"migrated"`,
++  ids 1-39 in work order order); `seed.py` builds the same entries (`seed_time_entries`) because the
++  seed still stores `labor_minutes`. Deleting staff who logged time is a 409 like other referenced staff.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/maintenance_app/migrations/0005_time_entries.sql
++++ b/maintenance_app/migrations/0005_time_entries.sql
+@@ -0,0 +1,28 @@
++-- Time logging: technicians log their working time on an order while it is in progress, and
++-- work_orders.labor_minutes becomes derived (the sum of the order's time entries, NULL without any).
++--
++-- Every existing order with a labor_minutes value gets exactly one entry carrying it (logged by
++-- its assignee at its completion time, note 'migrated'); ids 1, 2, 3, ... follow the work order
++-- ids, so the derived total equals the former stored value. Entries of inactive technicians are
++-- migrated like any other. The stored column is then dropped.
++
++CREATE TABLE time_entries (
++    id            INTEGER PRIMARY KEY AUTOINCREMENT,
++    work_order_id INTEGER NOT NULL REFERENCES work_orders (id),
++    technician_id INTEGER NOT NULL REFERENCES staff (id),
++    minutes       INTEGER NOT NULL CHECK (minutes >= 1),
++    logged_at     TEXT    NOT NULL,  -- YYYY-MM-DDTHH:MM:SS (UTC)
++    note          TEXT
++);
++
++CREATE INDEX time_entries_work_order_id ON time_entries (work_order_id);
++CREATE INDEX time_entries_technician_id ON time_entries (technician_id);
++
++INSERT INTO time_entries (id, work_order_id, technician_id, minutes, logged_at, note)
++SELECT ROW_NUMBER() OVER (ORDER BY id), id, assignee_id, labor_minutes, completed_at, 'migrated'
++  FROM work_orders
++ WHERE labor_minutes IS NOT NULL
++ ORDER BY id;
++
++-- (Its CHECK constraint belongs to the column itself, so SQLite can drop it in place.)
++ALTER TABLE work_orders DROP COLUMN labor_minutes;
+--- a/maintenance_app/permissions.py
++++ b/maintenance_app/permissions.py
+@@ -109,6 +109,11 @@
+     return is_assignee_of(user, order)
+ 
+ 
++def can_log_time_on_work_order(user, order):
++    """``log_time``: only the current assignee."""
++    return is_assignee_of(user, order)
++
++
+ # --- parts and part usages ------------------------------------------------------------
+ 
+ def can_read_part(user, part):
+@@ -128,3 +133,15 @@
+ def can_write_part_usages(user):
+     """Usages are history: created only by ``use_parts``, never through the API."""
+     return False
++
++
++# --- time entries ---------------------------------------------------------------------
++
++def can_read_time_entry(user, order, asset):
++    """A time entry is readable exactly by those who can read its work order."""
++    return can_read_work_order(user, order, asset)
++
++
++def can_write_time_entries(user):
++    """Time entries are created only by ``log_time``, never through the API, and never changed."""
++    return False
+--- a/maintenance_app/repository.py
++++ b/maintenance_app/repository.py
+@@ -5,7 +5,7 @@
+ been validated by ``services``.
+ 
+ Derived values that depend only on stored data (``assets.open_orders``,
+-``work_orders.parts_cost``, ``parts.low_stock``) are computed here; those that depend on the
++``work_orders.parts_cost``/``labor_minutes``, ``parts.low_stock``) are computed here; those that depend on the
+ request's clock (``work_orders.due_date``/``overdue``) are added by ``services.present_work_order``.
+ """
+ import json
+@@ -70,9 +70,11 @@
+ 
+ 
+ def staff_has_work_orders(staff_id):
+-    """True if the staff member requested or is assigned to any work order."""
++    """True if the staff member requested, is assigned to or logged time on any work order."""
+     row = get_db().execute(
+-        "SELECT 1 FROM work_orders WHERE requested_by_id = :id OR assignee_id = :id LIMIT 1", {"id": staff_id}
++        "SELECT 1 FROM work_orders WHERE requested_by_id = :id OR assignee_id = :id"
++        " UNION ALL SELECT 1 FROM time_entries WHERE technician_id = :id LIMIT 1",
++        {"id": staff_id},
+     ).fetchone()
+     return row is not None
+ 
+@@ -139,10 +141,12 @@
+ 
+ _WORK_ORDER_SELECT = """
+     SELECT w.id, w.asset_id, w.title, w.description, w.priority, w.status, w.requested_by_id,
+-           w.created_at, w.assignee_id, w.started_at, w.completed_at, w.resolution, w.labor_minutes,
++           w.created_at, w.assignee_id, w.started_at, w.completed_at, w.resolution,
+            w.cancel_reason, w.dispatch,
+            (SELECT COALESCE(SUM(u.quantity * u.unit_cost), 0) FROM part_usages u
+-             WHERE u.work_order_id = w.id) AS parts_cost
++             WHERE u.work_order_id = w.id) AS parts_cost,
++           -- NULL (not 0) when the order has no time entries
++           (SELECT SUM(t.minutes) FROM time_entries t WHERE t.work_order_id = w.id) AS labor_minutes
+     FROM work_orders w
+ """
+ 
+@@ -217,11 +221,10 @@
+     )
+ 
+ 
+-def mark_work_order_completed(work_order_id, completed_at, resolution, labor_minutes):
++def mark_work_order_completed(work_order_id, completed_at, resolution):
+     get_db().execute(
+-        "UPDATE work_orders SET status = 'completed', completed_at = ?, resolution = ?, labor_minutes = ?"
+-        " WHERE id = ?",
+-        (completed_at, resolution, labor_minutes, work_order_id),
++        "UPDATE work_orders SET status = 'completed', completed_at = ?, resolution = ? WHERE id = ?",
++        (completed_at, resolution, work_order_id),
+     )
+ 
+ 
+@@ -327,6 +330,45 @@
+     return cur.lastrowid
+ 
+ 
++# --- time entries ---------------------------------------------------------------------
++
++_TIME_ENTRY_SELECT = "SELECT id, work_order_id, technician_id, minutes, logged_at, note FROM time_entries"
++
++
++def _time_entry(row):
++    if row is None:
++        return None
++    return {
++        "id": row["id"],
++        "work_order": row["work_order_id"],
++        "technician": row["technician_id"],
++        "minutes": row["minutes"],
++        "logged_at": row["logged_at"],
++        "note": row["note"],
++    }
++
++
++def list_time_entries():
++    return [_time_entry(row) for row in get_db().execute(f"{_TIME_ENTRY_SELECT} ORDER BY id")]
++
++
++def get_time_entry(entry_id):
++    return _time_entry(get_db().execute(f"{_TIME_ENTRY_SELECT} WHERE id = ?", (entry_id,)).fetchone())
++
++
++def work_order_has_time_entries(work_order_id):
++    row = get_db().execute("SELECT 1 FROM time_entries WHERE work_order_id = ? LIMIT 1", (work_order_id,)).fetchone()
++    return row is not None
++
++
++def insert_time_entry(work_order_id, technician_id, minutes, logged_at, note):
++    cur = get_db().execute(
++        "INSERT INTO time_entries (work_order_id, technician_id, minutes, logged_at, note) VALUES (?, ?, ?, ?, ?)",
++        (work_order_id, technician_id, minutes, logged_at, note),
++    )
++    return cur.lastrowid
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def add_outbox_message(channel, payload, created_at):
+--- a/maintenance_app/routes_api.py
++++ b/maintenance_app/routes_api.py
+@@ -143,6 +143,11 @@
+     return services.use_parts_on_work_order(current_context(), work_order_id, _body())
+ 
+ 
++@bp.post("/work_orders/<int:work_order_id>/log_time")
++def log_time_on_work_order(work_order_id):
++    return services.log_time_on_work_order(current_context(), work_order_id, _body())
++
++
+ # --- parts ----------------------------------------------------------------------------
+ 
+ @bp.get("/parts")
+@@ -193,6 +198,28 @@
+     services.ensure_can_write_part_usages(current_context(), usage_id)
+ 
+ 
++# --- time entries (read-only) ---------------------------------------------------------
++
++@bp.get("/time_entries")
++def list_time_entries():
++    return _items(services.list_time_entries(current_context(), _filters()))
++
++
++@bp.get("/time_entries/<int:entry_id>")
++def get_time_entry(entry_id):
++    return services.get_time_entry(current_context(), entry_id)
++
++
++@bp.post("/time_entries")
++def create_time_entry():
++    services.ensure_can_write_time_entries(current_context())
++
++
++@bp.route("/time_entries/<int:entry_id>", methods=["PATCH", "DELETE"])
++def change_time_entry(entry_id):
++    services.ensure_can_write_time_entries(current_context(), entry_id)
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ @bp.get("/_outbox")
+--- a/maintenance_app/routes_ui.py
++++ b/maintenance_app/routes_ui.py
+@@ -178,14 +178,20 @@
+ 
+ @bp.post("/work_orders/<int:work_order_id>/complete")
+ def complete_work_order(work_order_id):
+-    params = _form_values({"resolution": _text, "labor_minutes": _integer})
+-    services.complete_work_order(current_context(), work_order_id, params)
++    services.complete_work_order(current_context(), work_order_id, _form_values({"resolution": _text}))
+     return _redirect_to_work_order(work_order_id)
+ 
+ 
+ @bp.post("/work_orders/<int:work_order_id>/cancel")
+ def cancel_work_order(work_order_id):
+     services.cancel_work_order(current_context(), work_order_id, _form_values({"reason": _text}))
++    return _redirect_to_work_order(work_order_id)
++
++
++@bp.post("/work_orders/<int:work_order_id>/log_time")
++def log_time_on_work_order(work_order_id):
++    params = _form_values({"minutes": _integer, "note": _optional_text})
++    services.log_time_on_work_order(current_context(), work_order_id, params)
+     return _redirect_to_work_order(work_order_id)
+ 
+ 
+@@ -239,3 +245,17 @@
+ def show_part_usage(usage_id):
+     usage = services.get_part_usage(current_context(), usage_id)
+     return render_template("part_usages/detail.html", usage=usage)
++
++
++# --- time entries ---------------------------------------------------------------------
++
++@bp.get("/time_entries")
++def list_time_entries():
++    entries = services.list_time_entries(current_context(), request.args.to_dict())
++    return render_template("time_entries/list.html", entries=entries)
++
++
++@bp.get("/time_entries/<int:entry_id>")
++def show_time_entry(entry_id):
++    entry = services.get_time_entry(current_context(), entry_id)
++    return render_template("time_entries/detail.html", entry=entry)
+--- a/maintenance_app/services.py
++++ b/maintenance_app/services.py
+@@ -11,6 +11,9 @@
+                      assigned --assign--> assigned               (re-assignment)
+     open | assigned | in_progress --cancel--> cancelled          (requester: only from open)
+     in_progress --use_parts--> in_progress                       (consumes stock, records part usages)
++    in_progress --log_time---> in_progress                       (records a time entry)
++
++``complete`` needs at least one time entry; ``labor_minutes`` is the sum of the entries.
+ """
+ from datetime import date, timedelta
+ 
+@@ -32,6 +35,7 @@
+ STARTABLE_STATUSES = ("assigned",)
+ COMPLETABLE_STATUSES = ("in_progress",)
+ PARTS_USABLE_STATUSES = ("in_progress",)
++TIME_LOGGABLE_STATUSES = ("in_progress",)
+ REQUESTER_EDITABLE_STATUSES = ("open",)
+ REQUESTER_CANCELLABLE_STATUSES = ("open",)
+ SUPERVISOR_EDITABLE_STATUSES = UNFINISHED_STATUSES
+@@ -48,6 +52,7 @@
+                      "labor_minutes", "cancel_reason", "dispatch", "parts_cost", "due_date", "overdue")
+ PART_FIELDS = ("id", "sku", "name", "site", "unit_cost", "quantity", "reorder_level", "low_stock")
+ PART_USAGE_FIELDS = ("id", "work_order", "part", "quantity", "unit_cost", "used_by", "used_at")
++TIME_ENTRY_FIELDS = ("id", "work_order", "technician", "minutes", "logged_at", "note")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -299,6 +304,8 @@
+     if not permissions.can_work_on_work_order(user, order):
+         raise Forbidden("Only the assignee can complete the work order.")
+     _require_status(order, COMPLETABLE_STATUSES, "Only work orders in progress can be completed.")
++    if not repository.work_order_has_time_entries(order["id"]):
++        raise Conflict("Log the working time (log_time) before completing the work order.")
+ 
+ 
+ def _authorize_cancel(user, order):
+@@ -316,6 +323,12 @@
+     _require_status(order, PARTS_USABLE_STATUSES, "Parts can only be used on work orders in progress.")
+ 
+ 
++def _authorize_log_time(user, order):
++    if not permissions.can_log_time_on_work_order(user, order):
++        raise Forbidden("Only the assignee can log time on the work order.")
++    _require_status(order, TIME_LOGGABLE_STATUSES, "Time can only be logged on work orders in progress.")
++
++
+ WORK_ORDER_ACTIONS = {
+     "assign": _authorize_assign,
+     "claim": _authorize_claim,
+@@ -323,6 +336,7 @@
+     "complete": _authorize_complete,
+     "cancel": _authorize_cancel,
+     "use_parts": _authorize_use_parts,
++    "log_time": _authorize_log_time,
+ }
+ 
+ 
+@@ -382,19 +396,29 @@
+ 
+ 
+ def complete_work_order(ctx, work_order_id, params):
++    """Finish an in-progress order that has logged time; ``labor_minutes`` in the message is the
++    order's derived total at this moment."""
+     with transaction():
+         order = _load_work_order(work_order_id)
+         _authorize_complete(ctx.user, order)
+-        values = validation.clean_complete_params(params)
+-        repository.mark_work_order_completed(
+-            work_order_id, ctx.now_text, values["resolution"], values["labor_minutes"]
+-        )
++        resolution = validation.clean_complete_params(params)
++        repository.mark_work_order_completed(work_order_id, ctx.now_text, resolution)
+         repository.add_outbox_message(
+             "work_completed",
+             {"work_order": work_order_id, "asset": order["asset"], "technician": order["assignee"],
+-             "labor_minutes": values["labor_minutes"], "parts_cost": order["parts_cost"]},
++             "labor_minutes": order["labor_minutes"], "parts_cost": order["parts_cost"]},
+             ctx.now_text,
+         )
++    return present_work_order(ctx, repository.get_work_order(work_order_id))
++
++
++def log_time_on_work_order(ctx, work_order_id, params):
++    """The assignee records working time on an in-progress order (one time entry; no message)."""
++    with transaction():
++        order = _load_work_order(work_order_id)
++        _authorize_log_time(ctx.user, order)
++        values = validation.clean_log_time_params(params)
++        repository.insert_time_entry(work_order_id, ctx.user["id"], values["minutes"], ctx.now_text, values["note"])
+     return present_work_order(ctx, repository.get_work_order(work_order_id))
+ 
+ 
+@@ -621,6 +645,43 @@
+     return usage
+ 
+ 
++# --- time entries (read-only history, written by ``log_time``) -------------------------
++
++def list_time_entries(ctx, filters=None):
++    assets = {a["id"]: a for a in repository.list_assets()}
++    orders = {o["id"]: o for o in repository.list_work_orders()}
++
++    def readable(entry):
++        order = orders[entry["work_order"]]
++        return permissions.can_read_time_entry(ctx.user, order, assets[order["asset"]])
++
++    entries = [e for e in repository.list_time_entries() if readable(e)]
++    return apply_filters(entries, filters or {}, TIME_ENTRY_FIELDS)
++
++
++def get_time_entry(ctx, entry_id):
++    entry = _load_time_entry(entry_id)
++    order = repository.get_work_order(entry["work_order"])
++    if not permissions.can_read_time_entry(ctx.user, order, repository.get_asset(order["asset"])):
++        raise Forbidden()
++    return entry
++
++
++def ensure_can_write_time_entries(ctx, entry_id=None):
++    """POST, PATCH and DELETE on time entries: 404 for an unknown entry, else always 403."""
++    if entry_id is not None:
++        _load_time_entry(entry_id)
++    if not permissions.can_write_time_entries(ctx.user):
++        raise Forbidden("Time entries are recorded by the log_time action and cannot be changed.")
++
++
++def _load_time_entry(entry_id):
++    entry = repository.get_time_entry(entry_id)
++    if entry is None:
++        raise NotFound("No such time entry.")
++    return entry
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def list_outbox(ctx, filters=None):
+--- a/maintenance_app/templates/base.html
++++ b/maintenance_app/templates/base.html
+@@ -22,6 +22,7 @@
+     <a href="{{ url_for('ui.list_staff') }}">Staff</a>
+     <a href="{{ url_for('ui.list_parts') }}">Parts</a>
+     <a href="{{ url_for('ui.list_part_usages') }}">Part usages</a>
++    <a href="{{ url_for('ui.list_time_entries') }}">Time entries</a>
+     {% if ctx %}<span>Signed in as {{ ctx.user.username }} ({{ ctx.user.role }}, {{ ctx.user.site }})</span>{% endif %}
+   </nav>
+   <main>
+--- a/maintenance_app/templates/time_entries/detail.html
++++ b/maintenance_app/templates/time_entries/detail.html
+@@ -0,0 +1,13 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}Time entry #{{ entry.id }}{% endblock %}
++{% block content %}
++<h1>Time entry #{{ entry.id }}</h1>
++<dl>
++  {{ field("work_order", entry.work_order, href=url_for('ui.show_work_order', work_order_id=entry.work_order)) }}
++  {{ field("technician", entry.technician, href=url_for('ui.show_staff', staff_id=entry.technician)) }}
++  {{ field("minutes", entry.minutes) }}
++  {{ field("logged_at", entry.logged_at) }}
++  {{ field("note", entry.note) }}
++</dl>
++{% endblock %}
+--- a/maintenance_app/templates/time_entries/list.html
++++ b/maintenance_app/templates/time_entries/list.html
+@@ -0,0 +1,20 @@
++{% extends "base.html" %}
++{% block title %}Time entries{% endblock %}
++{% block content %}
++<h1>Time entries</h1>
++<table>
++  <thead><tr><th>Entry</th><th>Work order</th><th>Technician</th><th>Minutes</th><th>Logged at</th><th>Note</th></tr></thead>
++  <tbody>
++  {% for entry in entries %}
++    <tr data-id="{{ entry.id }}">
++      <td><a href="{{ url_for('ui.show_time_entry', entry_id=entry.id) }}">#{{ entry.id }}</a></td>
++      <td><a href="{{ url_for('ui.show_work_order', work_order_id=entry.work_order) }}">#{{ entry.work_order }}</a></td>
++      <td><a href="{{ url_for('ui.show_staff', staff_id=entry.technician) }}">{{ entry.technician }}</a></td>
++      <td>{{ entry.minutes }}</td>
++      <td>{{ entry.logged_at }}</td>
++      <td>{{ entry.note|display }}</td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/maintenance_app/templates/work_orders/detail.html
++++ b/maintenance_app/templates/work_orders/detail.html
+@@ -15,7 +15,7 @@
+   {{ field("started_at", order.started_at) }}
+   {{ field("completed_at", order.completed_at) }}
+   {{ field("resolution", order.resolution) }}
+-  {{ field("labor_minutes", order.labor_minutes) }}
++  {{ field("labor_minutes", order.labor_minutes, href=url_for('ui.list_time_entries', work_order=order.id)) }}
+   {{ field("cancel_reason", order.cancel_reason) }}
+   {{ field("dispatch", order.dispatch) }}
+   {{ field("parts_cost", order.parts_cost, href=url_for('ui.list_part_usages', work_order=order.id)) }}
+@@ -48,8 +48,14 @@
+ {% if "complete" in actions %}
+ <form data-action="complete" method="post" action="{{ url_for('ui.complete_work_order', work_order_id=order.id) }}">
+   <label>Resolution <textarea name="resolution" required></textarea></label>
+-  <label>Labour (minutes) <input name="labor_minutes" type="number" min="1" step="1" required></label>
+   <button type="submit">Complete</button>
++</form>
++{% endif %}
++{% if "log_time" in actions %}
++<form data-action="log_time" method="post" action="{{ url_for('ui.log_time_on_work_order', work_order_id=order.id) }}">
++  <label>Minutes <input name="minutes" type="number" min="1" max="600" step="1" required></label>
++  <label>Note <textarea name="note"></textarea></label>
++  <button type="submit">Log time</button>
+ </form>
+ {% endif %}
+ {% if "use_parts" in actions %}
+--- a/maintenance_app/validation.py
++++ b/maintenance_app/validation.py
+@@ -20,6 +20,9 @@
+ UNFINISHED_STATUSES = ("open", "assigned", "in_progress")
+ # Work orders in these states count towards their assignee's workload.
+ WORKLOAD_STATUSES = ("assigned", "in_progress")
++# Minutes a single ``log_time`` call may record (inclusive).
++LOG_TIME_MIN_MINUTES = 1
++LOG_TIME_MAX_MINUTES = 600
+ # How a work order got its assignee (``dispatch``): by ``assign`` or by the technician's ``claim``.
+ DISPATCH_SUPERVISOR = "supervisor"
+ DISPATCH_SELF = "self"
+@@ -105,6 +108,14 @@
+     return value
+ 
+ 
++def integer_between(value, low, high):
++    if value is None:
++        raise FieldInvalid("required")
++    if not is_integer(value) or not low <= value <= high:
++        raise FieldInvalid(f"must be an integer from {low} to {high}")
++    return value
++
++
+ def non_negative_integer(value):
+     if value is None:
+         raise FieldInvalid("required")
+@@ -138,7 +149,8 @@
+ 
+ WORK_ORDER_CREATABLE = ("asset", "title", "description", "priority")
+ WORK_ORDER_EDITABLE = ("title", "description", "priority")
+-# Maintained by the system and the workflow actions; clients sending them get a 400.
++# Maintained by the system and the workflow actions (``labor_minutes`` is derived from the time
++# entries); clients sending them get a 400.
+ WORK_ORDER_READ_ONLY = ("id", "status", "requested_by", "created_at", "assignee", "started_at",
+                         "completed_at", "resolution", "labor_minutes", "cancel_reason", "dispatch",
+                         "due_date", "overdue", "parts_cost")
+@@ -230,13 +242,25 @@
+ 
+ 
+ def clean_complete_params(data):
+-    data = require_object(data)
+-    errors = unknown_field_errors(data, ("resolution", "labor_minutes"))
+-    values = {}
++    """Return the resolution. Labour is no longer reported here: it is logged with ``log_time``."""
++    data = require_object(data)
++    errors = unknown_field_errors(data, ("resolution",), read_only=("labor_minutes",))
++    resolution = None
+     with collect(errors, "resolution"):
+-        values["resolution"] = required_text(data.get("resolution"))
+-    with collect(errors, "labor_minutes"):
+-        values["labor_minutes"] = positive_integer(data.get("labor_minutes"))
++        resolution = required_text(data.get("resolution"))
++    raise_if_errors(errors)
++    return resolution
++
++
++def clean_log_time_params(data):
++    """``{"minutes": 1..600, "note": text or null}`` (``note`` optional, default null)."""
++    data = require_object(data)
++    errors = unknown_field_errors(data, ("minutes", "note"))
++    values = {}
++    with collect(errors, "minutes"):
++        values["minutes"] = integer_between(data.get("minutes"), LOG_TIME_MIN_MINUTES, LOG_TIME_MAX_MINUTES)
++    with collect(errors, "note"):
++        values["note"] = optional_text(data.get("note"))
+     raise_if_errors(errors)
+     return values
+ 
+--- a/seed.py
++++ b/seed.py
+@@ -9,6 +9,9 @@
+ The seed also still uses the old priorities (``urgent``/``normal``/``low``); they are mapped
+ to p1-p4 exactly as migration ``0004_work_order_priority_scale.sql`` mapped existing orders
+ (see ``seed_priority``).
++The seed stores ``labor_minutes`` on work orders; since migration ``0005_time_entries.sql`` it is
++derived from time entries, so each order with a value gets the one time entry that migration
++gave the existing orders (see ``seed_time_entries``).
+ """
+ import json
+ import os
+@@ -40,6 +43,17 @@
+     return {"urgent": "p1", "low": "p4"}[order["priority"]]
+ 
+ 
++def seed_time_entries(orders):
++    """Time entries for the seed work orders: as created by migration 0005 (one per order with
++    ``labor_minutes``, ids 1, 2, ... in work order id order)."""
++    with_labor = sorted((o for o in orders if o["labor_minutes"] is not None), key=lambda o: o["id"])
++    return [
++        {"id": entry_id, "work_order": o["id"], "technician": o["assignee"], "minutes": o["labor_minutes"],
++         "logged_at": o["completed_at"], "note": "migrated"}
++        for entry_id, o in enumerate(with_labor, start=1)
++    ]
++
++
+ def load_seed(conn, seed):
+     # Staff and assets first, so the work orders' foreign keys hold row by row.
+     conn.executemany(
+@@ -55,14 +69,18 @@
+     criticality = {asset["id"]: asset["criticality"] for asset in seed["assets"]}
+     conn.executemany(
+         "INSERT INTO work_orders (id, asset_id, title, description, priority, status, requested_by_id,"
+-        " created_at, assignee_id, started_at, completed_at, resolution, labor_minutes, cancel_reason, dispatch)"
++        " created_at, assignee_id, started_at, completed_at, resolution, cancel_reason, dispatch)"
+         " VALUES (:id, :asset, :title, :description, :priority, :status, :requested_by,"
+-        " :created_at, :assignee, :started_at, :completed_at, :resolution, :labor_minutes, :cancel_reason,"
+-        " :dispatch)",
++        " :created_at, :assignee, :started_at, :completed_at, :resolution, :cancel_reason, :dispatch)",
+         [
+             {**order, "priority": seed_priority(order, criticality[order["asset"]]), "dispatch": seed_dispatch(order)}
+             for order in seed["work_orders"]
+         ],
++    )
++    conn.executemany(
++        "INSERT INTO time_entries (id, work_order_id, technician_id, minutes, logged_at, note)"
++        " VALUES (:id, :work_order, :technician, :minutes, :logged_at, :note)",
++        seed_time_entries(seed["work_orders"]),
+     )
+ 
+ 
+--- a/tests/test_maintenance_actions.py
++++ b/tests/test_maintenance_actions.py
+@@ -70,10 +70,17 @@
+ 
+ # --- complete -------------------------------------------------------------------------
+ 
++def _log_time(app, order_id, minutes, user):
++    return app.post(f"/api/work_orders/{order_id}/log_time", {"minutes": minutes}, user=user)
++
++
+ def test_complete(app):
+-    body = {"resolution": "Replaced bearing", "labor_minutes": 45}
++    body = {"resolution": "Replaced bearing"}
+     assert app.post("/api/work_orders/79/complete", body, user="nils").status == 403
+     assert app.post("/api/work_orders/77/complete", body, user="nils").status == 409  # assigned
++    assert app.post("/api/work_orders/79/complete", body, user="olga").status == 409  # no time logged yet
++    _log_time(app, 79, 30, "olga")
++    _log_time(app, 79, 15, "olga")
+     r = app.post("/api/work_orders/79/complete", body, user="olga", now=NOW)
+     assert r.status == 200
+     assert (r.json["status"], r.json["completed_at"], r.json["resolution"], r.json["labor_minutes"]) == (
+@@ -91,14 +98,19 @@
+     def complete(**body):
+         return app.post("/api/work_orders/79/complete", body, user="olga").status
+ 
+-    assert complete(labor_minutes=10) == 400
+-    assert complete(resolution=" ", labor_minutes=10) == 400
+-    assert complete(resolution="Done") == 400
+-    for minutes in (0, -5, 1.5, 2.0, "30", True, None):
++    _log_time(app, 79, 20, "olga")
++    assert complete() == 400
++    assert complete(resolution=" ") == 400
++    assert complete(resolution=None) == 400
++    assert complete(resolution=3) == 400
++    for minutes in (10, 20, None):  # labour comes from the time entries only
+         assert complete(resolution="Done", labor_minutes=minutes) == 400, minutes
++    assert complete(resolution="Done", note="x") == 400
++    assert app.post("/api/work_orders/79/complete", [], user="olga").status == 400
+     assert app.get("/api/work_orders/79", user="olga").json["status"] == "in_progress"
+     assert _outbox(app) == []
+-    assert complete(resolution="Done", labor_minutes=1) == 200
++    assert complete(resolution="Done") == 200
++    assert app.get("/api/work_orders/79", user="olga").json["labor_minutes"] == 20
+ 
+ 
+ # --- cancel ---------------------------------------------------------------------------
+@@ -141,8 +153,8 @@
+     assert app.get(path, user="tess").status == 200  # technician at East
+     assert app.post(f"{path}/assign", {"technician": 12}, user="yara").status == 200
+     assert app.post(f"{path}/start", {}, user="tess", now="2026-03-01T13:00:00").status == 200
+-    done = app.post(f"{path}/complete", {"resolution": "Sealed", "labor_minutes": 30}, user="tess",
+-                    now="2026-03-01T14:00:00").json
++    assert app.post(f"{path}/log_time", {"minutes": 30}, user="tess").status == 200
++    done = app.post(f"{path}/complete", {"resolution": "Sealed"}, user="tess", now="2026-03-01T14:00:00").json
+     assert done["status"] == "completed" and done["started_at"] == "2026-03-01T13:00:00"
+     assert [m["channel"] for m in _outbox(app)] == ["assignment", "work_completed"]
+     assert [m["id"] for m in app.get("/api/_outbox?channel=work_completed", user="mei").json["items"]] == [2]
+--- a/tests/test_maintenance_dispatch.py
++++ b/tests/test_maintenance_dispatch.py
+@@ -76,7 +76,8 @@
+ def test_finished_and_cancelled_orders_do_not_count(app):
+     app.post("/api/work_orders/77/cancel", {"reason": "dup"}, user="sofia")  # nils 3 -> 2
+     assert app.post("/api/work_orders/38/claim", {}, user="nils").status == 200
+-    app.post("/api/work_orders/79/complete", {"resolution": "ok", "labor_minutes": 5}, user="olga")  # olga 2 -> 1
++    app.post("/api/work_orders/79/log_time", {"minutes": 5}, user="olga")
++    app.post("/api/work_orders/79/complete", {"resolution": "ok"}, user="olga")  # olga 2 -> 1
+     assert app.post("/api/work_orders/52/claim", {}, user="olga").status == 200
+     assert app.post("/api/work_orders/63/claim", {}, user="olga").status == 200
+     assert app.patch("/api/work_orders/65", {"priority": "p3"}, user="sofia").status == 200  # now claimable
+@@ -89,7 +90,8 @@
+     assert app.patch("/api/work_orders/38", {"title": "x"}, user="ruth").status == 409
+     assert app.post("/api/work_orders/38/start", {}, user="nils").status == 403
+     assert app.post("/api/work_orders/38/start", {}, user="olga").status == 200
+-    r = app.post("/api/work_orders/38/complete", {"resolution": "Done", "labor_minutes": 15}, user="olga")
++    assert app.post("/api/work_orders/38/log_time", {"minutes": 15}, user="olga").status == 200
++    r = app.post("/api/work_orders/38/complete", {"resolution": "Done"}, user="olga")
+     assert r.status == 200 and r.json["status"] == "completed" and r.json["dispatch"] == "self"
+     assert _outbox(app)[-1]["payload"] == {"work_order": 38, "asset": 10, "technician": 9, "labor_minutes": 15,
+                                            "parts_cost": 0}
+--- a/tests/test_maintenance_parts.py
++++ b/tests/test_maintenance_parts.py
+@@ -145,8 +145,8 @@
+     assert _use(app, 77, [{"part": 1, "quantity": 999}], user="nils").status == 409
+     assert _use(app, 77, [], user="nils").status == 409  # 409 beats 400
+     assert app.post("/api/work_orders/999/use_parts", {"items": item}, user="olga").status == 404
+-    assert app.post("/api/work_orders/79/complete", {"resolution": "Done", "labor_minutes": 5},
+-                    user="olga").status == 200
++    assert app.post("/api/work_orders/79/log_time", {"minutes": 5}, user="olga").status == 200
++    assert app.post("/api/work_orders/79/complete", {"resolution": "Done"}, user="olga").status == 200
+     assert _use(app, 79, item).status == 409  # completed
+     assert _part(app, 1)["quantity"] == 12
+ 
+@@ -187,7 +187,8 @@
+ 
+ def test_completion_and_cancellation_keep_parts(app):
+     _use(app, 80, [{"part": 4, "quantity": 2}, {"part": 6, "quantity": 1}], user="wade")
+-    r = app.post("/api/work_orders/80/complete", {"resolution": "Fixed", "labor_minutes": 30}, user="wade", now=NOW)
++    app.post("/api/work_orders/80/log_time", {"minutes": 30}, user="wade")
++    r = app.post("/api/work_orders/80/complete", {"resolution": "Fixed"}, user="wade", now=NOW)
+     assert r.status == 200 and r.json["parts_cost"] == 83.6  # 2*9.8 + 64
+     completed = [m for m in _outbox(app) if m["channel"] == "work_completed"]
+     assert [m["payload"] for m in completed] == [
+--- a/tests/test_maintenance_time_entries.py
++++ b/tests/test_maintenance_time_entries.py
+@@ -0,0 +1,244 @@
++"""Time logging: the log_time action, read-only time entries, the derived labor_minutes, the
++time-entry requirement of complete and the migration of the former stored labor figures.
++
++Order 79: in progress, asset 13 (North), requested by sofia, assignee olga (9).
++Order 80: in progress, asset 22 (South), requested by lina, assignee wade (15).
++Order 77: assigned (not started), assignee nils (8). The seed has 39 orders with labor_minutes,
++so migration 0005 created time entries 1-39.
++"""
++import os
++import sqlite3
++
++from accept_client import parse_ui
++
++NOW = "2026-03-02T09:30:00"
++MIGRATED = 39
++
++
++def _log(app, order_id, body, user="olga", now=NOW):
++    return app.post(f"/api/work_orders/{order_id}/log_time", body, user=user, now=now)
++
++
++def _order(app, order_id):
++    return app.get(f"/api/work_orders/{order_id}", user="sofia").json
++
++
++def _entries(app, query="", user="sofia"):
++    return app.get(f"/api/time_entries{query}", user=user).json["items"]
++
++
++def _outbox(app):
++    return app.get("/api/_outbox", user="ruth").json["items"]
++
++
++# --- log_time -------------------------------------------------------------------------
++
++def test_log_time(app):
++    assert _order(app, 79)["labor_minutes"] is None
++    r = _log(app, 79, {"minutes": 45})
++    assert r.status == 200 and r.json["id"] == 79
++    assert (r.json["status"], r.json["labor_minutes"]) == ("in_progress", 45)
++    r = _log(app, 79, {"minutes": 20, "note": "Waited for parts"}, now="2026-03-02T11:00:00")
++    assert r.json["labor_minutes"] == 65
++    assert _entries(app, "?work_order=79") == [
++        {"id": MIGRATED + 1, "work_order": 79, "technician": 9, "minutes": 45, "logged_at": NOW, "note": None},
++        {"id": MIGRATED + 2, "work_order": 79, "technician": 9, "minutes": 20, "logged_at": "2026-03-02T11:00:00",
++         "note": "Waited for parts"},
++    ]
++    assert _log(app, 79, {"minutes": 1, "note": None}).status == 200
++    assert _log(app, 79, {"minutes": 600, "note": ""}).status == 200  # bounds are inclusive
++    assert _order(app, 79)["labor_minutes"] == 666
++    assert _outbox(app) == []  # no message
++    assert [o["id"] for o in app.get("/api/work_orders?labor_minutes=666", user="sofia").json["items"]] == [79]
++
++
++def test_log_time_permission_and_state(app):
++    body = {"minutes": 10}
++    for user in ("nils", "sofia", "ruth"):  # site technician, supervisor (and requester), requester
++        assert _log(app, 79, body, user=user).status == 403, user
++    assert _log(app, 79, {"minutes": 0, "x": 1}, user="nils").status == 403  # 403 beats 400
++    assert _log(app, 77, body, user="olga").status == 403  # not the assignee, even though not in progress
++    assert _log(app, 74, body, user="nils").status == 403  # unassigned
++    assert _log(app, 77, body, user="nils").status == 409  # assigned, not started
++    assert _log(app, 77, {"minutes": "x"}, user="nils").status == 409  # 409 beats 400
++    assert _log(app, 2, body, user="tess").status == 409  # completed
++    assert app.post("/api/work_orders/79/cancel", {"reason": "Dup"}, user="sofia").status == 200
++    assert _log(app, 79, body).status == 409  # cancelled
++    assert _log(app, 999, body).status == 404
++    assert _entries(app) == _entries(app, "?note=migrated")  # nothing logged
++    assert _outbox(app) == []
++
++
++def test_log_time_validation(app):
++    bad_bodies = [
++        {}, {"note": "x"}, {"minutes": None}, {"minutes": 10, "extra": 1}, {"minutes": 10, "technician": 9},
++        {"minutes": 10, "note": 3}, {"minutes": 10, "note": ["x"]}, {"minutes": 10, "note": True},
++    ] + [{"minutes": m} for m in (0, -1, 601, 1000, 1.5, 2.0, "30", True, False)]
++    for body in bad_bodies:
++        assert _log(app, 79, body).status == 400, body
++    for body in ([10], "10", 10):
++        assert _log(app, 79, body).status == 400, body
++    assert _order(app, 79)["labor_minutes"] is None
++    assert len(_entries(app)) == MIGRATED
++
++
++def test_labor_minutes_cannot_be_sent(app):
++    body = {"asset": 1, "title": "x", "priority": "p3"}
++    assert app.post("/api/work_orders", {**body, "labor_minutes": 5}, user="ruth").status == 400
++    assert app.post("/api/work_orders", {**body, "labor_minutes": None}, user="ruth").status == 400
++    assert app.patch("/api/work_orders/74", {"labor_minutes": 5}, user="sofia").status == 400
++    assert app.patch("/api/work_orders/74", {"labor_minutes": 5}, user="kofi").status == 403  # 403 beats 400
++
++
++# --- complete -------------------------------------------------------------------------
++
++def test_complete_needs_a_time_entry(app):
++    assert app.post("/api/work_orders/79/complete", {"resolution": "Done"}, user="olga").status == 409
++    assert app.post("/api/work_orders/79/complete", {}, user="olga").status == 409  # 409 beats 400
++    assert app.post("/api/work_orders/79/complete", {"resolution": "Done"}, user="nils").status == 403  # 403 first
++    _log(app, 79, {"minutes": 50})
++    assert app.post("/api/work_orders/79/complete", {"resolution": "Done", "labor_minutes": 50},
++                    user="olga").status == 400
++    assert app.post("/api/work_orders/79/complete", {"resolution": "Done"}, user="nils").status == 403
++    r = app.post("/api/work_orders/79/complete", {"resolution": "Done"}, user="olga", now=NOW)
++    assert r.status == 200 and (r.json["status"], r.json["labor_minutes"]) == ("completed", 50)
++    assert [m["payload"] for m in _outbox(app)] == [
++        {"work_order": 79, "asset": 13, "technician": 9, "labor_minutes": 50, "parts_cost": 0}
++    ]
++    assert _log(app, 79, {"minutes": 5}).status == 409  # no more logging once completed
++    assert _order(app, 79)["labor_minutes"] == 50
++
++
++def test_work_completed_carries_the_total_with_parts(app):
++    app.post("/api/work_orders/80/use_parts", {"items": [{"part": 4, "quantity": 1}]}, user="wade")
++    _log(app, 80, {"minutes": 25}, user="wade")
++    _log(app, 80, {"minutes": 35, "note": "second visit"}, user="wade")
++    app.post("/api/work_orders/80/complete", {"resolution": "Fixed"}, user="wade")
++    assert _outbox(app)[-1]["payload"] == {"work_order": 80, "asset": 22, "technician": 15, "labor_minutes": 60,
++                                           "parts_cost": 9.8}
++
++
++def test_cancelling_keeps_time_entries(app):
++    _log(app, 79, {"minutes": 40})
++    assert app.post("/api/work_orders/79/cancel", {"reason": "Dup"}, user="sofia").status == 200
++    order = _order(app, 79)
++    assert (order["status"], order["labor_minutes"]) == ("cancelled", 40)
++    assert [e["minutes"] for e in _entries(app, "?work_order=79")] == [40]
++
++
++def test_entries_stay_with_the_technician_who_logged_them(app):
++    # Only the assignee logs, and an in-progress order cannot be re-assigned, so the technician of
++    # every entry is the order's assignee; deleting them stays a 409.
++    _log(app, 80, {"minutes": 15}, user="wade")
++    assert _entries(app, "?technician=15&note=null")[0]["work_order"] == 80
++    assert app.delete("/api/staff/15", user="sofia").status == 409
++
++
++# --- time entries (read-only) ---------------------------------------------------------
++
++def test_time_entries_follow_work_order_read_rules(app):
++    _log(app, 79, {"minutes": 10})  # North order requested by sofia: entry 40
++    _log(app, 80, {"minutes": 20}, user="wade")  # South order requested by lina: entry 41
++    new = [MIGRATED + 1, MIGRATED + 2]
++    assert [e["id"] for e in _entries(app, user="tomas")][-2:] == new  # supervisors read everything
++    assert len(_entries(app, user="tomas")) == MIGRATED + 2
++    assert [e["id"] for e in _entries(app, "?note=null", user="nils")] == [MIGRATED + 1]
++    assert [e["id"] for e in _entries(app, "?note=null", user="lina")] == [MIGRATED + 2]
++    assert _entries(app, "?note=null", user="ruth") == []
++    readable = {o["id"] for o in app.get("/api/work_orders", user="nils").json["items"]}
++    assert all(e["work_order"] in readable for e in _entries(app, user="nils"))
++    assert app.get(f"/api/time_entries/{MIGRATED + 1}", user="ruth").status == 403
++    assert app.get(f"/api/time_entries/{MIGRATED + 2}", user="nils").status == 403
++    assert app.get(f"/api/time_entries/{MIGRATED + 2}", user="lina").json["minutes"] == 20
++    assert app.get("/api/time_entries/999", user="lina").status == 404
++    assert app.get("/api/time_entries?colour=red", user="sofia").status == 400
++
++
++def test_time_entries_are_read_only(app):
++    body = {"work_order": 79, "technician": 9, "minutes": 10}
++    for user in ("sofia", "olga", "ruth"):
++        assert app.post("/api/time_entries", body, user=user).status == 403
++        assert app.post("/api/time_entries", {}, user=user).status == 403
++        assert app.patch("/api/time_entries/1", {"minutes": 5}, user=user).status == 403
++        assert app.delete("/api/time_entries/1", user=user).status == 403
++    assert app.patch("/api/time_entries/999", {}, user="sofia").status == 404
++    assert app.delete("/api/time_entries/999", user="sofia").status == 404
++    assert app.get("/api/time_entries/1", user="sofia").json["minutes"] == 315
++
++
++# --- UI -------------------------------------------------------------------------------
++
++def test_time_entries_ui(app):
++    _log(app, 79, {"minutes": 10, "note": "Diagnosis"})
++    new_id = MIGRATED + 1
++    assert parse_ui(app.get("/ui/time_entries", user="sofia").text).rows == list(range(1, new_id + 1))
++    nils_rows = parse_ui(app.get("/ui/time_entries", user="nils").text).rows
++    assert nils_rows == [e["id"] for e in _entries(app, user="nils")] and new_id in nils_rows
++    assert new_id not in parse_ui(app.get("/ui/time_entries", user="ruth").text).rows
++    assert parse_ui(app.get(f"/ui/time_entries/{new_id}", user="nils").text).fields == {
++        "work_order": "79", "technician": "9", "minutes": "10", "logged_at": NOW, "note": "Diagnosis"}
++    assert app.get(f"/ui/time_entries/{new_id}", user="ruth").status == 403
++    assert app.get("/ui/time_entries/999", user="ruth").status == 404
++    assert parse_ui(app.get("/ui/work_orders/79", user="olga").text).fields["labor_minutes"] == "10"
++
++
++def test_log_time_and_complete_forms(app):
++    def actions(order_id, user):
++        return parse_ui(app.get(f"/ui/work_orders/{order_id}", user=user).text).actions
++
++    assert actions(79, "olga") == ["log_time", "use_parts"]  # no time yet: complete not allowed
++    for user in ("nils", "sofia"):
++        assert "log_time" not in actions(79, user)
++    assert "log_time" not in actions(77, "nils")  # assigned, not started
++    page = parse_ui(app.get("/ui/work_orders/79", user="olga").text)
++    assert {"minutes", "note"} <= set(page.inputs)
++    _log(app, 79, {"minutes": 10})
++    assert actions(79, "olga") == ["complete", "log_time", "use_parts"]
++    page = parse_ui(app.get("/ui/work_orders/79", user="olga").text)
++    assert "labor_minutes" not in page.inputs and "resolution" in page.inputs
++    app.post("/api/work_orders/79/complete", {"resolution": "Done"}, user="olga")
++    assert actions(79, "olga") == []
++
++
++def test_ui_log_time_posts_through_service(app):
++    from test_maintenance_ui import _post_form
++
++    status, headers, _ = _post_form(app, "/ui/work_orders/79/log_time", {"minutes": "30", "note": ""}, "olga")
++    assert status == 303 and headers["Location"].endswith("/ui/work_orders/79")
++    assert _entries(app, "?work_order=79")[0]["note"] is None
++    assert _post_form(app, "/ui/work_orders/79/log_time", {"minutes": "15", "note": "Retest"}, "olga")[0] == 303
++    assert _order(app, 79)["labor_minutes"] == 45
++    assert _post_form(app, "/ui/work_orders/79/log_time", {"minutes": "601"}, "olga")[0] == 400
++    assert _post_form(app, "/ui/work_orders/79/log_time", {"minutes": "10"}, "nils")[0] == 403
++    assert _post_form(app, "/ui/work_orders/77/log_time", {"minutes": "10"}, "nils")[0] == 409
++
++
++# --- migration ------------------------------------------------------------------------
++
++def test_existing_labor_is_migrated_to_time_entries(app, seed):
++    with_labor = [o for o in seed["work_orders"] if o["labor_minutes"] is not None]
++    assert len(with_labor) == MIGRATED
++    expected = [
++        {"id": i, "work_order": o["id"], "technician": o["assignee"], "minutes": o["labor_minutes"],
++         "logged_at": o["completed_at"], "note": "migrated"}
++        for i, o in enumerate(with_labor, start=1)
++    ]
++    assert _entries(app) == expected
++    assert any(e["technician"] == 13 for e in expected)  # umar is inactive: migrated all the same
++    orders = {o["id"]: o for o in app.get("/api/work_orders", user="sofia").json["items"]}
++    for order in seed["work_orders"]:
++        assert orders[order["id"]]["labor_minutes"] == order["labor_minutes"], order["id"]
++
++
++def test_migrated_database(app):
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    try:
++        columns = [row[1] for row in conn.execute("PRAGMA table_info(work_orders)")]
++        assert "labor_minutes" not in columns  # derived now, not stored
++        assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'time_entries'").fetchone()[0] == MIGRATED
++        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
++        assert conn.execute("SELECT COUNT(*) FROM outbox").fetchone()[0] == 0
++    finally:
++        conn.close()
++    assert _log(app, 79, {"minutes": 5}).status == 200
++    assert _entries(app, "?work_order=79")[0]["id"] == MIGRATED + 1
+--- a/tests/test_maintenance_ui.py
++++ b/tests/test_maintenance_ui.py
+@@ -49,7 +49,7 @@
+         "cancel_reason": "", "dispatch": "supervisor", "parts_cost": "0", "due_date": "2026-03-01",
+         "overdue": "false",
+     }
+-    assert page.actions == ["complete", "use_parts"]
++    assert page.actions == ["log_time", "use_parts"]  # complete only once time has been logged
+     assert app.get("/ui/work_orders/79", user="ruth").status == 403
+     assert app.get("/ui/work_orders/999", user="ruth").status == 404
+ 
+@@ -72,7 +72,9 @@
+     assert _actions(app, 77, "ruth") == []  # requester, no longer open
+     assert _actions(app, 77, "nils") == ["start"]
+     assert _actions(app, 79, "sofia") == ["cancel"]  # in progress
+-    assert _actions(app, 79, "olga") == ["complete", "use_parts"]
++    assert _actions(app, 79, "olga") == ["log_time", "use_parts"]
++    app.post("/api/work_orders/79/log_time", {"minutes": 10}, user="olga")
++    assert _actions(app, 79, "olga") == ["complete", "log_time", "use_parts"]
+     assert _actions(app, 2, "sofia") == []  # completed
+     assign = parse_ui(app.get("/ui/work_orders/74", user="sofia").text)
+     assert {"technician", "reason"} <= set(assign.inputs)
+@@ -104,8 +106,11 @@
+     assert _post_form(app, "/ui/work_orders/83/assign", {"technician": "8"}, "sofia")[0] == 409  # nils is at the cap
+     assert _post_form(app, "/ui/work_orders/83/assign", {"technician": "9"}, "sofia")[0] == 303
+     assert _post_form(app, "/ui/work_orders/83/start", {}, "olga")[0] == 303
+-    assert _post_form(app, "/ui/work_orders/83/complete", {"resolution": "Fixed", "labor_minutes": "x"}, "olga")[0] == 400
+-    assert _post_form(app, "/ui/work_orders/83/complete", {"resolution": "Fixed", "labor_minutes": "20"}, "olga")[0] == 303
++    assert _post_form(app, "/ui/work_orders/83/complete", {"resolution": "Fixed"}, "olga")[0] == 409  # no time
++    assert _post_form(app, "/ui/work_orders/83/log_time", {"minutes": "x", "note": ""}, "olga")[0] == 400
++    assert _post_form(app, "/ui/work_orders/83/log_time", {"minutes": "20", "note": ""}, "olga")[0] == 303
++    assert _post_form(app, "/ui/work_orders/83/complete", {"resolution": ""}, "olga")[0] == 400
++    assert _post_form(app, "/ui/work_orders/83/complete", {"resolution": "Fixed"}, "olga")[0] == 303
+     assert app.get("/api/work_orders/83", user="ruth").json["labor_minutes"] == 20
+     assert _post_form(app, "/ui/work_orders/74/cancel", {"reason": ""}, "ruth")[0] == 400
+     assert _post_form(app, "/ui/work_orders/74/cancel", {"reason": "Gone"}, "ruth")[0] == 303

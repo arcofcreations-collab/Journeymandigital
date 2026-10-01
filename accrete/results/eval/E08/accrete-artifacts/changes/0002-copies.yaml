@@ -1,0 +1,154 @@
+request: "Physical copies of books (library): copies collection; loans record the copy lent; book status/available_copies derived from copies; borrow lends lowest-id available copy; deleting a book deletes its copies; data migration with one copy per book plus copies 41 (book 1) and 42 (book 22)."
+interpretation: >-
+  New entity copies (book ref required, immutable after create via an update trigger failing with 400;
+  barcode text required unique; status computed from open loans on the copy). Librarian-only create/update/delete;
+  delete_guard 409 when the copy has any loan. copies.book cascades on book delete (book delete still 409 when loans exist,
+  because loans.book blocks it). loans.copy is a required ref backfilled with the book's original copy (id = book id).
+  books.status becomes unavailable/available/on_loan from copies; books.available_copies counts available copies.
+  borrow picks the available copy with the lowest id and emits copy in loan_created.
+ops:
+  - add_entity:
+      name: copies
+      fields:
+        book: {type: ref, ref: books, required: true, on_delete: cascade}
+        barcode: text required unique
+      rules:
+        read: "True"
+        create: "user.role == 'librarian'"
+        update: "user.role == 'librarian'"
+        delete: "user.role == 'librarian'"
+  - add_records:
+      entity: copies
+      records:
+      - {id: 1, book: 1, barcode: "C0001"}
+      - {id: 2, book: 2, barcode: "C0002"}
+      - {id: 3, book: 3, barcode: "C0003"}
+      - {id: 4, book: 4, barcode: "C0004"}
+      - {id: 5, book: 5, barcode: "C0005"}
+      - {id: 6, book: 6, barcode: "C0006"}
+      - {id: 7, book: 7, barcode: "C0007"}
+      - {id: 8, book: 8, barcode: "C0008"}
+      - {id: 9, book: 9, barcode: "C0009"}
+      - {id: 10, book: 10, barcode: "C0010"}
+      - {id: 11, book: 11, barcode: "C0011"}
+      - {id: 12, book: 12, barcode: "C0012"}
+      - {id: 13, book: 13, barcode: "C0013"}
+      - {id: 14, book: 14, barcode: "C0014"}
+      - {id: 15, book: 15, barcode: "C0015"}
+      - {id: 16, book: 16, barcode: "C0016"}
+      - {id: 17, book: 17, barcode: "C0017"}
+      - {id: 18, book: 18, barcode: "C0018"}
+      - {id: 19, book: 19, barcode: "C0019"}
+      - {id: 20, book: 20, barcode: "C0020"}
+      - {id: 21, book: 21, barcode: "C0021"}
+      - {id: 22, book: 22, barcode: "C0022"}
+      - {id: 23, book: 23, barcode: "C0023"}
+      - {id: 24, book: 24, barcode: "C0024"}
+      - {id: 25, book: 25, barcode: "C0025"}
+      - {id: 26, book: 26, barcode: "C0026"}
+      - {id: 27, book: 27, barcode: "C0027"}
+      - {id: 28, book: 28, barcode: "C0028"}
+      - {id: 29, book: 29, barcode: "C0029"}
+      - {id: 30, book: 30, barcode: "C0030"}
+      - {id: 31, book: 31, barcode: "C0031"}
+      - {id: 32, book: 32, barcode: "C0032"}
+      - {id: 33, book: 33, barcode: "C0033"}
+      - {id: 34, book: 34, barcode: "C0034"}
+      - {id: 35, book: 35, barcode: "C0035"}
+      - {id: 36, book: 36, barcode: "C0036"}
+      - {id: 37, book: 37, barcode: "C0037"}
+      - {id: 38, book: 38, barcode: "C0038"}
+      - {id: 39, book: 39, barcode: "C0039"}
+      - {id: 40, book: 40, barcode: "C0040"}
+      - {id: 41, book: 1, barcode: "C0001-2"}
+      - {id: 42, book: 22, barcode: "C0022-2"}
+  - add_field: {entity: loans, name: copy, type: ref, ref: copies, required: true, backfill: "first(copies, id=record.book.id)"}
+  - add_field: {entity: copies, name: status, type: text,
+                computed: "'on_loan' if any(l.copy == record and l.returned_at is None for l in loans) else 'available'"}
+  - set_rule: {entity: copies, rule: delete_guard, expr: "count(loans, copy=record) == 0", message: "copy has loans"}
+  - add_constraint: {entity: copies, name: barcode_not_empty, expr: "len(record.barcode.strip()) > 0", message: "barcode must not be empty", field: barcode, existing: enforce}
+  - add_trigger:
+      entity: copies
+      name: book_immutable
+      on: update
+      when: "'book' in input"
+      effects:
+        - fail: "'book cannot be changed'"
+          status: 400
+  - add_field: {entity: books, name: available_copies, type: int,
+                computed: "len([c for c in copies if c.book == record and c.status == 'available'])"}
+  - change_field: {entity: books, name: status,
+                computed: "'unavailable' if count(copies, book=record) == 0 else ('available' if record.available_copies > 0 else 'on_loan')"}
+  - change_action:
+      entity: books
+      name: borrow
+      effects:
+        - create: loans
+          as: loan
+          values: {book: record, member: "params.member or user", copy: "first(copies, id=min(c.id for c in copies if c.book == record and c.status == 'available'))", borrowed_at: now, due_at: "today + days(14)"}
+        - emit: loan_created
+          payload: {loan: loan, book: record, member: "params.member or user", copy: "loan.copy"}
+expect:
+  - {as: chen, do: "GET /api/books/1", status: 200, json: {status: available, available_copies: 1}}
+  - {as: chen, do: "GET /api/books/22", status: 200, json: {status: available, available_copies: 1}}
+  - {as: chen, do: "GET /api/books/4", status: 200, json: {status: on_loan, available_copies: 0}}
+  - {as: chen, do: "GET /api/books/3", status: 200, json: {status: available, available_copies: 1}}
+  - {as: chen, do: "GET /api/copies", status: 200, count: 42}
+  - {as: chen, do: "GET /api/copies/7", status: 200, json: {id: 7, book: 7, barcode: C0007, status: on_loan}}
+  - {as: chen, do: "GET /api/copies/2", status: 200, json: {id: 2, book: 2, barcode: C0002, status: available}}
+  - {as: chen, do: "GET /api/copies/41", status: 200, json: {book: 1, barcode: C0001-2, status: available}}
+  - {as: chen, do: "GET /api/copies/1", status: 200, json: {status: on_loan}}
+  - {as: ada, do: "GET /api/loans/55", status: 200, json: {book: 1, copy: 1}}
+  - {as: ada, do: "GET /api/loans/1", status: 200, json: {book: 30, copy: 30}}
+  - {as: chen, do: "POST /api/copies", body: {book: 999}, status: 403}
+  - {as: chen, do: "PATCH /api/copies/2", body: {status: x}, status: 403}
+  - {as: chen, do: "DELETE /api/copies/41", status: 403}
+  - {as: ada, do: "POST /api/copies", body: {book: 999, barcode: X1}, status: 400}
+  - {as: ada, do: "POST /api/copies", body: {book: 2}, status: 400}
+  - {as: ada, do: "POST /api/copies", body: {book: 2, barcode: ""}, status: 400}
+  - {as: ada, do: "POST /api/copies", body: {book: 2, barcode: C0003}, status: 400}
+  - {as: ada, do: "POST /api/copies", body: {book: 2, barcode: X1, status: available}, status: 400}
+  - {as: ada, do: "POST /api/copies", body: {book: 2, barcode: X1, foo: 1}, status: 400}
+  - {as: ada, do: "POST /api/copies", body: {barcode: X1}, status: 400}
+  - {as: ada, do: "PATCH /api/copies/2", body: {book: 3}, status: 400}
+  - {as: ada, do: "PATCH /api/copies/2", body: {book: 2}, status: 400}
+  - {as: ada, do: "PATCH /api/copies/2", body: {status: on_loan}, status: 400}
+  - {as: ada, do: "PATCH /api/copies/2", body: {foo: 1}, status: 400}
+  - {as: ada, do: "PATCH /api/copies/2", body: {barcode: C0003}, status: 400}
+  - {as: ada, do: "PATCH /api/copies/2", body: {barcode: ""}, status: 400}
+  - {as: ada, do: "PATCH /api/copies/2", body: {barcode: NEW2}, status: 200, json: {id: 2, book: 2, barcode: NEW2}}
+  - {as: ada, do: "DELETE /api/copies/1", status: 409}
+  - {as: ada, do: "DELETE /api/copies/30", status: 409}
+  - {as: ada, do: "DELETE /api/copies/41", status: 204}
+  - {as: ada, do: "DELETE /api/books/1", status: 409}
+  - {as: ada, do: "POST /api/books/4/borrow", body: {member: 4}, status: 409}
+  - name: "new copy gets id 43 and makes a new book available"
+    steps:
+      - {as: ada, do: "POST /api/books", body: {title: T, author: A, isbn: "999-1"}, status: 201, json: {id: 41, status: unavailable, available_copies: 0}}
+      - {as: ada, do: "POST /api/books/41/borrow", body: {member: 4}, status: 409}
+      - {as: ada, do: "POST /api/copies", body: {book: 41, barcode: NEW}, status: 201, json: {id: 43, book: 41, barcode: NEW, status: available}}
+      - {as: ada, do: "GET /api/books/41", json: {status: available, available_copies: 1}}
+  - name: "borrow lends lowest available copy and emits it"
+    steps:
+      - {as: ada, do: "POST /api/books/1/borrow", body: {member: 4}, status: 200, json: {status: on_loan, available_copies: 0}}
+      - {as: ada, do: "GET /api/loans?copy=41", count: 1}
+      - {as: ada, do: "GET /api/copies/41", json: {status: on_loan}}
+      - {as: ada, do: "GET /api/_outbox?channel=loan_created", count: 1, json: {items: [{payload: {loan: 61, book: 1, member: 4, copy: 41}}]}}
+      - {as: ada, do: "POST /api/books/1/borrow", body: {member: 5}, status: 409}
+      - {as: ada, do: "POST /api/loans/61/return", status: 200, json: {copy: 41}}
+      - {as: ada, do: "GET /api/copies/41", json: {status: available}}
+      - {as: ada, do: "GET /api/books/1", json: {status: available, available_copies: 1}}
+  - name: "two copies: lowest id first"
+    steps:
+      - {as: ada, do: "POST /api/copies", body: {book: 3, barcode: C0003-2}, status: 201}
+      - {as: ada, do: "POST /api/books/3/borrow", body: {member: 4}, status: 200, json: {status: available, available_copies: 1}}
+      - {as: ada, do: "GET /api/loans/61", json: {copy: 3}}
+      - {as: ada, do: "POST /api/books/3/borrow", body: {member: 5}, status: 200, json: {status: on_loan, available_copies: 0}}
+      - {as: ada, do: "GET /api/loans/62", json: {copy: 43}}
+  - name: "deleting a loan-free book deletes its copies"
+    steps:
+      - {as: ada, do: "DELETE /api/books/3", status: 204}
+      - {as: ada, do: "GET /api/copies/3", status: 404}
+      - {as: ada, do: "GET /api/copies", count: 41}
+  - {as: ada, do: "POST /api/loans", body: {book: 2, member: 3, copy: 2, borrowed_at: "2026-01-01T00:00:00", due_at: "2026-01-02"}, status: 403}
+  - {as: ada, do: "PATCH /api/loans/1", body: {copy: 2}, status: 403}

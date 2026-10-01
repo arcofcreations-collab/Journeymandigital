@@ -1,0 +1,4 @@
+request: "Cost centres with budgets (expenses) - UI shows references as ids, like every other reference in the app"
+interpretation: "Show cost centre references by id in the HTML UI, consistent with the external contract (field text is the value, references are ids)"
+ops:
+  - set_display: {entity: cost_centres, field: null}

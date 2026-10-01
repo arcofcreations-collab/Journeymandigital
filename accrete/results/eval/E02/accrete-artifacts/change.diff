@@ -1,0 +1,123 @@
+--- a/changes/0003-self-dispatch.yaml
++++ b/changes/0003-self-dispatch.yaml
+@@ -0,0 +1,120 @@
++request: "Technician self-dispatch and a workload cap (maintenance, applied after E01)"
++interpretation: >-
++  Workload of a technician = number of work orders whose assignee is that technician and whose status
++  is assigned or in_progress. New system field work_orders.dispatch (enum supervisor|self, null
++  allowed, so it cannot be sent in a create/PATCH body -> 400, filterable incl. ?dispatch=null);
++  existing data is backfilled: 'self' when assignee is set and equals requested_by, 'supervisor' when
++  assignee is set otherwise, null without assignee (all statuses). New action claim(): allow
++  (403) = caller is an active technician at the asset's site; guard (409) = status open and the
++  caller's workload < 3; effects set assignee = caller, status = assigned, dispatch = 'self' and emit
++  on 'assignment' the same payload as assign. Because the workload is part of the guard, the UI claim
++  form appears exactly when a claim would succeed now. assign keeps its allow/guard/400 technician
++  check; after that check a 409 fail effect rejects a valid technician whose workload, not counting
++  this order, is >= 3 (so re-assigning to the current assignee is always allowed); assign now also
++  sets dispatch = 'supervisor'. Existing overloads (ravi has 4 active orders) are left untouched:
++  no record other than the dispatch backfill changes. Following the explicit statement that
++  re-assigning an order to its current assignee is always allowed, the cap is skipped when the chosen
++  technician is already the order's assignee (this only differs from the bare count for an already
++  overloaded technician, e.g. ravi re-assigned to his own order 68 stays allowed); any other order
++  for an overloaded technician is 409.
++ops:
++  - add_field:
++      entity: work_orders
++      name: dispatch
++      type: enum
++      values: [supervisor, self]
++      system: true
++      backfill: "None if record.assignee is None else ('self' if record.assignee == record.requested_by else 'supervisor')"
++
++  - change_action:
++      entity: work_orders
++      name: assign
++      effects:
++        - fail: "'technician must be an active technician at the asset site'"
++          status: 400
++          when: "params.technician.role != 'technician' or not params.technician.active or params.technician.site != record.asset.site"
++        - fail: "'technician already has 3 or more active work orders'"
++          status: 409
++          when: "params.technician != record.assignee and len([w for w in work_orders if w.assignee == params.technician and w.status in ['assigned', 'in_progress'] and w.id != record.id]) >= 3"
++        - set: {assignee: "params.technician", status: "'assigned'", dispatch: "'supervisor'"}
++        - emit: assignment
++          payload: {work_order: "record", asset: "record.asset", technician: "params.technician"}
++
++  - add_action:
++      entity: work_orders
++      name: claim
++      allow: "user.role == 'technician' and user.active and user.site == record.asset.site"
++      guard: "record.status == 'open' and count(work_orders, assignee=user, status='assigned') + count(work_orders, assignee=user, status='in_progress') < 3"
++      guard_message: "'only open orders can be claimed, by a technician with fewer than 3 active work orders'"
++      effects:
++        - set: {assignee: "user", status: "'assigned'", dispatch: "'self'"}
++        - emit: assignment
++          payload: {work_order: "record", asset: "record.asset", technician: "user"}
++
++expect:
++  # ---- backfill
++  - {as: sofia, do: "GET /api/work_orders?dispatch=self", count: 16}
++  - {as: sofia, do: "GET /api/work_orders?dispatch=supervisor", count: 46}
++  - {as: sofia, do: "GET /api/work_orders?dispatch=null", count: 20}
++  - {as: sofia, do: "GET /api/work_orders/22", status: 200, json: {dispatch: self, status: cancelled}}
++  - {as: sofia, do: "GET /api/work_orders/37", status: 200, json: {dispatch: supervisor}}
++  - {as: sofia, do: "GET /api/work_orders/38", status: 200, json: {dispatch: null}}
++  - {as: sofia, do: "GET /api/work_orders?assignee=10&status=assigned", count: 2}
++  # ---- claim
++  - name: "olga claims an open North order"
++    steps:
++      - {as: olga, do: "POST /api/work_orders/38/claim", body: {}, status: 200, json: {assignee: 9, status: assigned, dispatch: self}}
++      - {as: sofia, do: "GET /api/_outbox?channel=assignment", count: 1}
++      - {as: olga, do: "POST /api/work_orders/38/start", body: {}, status: 200, json: {status: in_progress}}
++      - {as: olga, do: "POST /api/work_orders/52/claim", body: {}, status: 409}
++  - name: "requester cannot cancel a claimed order"
++    steps:
++      - {as: olga, do: "POST /api/work_orders/38/claim", body: {}, status: 200}
++      - {as: ruth, do: "POST /api/work_orders/38/cancel", body: {reason: "x"}, status: 409}
++      - {as: ruth, do: "PATCH /api/work_orders/38", body: {title: "y"}, status: 409}
++      - {as: sofia, do: "POST /api/work_orders/38/cancel", body: {reason: "x"}, status: 200}
++  - {as: nils, do: "POST /api/work_orders/38/claim", body: {}, status: 409}
++  - {as: ravi, do: "POST /api/work_orders/54/claim", body: {}, status: 409}
++  - {as: sara, do: "POST /api/work_orders/54/claim", body: {}, status: 409}
++  - {as: wade, do: "POST /api/work_orders/54/claim", body: {}, status: 200, json: {assignee: 15, dispatch: self}}
++  - {as: tess, do: "POST /api/work_orders/30/claim", body: {}, status: 200}
++  - {as: umar, do: "POST /api/work_orders/38/claim", body: {}, status: 403}
++  - {as: ruth, do: "POST /api/work_orders/38/claim", body: {}, status: 403}
++  - {as: sofia, do: "POST /api/work_orders/38/claim", body: {}, status: 403}
++  - {as: olga, do: "POST /api/work_orders/54/claim", body: {}, status: 403}
++  - {as: olga, do: "POST /api/work_orders/37/claim", body: {}, status: 409}
++  - {as: olga, do: "POST /api/work_orders/49/claim", body: {}, status: 409}
++  # ---- assign cap
++  - {as: sofia, do: "POST /api/work_orders/38/assign", body: {technician: 8}, status: 409}
++  - {as: sofia, do: "POST /api/work_orders/38/assign", body: {technician: 13}, status: 400}
++  - {as: sofia, do: "POST /api/work_orders/38/assign", body: {technician: 10}, status: 400}
++  - {as: sofia, do: "POST /api/work_orders/38/assign", body: {}, status: 400}
++  - {as: sofia, do: "POST /api/work_orders/49/assign", body: {technician: 13}, status: 409}
++  - {as: olga, do: "POST /api/work_orders/38/assign", body: {technician: 8}, status: 403}
++  - {as: tomas, do: "POST /api/work_orders/54/assign", body: {technician: 10}, status: 409}
++  - {as: tomas, do: "POST /api/work_orders/54/assign", body: {technician: 11}, status: 409}
++  - {as: sofia, do: "POST /api/work_orders/77/assign", body: {technician: 8}, status: 200, json: {assignee: 8, dispatch: supervisor}}
++  - {as: tomas, do: "POST /api/work_orders/72/assign", body: {technician: 11}, status: 200, json: {assignee: 11, dispatch: supervisor}}
++  - {as: tomas, do: "POST /api/work_orders/68/assign", body: {technician: 10}, status: 200, json: {assignee: 10, dispatch: supervisor}}
++  - {as: tomas, do: "POST /api/work_orders/68/assign", body: {technician: 11}, status: 409}
++  - {as: tomas, do: "POST /api/work_orders/68/assign", body: {technician: 15}, status: 200, json: {assignee: 15}}
++  - {as: sofia, do: "POST /api/work_orders/37/assign", body: {technician: 8}, status: 409}
++  - {as: sofia, do: "POST /api/work_orders/37/assign", body: {technician: 9}, status: 200, json: {assignee: 9, dispatch: supervisor}}
++  - name: "assign at cap emits nothing"
++    steps:
++      - {as: sofia, do: "POST /api/work_orders/38/assign", body: {technician: 8}, status: 409}
++      - {as: sofia, do: "GET /api/_outbox?channel=assignment", count: 0}
++      - {as: sofia, do: "GET /api/work_orders/38", json: {assignee: null, status: open, dispatch: null}}
++  - name: "assign fills workload to the cap"
++    steps:
++      - {as: sofia, do: "POST /api/work_orders/38/assign", body: {technician: 9}, status: 200, json: {dispatch: supervisor}}
++      - {as: sofia, do: "POST /api/work_orders/52/assign", body: {technician: 9}, status: 409}
++      - {as: olga, do: "POST /api/work_orders/52/claim", body: {}, status: 409}
++  - name: "supervisor re-assigns a self-claimed order"
++    steps:
++      - {as: olga, do: "POST /api/work_orders/38/claim", body: {}, status: 200, json: {dispatch: self}}
++      - {as: sofia, do: "POST /api/work_orders/38/assign", body: {technician: 9}, status: 200, json: {dispatch: supervisor}}
++  # ---- read-only field
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 1, title: "t", priority: normal, dispatch: self}, status: 400}
++  - {as: sofia, do: "PATCH /api/work_orders/38", body: {dispatch: self}, status: 400}
++  - {as: ruth, do: "POST /api/work_orders", body: {asset: 1, title: "t", priority: normal}, status: 201, json: {dispatch: null}}

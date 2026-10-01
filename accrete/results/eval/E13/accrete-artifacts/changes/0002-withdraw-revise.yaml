@@ -1,0 +1,61 @@
+request: "Withdraw submitted claims and revise rejected ones (expenses). New actions POST /api/claims/{id}/withdraw (own submitted claim, at most 7 days after submitted_at -> draft, submitted_at null) and POST /api/claims/{id}/revise (own rejected claim with revision < 2 -> draft, previous_rejection_reason = rejection_reason, rejection/decision/submission fields cleared, revision + 1). New read-only fields revision (int, 0) and previous_rejection_reason (text, null); existing claims get 0 / null. No outbox messages; read permissions unchanged."
+interpretation: "Add system fields claims.revision (int, default/backfill 0) and claims.previous_rejection_reason (text, null) so clients sending them get 400. Add action withdraw (allow: own claim; guard: status submitted and now <= submitted_at + 7 days, inclusive) setting status draft and submitted_at null. Add action revise (allow: own claim; guard: status rejected and revision < 2) copying rejection_reason to previous_rejection_reason, clearing rejection_reason/decided_at/decided_by/submitted_at, status draft, revision + 1. Existing submit/approve/reject/pay untouched; UI forms follow allow+guard automatically."
+ops:
+  - add_field: {entity: claims, name: revision, type: int, required: true, system: true, default: "0", backfill: "0"}
+  - add_field: {entity: claims, name: previous_rejection_reason, type: text, system: true}
+  - add_action:
+      entity: claims
+      name: withdraw
+      allow: "record.employee == user"
+      guard: "record.status == 'submitted' and record.submitted_at is not None and now <= record.submitted_at + days(7)"
+      guard_message: "'only a submitted claim can be withdrawn, within 7 days of submission'"
+      effects:
+        - set: {status: "'draft'", submitted_at: "None"}
+  - add_action:
+      entity: claims
+      name: revise
+      allow: "record.employee == user"
+      guard: "record.status == 'rejected' and record.revision < 2"
+      guard_message: "'only a rejected claim with fewer than 2 revisions can be revised'"
+      effects:
+        - set: {previous_rejection_reason: "record.rejection_reason"}
+        - set: {status: "'draft'", rejection_reason: "None", decided_at: "None", decided_by: "None", submitted_at: "None", revision: "record.revision + 1"}
+expect:
+  - {as: quinn, do: "GET /api/claims/3", status: 200, json: {revision: 0, previous_rejection_reason: null}}
+  - {as: quinn, do: "POST /api/claims/3/withdraw", body: {}, now: "2026-03-03T14:00:00", status: 200, json: {status: draft, submitted_at: null, revision: 0}}
+  - {as: quinn, do: "POST /api/claims/3/withdraw", body: {}, now: "2026-03-03T14:00:01", status: 409}
+  - {as: marco, do: "POST /api/claims/3/withdraw", body: {}, now: "2026-02-25T10:00:00", status: 403}
+  - {as: fiona, do: "POST /api/claims/3/withdraw", body: {}, now: "2026-02-25T10:00:00", status: 403}
+  - {as: yusuf, do: "POST /api/claims/7/withdraw", body: {}, now: "2026-02-01T10:00:00", status: 409}
+  - {as: omar, do: "POST /api/claims/7/revise", body: {}, status: 403}
+  - {as: quinn, do: "POST /api/claims/3/revise", body: {}, status: 409}
+  - {as: yusuf, do: "POST /api/claims/7/revise", body: {}, now: "2026-03-01T10:00:00", status: 200, json: {status: draft, revision: 1, previous_rejection_reason: "Missing receipt", rejection_reason: null, decided_at: null, decided_by: null, submitted_at: null}}
+  - {as: yusuf, do: "POST /api/claims", body: {amount: 10, category: meals, description: x, revision: 1}, status: 400}
+  - {as: yusuf, do: "POST /api/claims", body: {amount: 10, category: meals, description: x, previous_rejection_reason: "a"}, status: 400}
+  - {as: yusuf, do: "POST /api/claims", body: {amount: 10, category: meals, description: x}, status: 201, json: {revision: 0, previous_rejection_reason: null, status: draft}}
+  - name: "withdraw then edit, resubmit, approve, pay"
+    steps:
+      - {as: quinn, do: "POST /api/claims/3/withdraw", body: {}, now: "2026-02-26T10:00:00", status: 200}
+      - {as: quinn, do: "PATCH /api/claims/3", body: {amount: 400}, now: "2026-02-26T10:01:00", status: 200, json: {amount: 400}}
+      - {as: quinn, do: "PATCH /api/claims/3", body: {revision: 3}, now: "2026-02-26T10:01:00", status: 400}
+      - {as: marco, do: "GET /api/claims/3", now: "2026-02-26T10:01:00", status: 200, json: {status: draft}}
+      - {as: quinn, do: "POST /api/claims/3/submit", body: {}, now: "2026-02-27T10:00:00", status: 200, json: {status: submitted, submitted_at: "2026-02-27T10:00:00"}}
+      - {as: quinn, do: "POST /api/claims/3/withdraw", body: {}, now: "2026-03-06T10:00:00", status: 200}
+      - {as: quinn, do: "POST /api/claims/3/submit", body: {}, now: "2026-03-07T10:00:00", status: 200}
+      - {as: marco, do: "POST /api/claims/3/approve", body: {}, now: "2026-03-08T10:00:00", status: 200, json: {status: approved}}
+      - {as: fiona, do: "POST /api/claims/3/pay", body: {}, now: "2026-03-09T10:00:00", status: 200, json: {status: paid}}
+      - {as: fiona, do: "GET /api/_outbox?channel=payment", count: 1}
+  - name: "withdraw then delete"
+    steps:
+      - {as: quinn, do: "POST /api/claims/3/withdraw", body: {}, now: "2026-02-26T10:00:00", status: 200}
+      - {as: quinn, do: "DELETE /api/claims/3", now: "2026-02-26T10:00:00", status: 204}
+  - name: "revise at most twice"
+    steps:
+      - {as: yusuf, do: "POST /api/claims/7/revise", body: {}, now: "2026-03-01T10:00:00", status: 200}
+      - {as: yusuf, do: "POST /api/claims/7/submit", body: {}, now: "2026-03-01T11:00:00", status: 200}
+      - {as: omar, do: "POST /api/claims/7/reject", body: {reason: "Still no receipt"}, now: "2026-03-02T11:00:00", status: 200, json: {status: rejected, rejection_reason: "Still no receipt", revision: 1, previous_rejection_reason: "Missing receipt"}}
+      - {as: yusuf, do: "POST /api/claims/7/revise", body: {}, now: "2026-03-03T10:00:00", status: 200, json: {revision: 2, previous_rejection_reason: "Still no receipt"}}
+      - {as: yusuf, do: "POST /api/claims/7/submit", body: {}, now: "2026-03-03T11:00:00", status: 200}
+      - {as: omar, do: "POST /api/claims/7/reject", body: {reason: "Third"}, now: "2026-03-04T11:00:00", status: 200}
+      - {as: yusuf, do: "POST /api/claims/7/revise", body: {}, now: "2026-03-05T10:00:00", status: 409}
+      - {as: fiona, do: "GET /api/_outbox", count: 0}

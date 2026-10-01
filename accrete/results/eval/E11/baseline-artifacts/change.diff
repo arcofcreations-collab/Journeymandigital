@@ -1,0 +1,1056 @@
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,7 @@
+ # Expense claims
+ 
+ Employees submit expense claims, their manager approves or rejects them, finance pays them.
++Every claim is charged to a cost centre, and approvals may not exceed the cost centre's budget.
+ Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External behaviour follows `spec/CONTRACT.md`
+ and `spec/apps/expenses.md`.
+ 
+@@ -19,6 +20,7 @@
+   errors.py               ValidationError/Forbidden/NotFound/Conflict/... and their rendering
+   validation.py           request-body checks (shape, types, required/read-only fields, amount range)
+   repository.py           all SQL; returns API-shaped dicts (employee_id column -> "employee" field)
++  money.py                rounding/comparing amounts to the cent (Decimal, half up)
+   permissions.py          who may do what (pure functions of user + record + claimant)
+   services.py             business rules and the claim workflow; one function per operation
+   filters.py              ?field=value list filtering
+@@ -58,6 +60,9 @@
+ | fields clients may set / never set | `validation.CLAIM_WRITABLE`, `validation.CLAIM_READ_ONLY` |
+ | amount range, categories, roles | `validation.MAX_CLAIM_AMOUNT`, `CLAIM_CATEGORIES`, `EMPLOYEE_ROLES` |
+ | actions shown on detail pages | `services.claim_actions` |
++| budget rule on approve (409), also hides the approve form | `services._within_budget` |
++| default cost centre of a new claim | `services._default_cost_centre_id` |
++| `committed` / `remaining` of cost centres | `repository._COST_CENTRE_SELECT`, `repository._cost_centre` |
+ 
+ ## Running the tests
+ 
+@@ -83,7 +88,7 @@
+ ## Changing the schema: adding a migration
+ 
+ 1. Add `expenses_app/migrations/NNNN_short_name.sql` with the next number
+-   (e.g. `0002_add_claim_paid_at.sql`). Names must match `^\d{4}_[a-z0-9_]+\.sql$`.
++   (e.g. `0003_add_claim_paid_at.sql`). Names must match `^\d{4}_[a-z0-9_]+\.sql$`.
+ 2. Write plain SQLite DDL/DML. Don't add `BEGIN`/`COMMIT`: the runner wraps each file in a
+    transaction together with its `schema_version` row, so a failing migration leaves nothing behind.
+    (For changes SQLite's `ALTER TABLE` can't do, e.g. altering a CHECK constraint, use the
+@@ -111,4 +116,13 @@
+ * Employee `manager` must be an existing employee and must not create a reporting loop → else 400.
+   Deleting an employee who has claims, decided claims or reports → 409.
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the heading.
++* Cost centres (migration `0002_cost_centres` creates ENG/SAL/FIN/TRV and charges every existing
++  claim to its employee's department's cost centre, falling back to 1/ENG for a department without
++  one). `committed` = approved + paid amounts, `remaining` = `budget - committed`, both rounded to the
++  cent. Approval is refused (409) when the new `committed` would exceed `budget` to the cent;
++  equal is allowed. A PATCH whose valid `budget` is below `committed` is 409 even if other fields
++  are invalid (409 beats 400). A non-null `department` must be non-blank text.
++* A claim created without `cost_centre` by an employee whose department has no cost centre → 400
++  (`cost_centre` field): every claim must be charged to one. The claim create form's empty option
++  means "my department's cost centre".
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/expenses_app/migrations/0002_cost_centres.sql
++++ b/expenses_app/migrations/0002_cost_centres.sql
+@@ -0,0 +1,55 @@
++-- Cost centres with budgets; every claim is charged to one.
++
++CREATE TABLE cost_centres (
++    id         INTEGER PRIMARY KEY AUTOINCREMENT,
++    code       TEXT    NOT NULL UNIQUE,
++    name       TEXT    NOT NULL,
++    department TEXT    UNIQUE,  -- optional; unique among non-null values
++    budget     REAL    NOT NULL CHECK (budget >= 0)
++);
++
++INSERT INTO cost_centres (id, code, name, department, budget) VALUES
++    (1, 'ENG', 'Engineering', 'Engineering', 31000.00),
++    (2, 'SAL', 'Sales',       'Sales',       12000.00),
++    (3, 'FIN', 'Finance',     'Finance',      2000.00),
++    (4, 'TRV', 'Travel pool', NULL,           5000.00);
++
++-- claims.cost_centre_id is NOT NULL, which ALTER TABLE ADD COLUMN cannot add to a table
++-- with rows: rebuild the table (create-copy-drop-rename).
++CREATE TABLE claims_new (
++    id               INTEGER PRIMARY KEY AUTOINCREMENT,
++    employee_id      INTEGER NOT NULL REFERENCES employees (id),
++    amount           REAL    NOT NULL CHECK (amount > 0 AND amount <= 5000),
++    category         TEXT    NOT NULL CHECK (category IN ('travel', 'meals', 'equipment', 'other')),
++    description      TEXT    NOT NULL,
++    status           TEXT    NOT NULL DEFAULT 'draft'
++                             CHECK (status IN ('draft', 'submitted', 'approved', 'rejected', 'paid')),
++    submitted_at     TEXT,   -- YYYY-MM-DDTHH:MM:SS (UTC)
++    decided_at       TEXT,   -- YYYY-MM-DDTHH:MM:SS (UTC)
++    decided_by_id    INTEGER REFERENCES employees (id),
++    rejection_reason TEXT,
++    cost_centre_id   INTEGER NOT NULL REFERENCES cost_centres (id)
++);
++
++-- Existing claims go to the cost centre of their employee's current department
++-- (Sales -> 2, Engineering -> 1); a department without a cost centre falls back to 1.
++INSERT INTO claims_new (id, employee_id, amount, category, description, status,
++                        submitted_at, decided_at, decided_by_id, rejection_reason, cost_centre_id)
++SELECT c.id, c.employee_id, c.amount, c.category, c.description, c.status,
++       c.submitted_at, c.decided_at, c.decided_by_id, c.rejection_reason,
++       COALESCE((SELECT cc.id FROM cost_centres cc JOIN employees e ON e.department = cc.department
++                 WHERE e.id = c.employee_id), 1)
++FROM claims c;
++
++-- Keep the AUTOINCREMENT high-water mark so ids of deleted claims are never reused.
++DELETE FROM sqlite_sequence WHERE name = 'claims_new';
++INSERT INTO sqlite_sequence (name, seq)
++SELECT 'claims_new', max(COALESCE((SELECT max(id) FROM claims_new), 0),
++                         COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'claims'), 0));
++
++DROP TABLE claims;
++ALTER TABLE claims_new RENAME TO claims;
++
++CREATE INDEX claims_employee_id ON claims (employee_id);
++CREATE INDEX claims_decided_by_id ON claims (decided_by_id);
++CREATE INDEX claims_cost_centre_id ON claims (cost_centre_id);
+--- a/expenses_app/money.py
++++ b/expenses_app/money.py
+@@ -0,0 +1,16 @@
++"""Money arithmetic: amounts are stored as floats, compared and rounded to the cent."""
++from decimal import ROUND_HALF_UP, Decimal
++
++CENT = Decimal("0.01")
++
++
++def cents(value):
++    """``value`` (int, float or Decimal) as a Decimal rounded to the cent."""
++    if not isinstance(value, Decimal):
++        value = Decimal(repr(value))
++    return value.quantize(CENT, rounding=ROUND_HALF_UP)
++
++
++def round_money(value):
++    """``value`` rounded to the cent, as a JSON-friendly float."""
++    return float(cents(value))
+--- a/expenses_app/permissions.py
++++ b/expenses_app/permissions.py
+@@ -51,3 +51,14 @@
+ 
+ def can_pay_claim(user, claim):
+     return is_finance(user)
++
++
++# --- cost centres ---------------------------------------------------------------------
++
++def can_read_cost_centre(user, cost_centre):
++    return True
++
++
++def can_manage_cost_centres(user):
++    """Create, update and delete cost centres."""
++    return is_finance(user)
+--- a/expenses_app/repository.py
++++ b/expenses_app/repository.py
+@@ -7,6 +7,7 @@
+ import json
+ 
+ from .db import get_db
++from .money import cents, round_money
+ 
+ # --- employees ------------------------------------------------------------------------
+ 
+@@ -78,7 +79,7 @@
+ # --- claims ---------------------------------------------------------------------------
+ 
+ _CLAIM_SELECT = """
+-    SELECT id, employee_id, amount, category, description, status,
++    SELECT id, employee_id, amount, category, description, cost_centre_id, status,
+            submitted_at, decided_at, decided_by_id, rejection_reason
+     FROM claims
+ """
+@@ -93,6 +94,7 @@
+         "amount": row["amount"],
+         "category": row["category"],
+         "description": row["description"],
++        "cost_centre": row["cost_centre_id"],
+         "status": row["status"],
+         "submitted_at": row["submitted_at"],
+         "decided_at": row["decided_at"],
+@@ -112,14 +114,16 @@
+ def insert_claim(employee_id, values):
+     """Insert a new claim in ``draft`` status."""
+     cur = get_db().execute(
+-        "INSERT INTO claims (employee_id, amount, category, description, status) VALUES (?, ?, ?, ?, 'draft')",
+-        (employee_id, values["amount"], values["category"], values["description"]),
++        "INSERT INTO claims (employee_id, amount, category, description, cost_centre_id, status)"
++        " VALUES (?, ?, ?, ?, ?, 'draft')",
++        (employee_id, values["amount"], values["category"], values["description"], values["cost_centre"]),
+     )
+     return cur.lastrowid
+ 
+ 
+ def update_claim(claim_id, values):
+-    columns = {"amount": "amount", "category": "category", "description": "description"}
++    columns = {"amount": "amount", "category": "category", "description": "description",
++               "cost_centre": "cost_centre_id"}
+     _update("claims", columns, claim_id, values)
+ 
+ 
+@@ -143,6 +147,76 @@
+ 
+ def mark_claim_paid(claim_id):
+     get_db().execute("UPDATE claims SET status = 'paid' WHERE id = ?", (claim_id,))
++
++
++# --- cost centres ---------------------------------------------------------------------
++
++# ``committed``: the amounts of the cost centre's approved and paid claims.
++_COST_CENTRE_SELECT = """
++    SELECT cc.id, cc.code, cc.name, cc.department, cc.budget,
++           (SELECT COALESCE(SUM(c.amount), 0) FROM claims c
++            WHERE c.cost_centre_id = cc.id AND c.status IN ('approved', 'paid')) AS committed
++    FROM cost_centres cc
++"""
++
++
++def _cost_centre(row):
++    if row is None:
++        return None
++    committed = cents(row["committed"])
++    return {
++        "id": row["id"],
++        "code": row["code"],
++        "name": row["name"],
++        "department": row["department"],
++        "budget": row["budget"],
++        "committed": float(committed),
++        "remaining": round_money(cents(row["budget"]) - committed),
++    }
++
++
++def list_cost_centres():
++    return [_cost_centre(row) for row in get_db().execute(f"{_COST_CENTRE_SELECT} ORDER BY cc.id")]
++
++
++def get_cost_centre(cost_centre_id):
++    return _cost_centre(get_db().execute(f"{_COST_CENTRE_SELECT} WHERE cc.id = ?", (cost_centre_id,)).fetchone())
++
++
++def get_cost_centre_for_department(department):
++    row = get_db().execute(f"{_COST_CENTRE_SELECT} WHERE cc.department = ?", (department,)).fetchone()
++    return _cost_centre(row)
++
++
++def cost_centre_value_taken(field, value, exclude_id=None):
++    """True if another cost centre has ``field`` (``code`` or ``department``) equal to ``value``."""
++    column = {"code": "code", "department": "department"}[field]
++    row = get_db().execute(
++        f"SELECT 1 FROM cost_centres WHERE {column} = ? AND id IS NOT ?", (value, exclude_id)
++    ).fetchone()
++    return row is not None
++
++
++def insert_cost_centre(values):
++    cur = get_db().execute(
++        "INSERT INTO cost_centres (code, name, department, budget) VALUES (?, ?, ?, ?)",
++        (values["code"], values["name"], values["department"], values["budget"]),
++    )
++    return cur.lastrowid
++
++
++def update_cost_centre(cost_centre_id, values):
++    columns = {"code": "code", "name": "name", "department": "department", "budget": "budget"}
++    _update("cost_centres", columns, cost_centre_id, values)
++
++
++def delete_cost_centre(cost_centre_id):
++    get_db().execute("DELETE FROM cost_centres WHERE id = ?", (cost_centre_id,))
++
++
++def cost_centre_has_claims(cost_centre_id):
++    row = get_db().execute("SELECT EXISTS (SELECT 1 FROM claims WHERE cost_centre_id = ?)", (cost_centre_id,))
++    return bool(row.fetchone()[0])
+ 
+ 
+ # --- outbox ---------------------------------------------------------------------------
+--- a/expenses_app/routes_api.py
++++ b/expenses_app/routes_api.py
+@@ -105,6 +105,34 @@
+     return services.pay_claim(current_context(), claim_id, _body())
+ 
+ 
++# --- cost centres ---------------------------------------------------------------------
++
++@bp.get("/cost_centres")
++def list_cost_centres():
++    return _items(services.list_cost_centres(current_context(), _filters()))
++
++
++@bp.post("/cost_centres")
++def create_cost_centre():
++    return services.create_cost_centre(current_context(), _body()), 201
++
++
++@bp.get("/cost_centres/<int:cost_centre_id>")
++def get_cost_centre(cost_centre_id):
++    return services.get_cost_centre(current_context(), cost_centre_id)
++
++
++@bp.patch("/cost_centres/<int:cost_centre_id>")
++def update_cost_centre(cost_centre_id):
++    return services.update_cost_centre(current_context(), cost_centre_id, _body())
++
++
++@bp.delete("/cost_centres/<int:cost_centre_id>")
++def delete_cost_centre(cost_centre_id):
++    services.delete_cost_centre(current_context(), cost_centre_id)
++    return "", 204
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ @bp.get("/_outbox")
+--- a/expenses_app/routes_ui.py
++++ b/expenses_app/routes_ui.py
+@@ -30,6 +30,10 @@
+ 
+ def _text(value):
+     return value
++
++
++def _optional_text(value):
++    return None if value.strip() == "" else value
+ 
+ 
+ def _optional_int(value):
+@@ -94,13 +98,18 @@
+ 
+ @bp.get("/claims/new")
+ def new_claim():
+-    services.ensure_can_create_claim(current_context())
+-    return render_template("claims/new.html", categories=validation.CLAIM_CATEGORIES)
++    ctx = current_context()
++    services.ensure_can_create_claim(ctx)
++    return render_template("claims/new.html", categories=validation.CLAIM_CATEGORIES,
++                           cost_centres=services.list_cost_centres(ctx))
+ 
+ 
+ @bp.post("/claims")
+ def create_claim():
+-    data = _form_values({"amount": _number, "category": _text, "description": _text})
++    data = _form_values({"amount": _number, "category": _text, "description": _text,
++                         "cost_centre": _optional_int})
++    if data.get("cost_centre") is None:
++        data.pop("cost_centre", None)  # "default": the cost centre of the employee's department
+     claim = services.create_claim(current_context(), data)
+     return redirect(url_for("ui.show_claim", claim_id=claim["id"]), 303)
+ 
+@@ -134,3 +143,30 @@
+ def pay_claim(claim_id):
+     services.pay_claim(current_context(), claim_id, {})
+     return redirect(url_for("ui.show_claim", claim_id=claim_id), 303)
++
++
++# --- cost centres ---------------------------------------------------------------------
++
++@bp.get("/cost_centres")
++def list_cost_centres():
++    cost_centres = services.list_cost_centres(current_context(), request.args.to_dict())
++    return render_template("cost_centres/list.html", cost_centres=cost_centres)
++
++
++@bp.get("/cost_centres/new")
++def new_cost_centre():
++    services.ensure_can_create_cost_centre(current_context())
++    return render_template("cost_centres/new.html")
++
++
++@bp.post("/cost_centres")
++def create_cost_centre():
++    data = _form_values({"code": _text, "name": _text, "department": _optional_text, "budget": _number})
++    cost_centre = services.create_cost_centre(current_context(), data)
++    return redirect(url_for("ui.show_cost_centre", cost_centre_id=cost_centre["id"]), 303)
++
++
++@bp.get("/cost_centres/<int:cost_centre_id>")
++def show_cost_centre(cost_centre_id):
++    cost_centre = services.get_cost_centre(current_context(), cost_centre_id)
++    return render_template("cost_centres/detail.html", cost_centre=cost_centre)
+--- a/expenses_app/services.py
++++ b/expenses_app/services.py
+@@ -8,15 +8,22 @@
+ 
+     draft --submit--> submitted --approve--> approved --pay--> paid
+                                 \\--reject--> rejected
++
++Every claim is charged to a cost centre; approving may not take the cost centre's
++``committed`` (approved + paid amounts) above its ``budget``.
+ """
++from decimal import Decimal
++
+ from . import permissions, repository, validation
+ from .db import transaction
+ from .errors import Conflict, Forbidden, NotFound, ValidationError
+ from .filters import apply_filters
++from .money import cents
+ 
+ EMPLOYEE_FIELDS = ("id", "username", "name", "role", "manager", "department")
+-CLAIM_FIELDS = ("id", "employee", "amount", "category", "description", "status",
++CLAIM_FIELDS = ("id", "employee", "amount", "category", "description", "cost_centre", "status",
+                 "submitted_at", "decided_at", "decided_by", "rejection_reason")
++COST_CENTRE_FIELDS = ("id", "code", "name", "department", "budget", "committed", "remaining")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -130,6 +137,9 @@
+     ensure_can_create_claim(ctx)
+     with transaction():
+         values = validation.clean_claim(data, partial=False)
++        if "cost_centre" not in values:
++            values["cost_centre"] = _default_cost_centre_id(ctx.user)
++        _check_claim_references(values)
+         claim_id = repository.insert_claim(ctx.user["id"], values)
+     return repository.get_claim(claim_id)
+ 
+@@ -141,6 +151,7 @@
+             raise Forbidden("Only the claim's employee can edit it.")
+         _require_status(claim, "draft", "Only draft claims can be edited.")
+         values = validation.clean_claim(data, partial=True)
++        _check_claim_references(values)
+         repository.update_claim(claim_id, values)
+     return repository.get_claim(claim_id)
+ 
+@@ -171,6 +182,8 @@
+         if not permissions.can_decide_claim(ctx.user, _claimant(claim)):
+             raise Forbidden("Only the employee's manager can approve the claim.")
+         _require_status(claim, "submitted", "Only submitted claims can be approved.")
++        if not _within_budget(claim):
++            raise Conflict("Approving this claim would exceed its cost centre's budget.")
+         validation.clean_no_params(params)
+         repository.mark_claim_decided(claim_id, "approved", ctx.now_text, ctx.user["id"])
+     return repository.get_claim(claim_id)
+@@ -195,9 +208,9 @@
+         _require_status(claim, "approved", "Only approved claims can be paid.")
+         validation.clean_no_params(params)
+         repository.mark_claim_paid(claim_id)
+-        repository.add_outbox_message(
+-            "payment", {"claim": claim_id, "employee": claim["employee"], "amount": claim["amount"]}, ctx.now_text
+-        )
++        payload = {"claim": claim_id, "employee": claim["employee"], "amount": claim["amount"],
++                   "cost_centre": claim["cost_centre"]}
++        repository.add_outbox_message("payment", payload, ctx.now_text)
+     return repository.get_claim(claim_id)
+ 
+ 
+@@ -208,7 +221,9 @@
+     if status == "draft" and permissions.can_submit_claim(user, claim):
+         actions.append("submit")
+     if status == "submitted" and permissions.can_decide_claim(user, _claimant(claim)):
+-        actions += ["approve", "reject"]
++        if _within_budget(claim):
++            actions.append("approve")
++        actions.append("reject")
+     if status == "approved" and permissions.can_pay_claim(user, claim):
+         actions.append("pay")
+     return actions
+@@ -230,6 +245,106 @@
+         raise Conflict(message)
+ 
+ 
++def _default_cost_centre_id(employee):
++    """The cost centre of the employee's department; claims need one, so none is a 400."""
++    cost_centre = repository.get_cost_centre_for_department(employee["department"])
++    if cost_centre is None:
++        raise ValidationError("Invalid input.", {"cost_centre": "required: your department has no cost centre"})
++    return cost_centre["id"]
++
++
++def _check_claim_references(values):
++    if "cost_centre" in values and repository.get_cost_centre(values["cost_centre"]) is None:
++        raise ValidationError("Invalid input.", {"cost_centre": "no such cost centre"})
++
++
++def _within_budget(claim):
++    """True if approving ``claim`` keeps its cost centre's committed amount within budget (to the cent)."""
++    cost_centre = repository.get_cost_centre(claim["cost_centre"])
++    committed_after = cents(cents(cost_centre["committed"]) + Decimal(repr(claim["amount"])))
++    return committed_after <= cents(cost_centre["budget"])
++
++
++# --- cost centres ---------------------------------------------------------------------
++
++def list_cost_centres(ctx, filters=None):
++    cost_centres = [c for c in repository.list_cost_centres() if permissions.can_read_cost_centre(ctx.user, c)]
++    return apply_filters(cost_centres, filters or {}, COST_CENTRE_FIELDS)
++
++
++def get_cost_centre(ctx, cost_centre_id):
++    cost_centre = _load_cost_centre(cost_centre_id)
++    if not permissions.can_read_cost_centre(ctx.user, cost_centre):
++        raise Forbidden()
++    return cost_centre
++
++
++def ensure_can_create_cost_centre(ctx):
++    if not permissions.can_manage_cost_centres(ctx.user):
++        raise Forbidden("Only finance can create cost centres.")
++
++
++def create_cost_centre(ctx, data):
++    ensure_can_create_cost_centre(ctx)
++    with transaction():
++        values = validation.clean_cost_centre(data, partial=False)
++        _check_cost_centre_uniqueness(values)
++        cost_centre_id = repository.insert_cost_centre(values)
++    return repository.get_cost_centre(cost_centre_id)
++
++
++def update_cost_centre(ctx, cost_centre_id, data):
++    with transaction():
++        cost_centre = _load_cost_centre(cost_centre_id)
++        if not permissions.can_manage_cost_centres(ctx.user):
++            raise Forbidden("Only finance can update cost centres.")
++        _require_budget_covers_committed(cost_centre, data)
++        values = validation.clean_cost_centre(data, partial=True)
++        _check_cost_centre_uniqueness(values, cost_centre_id)
++        repository.update_cost_centre(cost_centre_id, values)
++    return repository.get_cost_centre(cost_centre_id)
++
++
++def delete_cost_centre(ctx, cost_centre_id):
++    with transaction():
++        _load_cost_centre(cost_centre_id)
++        if not permissions.can_manage_cost_centres(ctx.user):
++            raise Forbidden("Only finance can delete cost centres.")
++        if repository.cost_centre_has_claims(cost_centre_id):
++            raise Conflict("A cost centre with claims cannot be deleted.")
++        repository.delete_cost_centre(cost_centre_id)
++
++
++def _load_cost_centre(cost_centre_id):
++    cost_centre = repository.get_cost_centre(cost_centre_id)
++    if cost_centre is None:
++        raise NotFound("No such cost centre.")
++    return cost_centre
++
++
++def _require_budget_covers_committed(cost_centre, data):
++    """A valid new ``budget`` below the current ``committed`` is a 409 (checked before other 400s)."""
++    if not isinstance(data, dict) or "budget" not in data:
++        return
++    try:
++        budget = validation.budget_amount(data["budget"])
++    except validation.FieldInvalid:
++        return  # reported as a 400 by clean_cost_centre
++    if cents(budget) < cents(cost_centre["committed"]):
++        raise Conflict("The budget cannot be lower than the amount already committed.",
++                       {"budget": f"must be at least {cost_centre['committed']}"})
++
++
++def _check_cost_centre_uniqueness(values, cost_centre_id=None):
++    """``code`` is unique; ``department`` is unique among non-null values."""
++    errors = {}
++    for field in ("code", "department"):
++        if values.get(field) is not None and repository.cost_centre_value_taken(field, values[field], cost_centre_id):
++            errors[field] = "already in use"
++    if errors:
++        raise ValidationError("Invalid input.", errors)
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def list_outbox(ctx, filters=None):
+--- a/expenses_app/templates/base.html
++++ b/expenses_app/templates/base.html
+@@ -19,6 +19,7 @@
+   <nav>
+     <a href="{{ url_for('ui.list_claims') }}">Claims</a>
+     <a href="{{ url_for('ui.list_employees') }}">Employees</a>
++    <a href="{{ url_for('ui.list_cost_centres') }}">Cost centres</a>
+     {% if ctx %}<span>Signed in as {{ ctx.user.username }} ({{ ctx.user.role }})</span>{% endif %}
+   </nav>
+   <main>
+--- a/expenses_app/templates/claims/detail.html
++++ b/expenses_app/templates/claims/detail.html
+@@ -8,6 +8,7 @@
+   {{ field("amount", claim.amount) }}
+   {{ field("category", claim.category) }}
+   {{ field("description", claim.description) }}
++  {{ field("cost_centre", claim.cost_centre, href=url_for('ui.show_cost_centre', cost_centre_id=claim.cost_centre)) }}
+   {{ field("status", claim.status) }}
+   {{ field("submitted_at", claim.submitted_at) }}
+   {{ field("decided_at", claim.decided_at) }}
+--- a/expenses_app/templates/claims/list.html
++++ b/expenses_app/templates/claims/list.html
+@@ -4,7 +4,7 @@
+ <h1>Claims</h1>
+ <p><a href="{{ url_for('ui.new_claim') }}">New claim</a></p>
+ <table>
+-  <thead><tr><th>Claim</th><th>Employee</th><th>Amount</th><th>Category</th><th>Description</th><th>Status</th></tr></thead>
++  <thead><tr><th>Claim</th><th>Employee</th><th>Amount</th><th>Category</th><th>Description</th><th>Cost centre</th><th>Status</th></tr></thead>
+   <tbody>
+   {% for claim in claims %}
+     <tr data-id="{{ claim.id }}">
+@@ -13,6 +13,7 @@
+       <td>{{ claim.amount|display }}</td>
+       <td>{{ claim.category }}</td>
+       <td>{{ claim.description }}</td>
++      <td>{{ claim.cost_centre }}</td>
+       <td>{{ claim.status }}</td>
+     </tr>
+   {% endfor %}
+--- a/expenses_app/templates/claims/new.html
++++ b/expenses_app/templates/claims/new.html
+@@ -10,6 +10,12 @@
+     </select>
+   </label>
+   <label>Description <textarea name="description" required></textarea></label>
++  <label>Cost centre
++    <select name="cost_centre">
++      <option value="">(my department's cost centre)</option>
++      {% for cost_centre in cost_centres %}<option value="{{ cost_centre.id }}">{{ cost_centre.code }} · {{ cost_centre.name }}</option>{% endfor %}
++    </select>
++  </label>
+   <button type="submit">Create</button>
+ </form>
+ {% endblock %}
+--- a/expenses_app/templates/cost_centres/detail.html
++++ b/expenses_app/templates/cost_centres/detail.html
+@@ -0,0 +1,14 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}{{ cost_centre.code }}{% endblock %}
++{% block content %}
++<h1>Cost centre #{{ cost_centre.id }}</h1>
++<dl>
++  {{ field("code", cost_centre.code) }}
++  {{ field("name", cost_centre.name) }}
++  {{ field("department", cost_centre.department) }}
++  {{ field("budget", cost_centre.budget) }}
++  {{ field("committed", cost_centre.committed) }}
++  {{ field("remaining", cost_centre.remaining) }}
++</dl>
++{% endblock %}
+--- a/expenses_app/templates/cost_centres/list.html
++++ b/expenses_app/templates/cost_centres/list.html
+@@ -0,0 +1,21 @@
++{% extends "base.html" %}
++{% block title %}Cost centres{% endblock %}
++{% block content %}
++<h1>Cost centres</h1>
++{% if ctx.role == "finance" %}<p><a href="{{ url_for('ui.new_cost_centre') }}">New cost centre</a></p>{% endif %}
++<table>
++  <thead><tr><th>Code</th><th>Name</th><th>Department</th><th>Budget</th><th>Committed</th><th>Remaining</th></tr></thead>
++  <tbody>
++  {% for cost_centre in cost_centres %}
++    <tr data-id="{{ cost_centre.id }}">
++      <td><a href="{{ url_for('ui.show_cost_centre', cost_centre_id=cost_centre.id) }}">{{ cost_centre.code }}</a></td>
++      <td>{{ cost_centre.name }}</td>
++      <td>{{ cost_centre.department|display }}</td>
++      <td>{{ cost_centre.budget|display }}</td>
++      <td>{{ cost_centre.committed|display }}</td>
++      <td>{{ cost_centre.remaining|display }}</td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/expenses_app/templates/cost_centres/new.html
++++ b/expenses_app/templates/cost_centres/new.html
+@@ -0,0 +1,12 @@
++{% extends "base.html" %}
++{% block title %}New cost centre{% endblock %}
++{% block content %}
++<h1>New cost centre</h1>
++<form data-create="cost_centres" method="post" action="{{ url_for('ui.create_cost_centre') }}">
++  <label>Code <input name="code" required></label>
++  <label>Name <input name="name" required></label>
++  <label>Department (optional) <input name="department"></label>
++  <label>Budget <input name="budget" type="number" step="0.01" min="0" required></label>
++  <button type="submit">Create</button>
++</form>
++{% endblock %}
+--- a/expenses_app/validation.py
++++ b/expenses_app/validation.py
+@@ -57,25 +57,47 @@
+     return value
+ 
+ 
++def optional_text(value):
++    """``None`` or non-blank text."""
++    if value is None:
++        return None
++    return required_text(value)
++
++
+ def choice(value, options):
+     if value not in options:
+         raise FieldInvalid("must be one of: " + ", ".join(options))
+     return value
+ 
+ 
+-def optional_record_id(value):
+-    if value is None:
+-        return None
++def record_id(value):
+     if isinstance(value, bool) or not isinstance(value, int):
+         raise FieldInvalid("must be a record id")
+     return value
+ 
+ 
+-def claim_amount(value):
++def optional_record_id(value):
++    if value is None:
++        return None
++    return record_id(value)
++
++
++def number(value):
+     if value is None:
+         raise FieldInvalid("required")
+     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+         raise FieldInvalid("must be a number")
++    return value
++
++
++def budget_amount(value):
++    if number(value) < 0:
++        raise FieldInvalid("must be at least 0")
++    return value
++
++
++def claim_amount(value):
++    number(value)
+     if not 0 < value <= MAX_CLAIM_AMOUNT:
+         raise FieldInvalid(f"must be greater than 0 and at most {MAX_CLAIM_AMOUNT}")
+     return value
+@@ -85,7 +107,7 @@
+ 
+ EMPLOYEE_WRITABLE = ("username", "name", "role", "manager", "department")
+ 
+-CLAIM_WRITABLE = ("amount", "category", "description")
++CLAIM_WRITABLE = ("amount", "category", "description", "cost_centre")
+ # Maintained by the workflow actions; clients sending them get a 400.
+ CLAIM_READ_ONLY = ("id", "employee", "status", "submitted_at", "decided_at", "decided_by", "rejection_reason")
+ 
+@@ -121,6 +143,32 @@
+     if "description" in data or not partial:
+         with collect(errors, "description"):
+             values["description"] = required_text(data.get("description"))
++    # Optional on create too: services default it to the employee's department's cost centre.
++    if "cost_centre" in data:
++        with collect(errors, "cost_centre"):
++            values["cost_centre"] = record_id(data["cost_centre"])
++    raise_if_errors(errors)
++    return values
++
++
++COST_CENTRE_WRITABLE = ("code", "name", "department", "budget")
++COST_CENTRE_READ_ONLY = ("id", "committed", "remaining")
++
++
++def clean_cost_centre(data, *, partial):
++    data = require_object(data)
++    errors = unknown_field_errors(data, COST_CENTRE_WRITABLE, read_only=COST_CENTRE_READ_ONLY)
++    values = {}
++    for name in ("code", "name"):
++        if name in data or not partial:
++            with collect(errors, name):
++                values[name] = required_text(data.get(name))
++    if "department" in data or not partial:
++        with collect(errors, "department"):
++            values["department"] = optional_text(data.get("department"))
++    if "budget" in data or not partial:
++        with collect(errors, "budget"):
++            values["budget"] = budget_amount(data.get("budget"))
+     raise_if_errors(errors)
+     return values
+ 
+--- a/seed.py
++++ b/seed.py
+@@ -2,7 +2,8 @@
+ 
+     python seed.py            # from this directory
+ 
+-Seed records keep their ids. Any existing database file is replaced.
++Seed records keep their ids. Any existing database file is replaced. The cost centres are
++reference data created by migration 0002, so seed claims can point at them.
+ """
+ import json
+ import os
+@@ -25,9 +26,9 @@
+         seed["employees"],
+     )
+     conn.executemany(
+-        "INSERT INTO claims (id, employee_id, amount, category, description, status,"
++        "INSERT INTO claims (id, employee_id, amount, category, description, cost_centre_id, status,"
+         " submitted_at, decided_at, decided_by_id, rejection_reason)"
+-        " VALUES (:id, :employee, :amount, :category, :description, :status,"
++        " VALUES (:id, :employee, :amount, :category, :description, :cost_centre, :status,"
+         " :submitted_at, :decided_at, :decided_by, :rejection_reason)",
+         seed["claims"],
+     )
+--- a/tests/test_expenses_claims.py
++++ b/tests/test_expenses_claims.py
+@@ -4,10 +4,12 @@
+ 
+ 
+ def test_any_employee_creates_draft_claim_for_themselves(app):
+-    for user, employee_id in (("priya", 5), ("marco", 2), ("fiona", 1)):
++    # cost_centre defaults to the cost centre of the creator's department
++    for user, employee_id, cost_centre in (("priya", 5, 1), ("marco", 2, 1), ("fiona", 1, 3), ("rosa", 7, 2)):
+         r = app.post("/api/claims", NEW, user=user)
+         assert r.status == 201
+-        assert r.json == {"id": r.json["id"], **NEW, "employee": employee_id, "status": "draft",
++        assert r.json == {"id": r.json["id"], **NEW, "employee": employee_id, "cost_centre": cost_centre,
++                          "status": "draft",
+                           "submitted_at": None, "decided_at": None, "decided_by": None, "rejection_reason": None}
+ 
+ 
+--- a/tests/test_expenses_cost_centres.py
++++ b/tests/test_expenses_cost_centres.py
+@@ -0,0 +1,188 @@
++"""Cost centres: the collection, claims charged to them, the approval budget rule, the UI."""
++import os
++import sqlite3
++
++from accept_client import parse_ui
++
++SALES = {"id": 2, "code": "SAL", "name": "Sales", "department": "Sales", "budget": 12000.0,
++         "committed": 10750.94, "remaining": 1249.06}
++NEW = {"code": "OPS", "name": "Operations", "department": "Ops", "budget": 1500}
++
++
++# --- the collection and its starting data ----------------------------------------------
++
++def test_starting_cost_centres_are_readable_by_everyone(app):
++    items = app.get("/api/cost_centres", user="priya").json["items"]
++    assert [(c["id"], c["code"], c["name"], c["department"], c["budget"]) for c in items] == [
++        (1, "ENG", "Engineering", "Engineering", 31000.0), (2, "SAL", "Sales", "Sales", 12000.0),
++        (3, "FIN", "Finance", "Finance", 2000.0), (4, "TRV", "Travel pool", None, 5000.0)]
++    assert [(c["committed"], c["remaining"]) for c in items] == [
++        (28886.18, 2113.82), (10750.94, 1249.06), (0.0, 2000.0), (0.0, 5000.0)]
++    assert app.get("/api/cost_centres/2", user="rosa").json == SALES
++    assert app.get("/api/cost_centres/99", user="rosa").status == 404
++    assert [c["id"] for c in app.get("/api/cost_centres?department=null", user="sam").json["items"]] == [4]
++
++
++def test_existing_claims_are_charged_to_their_employees_department(app):
++    employees = {e["id"]: e for e in app.get("/api/employees", user="fiona").json["items"]}
++    for claim in app.get("/api/claims", user="fiona").json["items"]:
++        expected = 2 if employees[claim["employee"]]["department"] == "Sales" else 1
++        assert claim["cost_centre"] == expected, claim["id"]
++
++
++def test_claims_reference_cost_centres_in_the_database(app):
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    assert conn.execute("SELECT COUNT(*) FROM claims WHERE cost_centre_id IS NULL").fetchone() == (0,)
++    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
++    conn.close()
++
++
++def test_only_finance_manages_cost_centres(app):
++    assert app.post("/api/cost_centres", NEW, user="marco").status == 403
++    assert app.post("/api/cost_centres", {"budget": -1}, user="marco").status == 403  # 403 beats 400
++    assert app.patch("/api/cost_centres/4", {"name": "x"}, user="marco").status == 403
++    assert app.patch("/api/cost_centres/4", {"budget": "x"}, user="priya").status == 403
++    assert app.delete("/api/cost_centres/4", user="priya").status == 403
++    assert app.patch("/api/cost_centres/99", {"name": "x"}, user="priya").status == 404
++    r = app.post("/api/cost_centres", NEW, user="fiona")
++    assert r.status == 201
++    assert r.json == {"id": 5, **NEW, "committed": 0.0, "remaining": 1500.0}
++    r = app.patch("/api/cost_centres/5", {"name": "Ops", "department": None, "budget": 99.5}, user="fiona")
++    assert r.status == 200 and (r.json["name"], r.json["department"], r.json["remaining"]) == ("Ops", None, 99.5)
++    assert app.delete("/api/cost_centres/5", user="fiona").status == 204
++    assert app.get("/api/cost_centres/5", user="fiona").status == 404
++
++
++def test_cost_centre_validation(app):
++    def create(**changes):
++        return app.post("/api/cost_centres", dict(NEW, **changes), user="fiona")
++
++    r = app.post("/api/cost_centres", {}, user="fiona")
++    assert r.status == 400 and set(r.json["fields"]) == {"code", "name", "budget"}
++    for field, value in (("budget", -0.01), ("budget", "10"), ("budget", True), ("budget", None),
++                         ("code", "  "), ("name", None), ("department", ""), ("department", 3),
++                         ("committed", 0), ("remaining", 0), ("id", 9), ("colour", "red")):
++        r = create(**{field: value})
++        assert r.status == 400 and field in r.json["fields"], (field, value)
++    assert create(code="ENG").status == 400  # duplicate code
++    assert create(department="Sales").status == 400  # duplicate department
++    assert app.post("/api/cost_centres", {"code": "X", "name": "X", "budget": 0}, user="fiona").status == 201
++    assert create(department=None).status == 201  # several cost centres without a department
++    assert app.patch("/api/cost_centres/4", {"code": "SAL"}, user="fiona").status == 400
++    assert app.patch("/api/cost_centres/4", {"department": "Finance"}, user="fiona").status == 400
++    assert app.patch("/api/cost_centres/2", {"code": "SAL", "department": "Sales"}, user="fiona").status == 200
++    assert app.patch("/api/cost_centres/4", {"committed": 1}, user="fiona").status == 400
++
++
++def test_budget_cannot_drop_below_committed(app):
++    assert app.patch("/api/cost_centres/2", {"budget": 10750.93}, user="fiona").status == 409
++    assert app.patch("/api/cost_centres/2", {"budget": 0, "code": ""}, user="fiona").status == 409  # 409 beats 400
++    assert app.patch("/api/cost_centres/2", {"budget": -5}, user="fiona").status == 400
++    r = app.patch("/api/cost_centres/2", {"budget": 10750.94}, user="fiona")
++    assert r.status == 200 and r.json["remaining"] == 0.0
++    assert app.patch("/api/cost_centres/3", {"budget": 0}, user="fiona").status == 200
++
++
++def test_cost_centre_with_claims_cannot_be_deleted(app):
++    assert app.delete("/api/cost_centres/1", user="fiona").status == 409
++    claim = app.post("/api/claims", {"amount": 5, "category": "travel", "description": "Bus", "cost_centre": 4},
++                     user="sam").json
++    assert app.delete("/api/cost_centres/4", user="fiona").status == 409  # even a draft claim counts
++    assert app.delete(f"/api/claims/{claim['id']}", user="sam").status == 204
++    assert app.delete("/api/cost_centres/4", user="fiona").status == 204
++
++
++# --- claims charged to cost centres ----------------------------------------------------
++
++def test_claim_cost_centre_on_create(app):
++    new = {"amount": 10, "category": "travel", "description": "Bus"}
++    assert app.post("/api/claims", dict(new, cost_centre=4), user="rosa").json["cost_centre"] == 4
++    for value in (None, 99, "2", True, 1.5):
++        r = app.post("/api/claims", dict(new, cost_centre=value), user="rosa")
++        assert r.status == 400 and "cost_centre" in r.json["fields"], value
++    # An employee whose department has no cost centre must name one.
++    assert app.post("/api/employees", {"username": "ann", "name": "Ann", "role": "employee", "manager": 2,
++                                       "department": "Ops"}, user="fiona").status == 201
++    r = app.post("/api/claims", new, user="ann")
++    assert r.status == 400 and "cost_centre" in r.json["fields"]
++    assert app.post("/api/claims", dict(new, cost_centre=4), user="ann").status == 201
++
++
++def test_claim_cost_centre_on_patch(app):
++    r = app.patch("/api/claims/1", {"cost_centre": 4}, user="wen")
++    assert r.status == 200 and r.json["cost_centre"] == 4
++    assert app.patch("/api/claims/1", {"cost_centre": 2}, user="marco").status == 403
++    assert app.patch("/api/claims/1", {"cost_centre": None}, user="wen").status == 400
++    assert app.patch("/api/claims/1", {"cost_centre": 99}, user="wen").status == 400
++    assert app.patch("/api/claims/2", {"cost_centre": 4}, user="victor").status == 409
++    assert app.patch("/api/claims/2", {"cost_centre": 99}, user="victor").status == 409  # 409 beats 400
++    assert [c["id"] for c in app.get("/api/claims?cost_centre=4", user="wen").json["items"]] == [1]
++
++
++# --- the approval budget rule ----------------------------------------------------------
++
++def test_approve_within_budget_updates_committed(app):
++    assert app.post("/api/claims/58/approve", {}, user="nadia").status == 200  # 1118.43 of 1249.06 left
++    sales = app.get("/api/cost_centres/2", user="nadia").json
++    assert (sales["committed"], sales["remaining"]) == (11869.37, 130.63)
++
++
++def test_approve_beyond_budget_is_409_and_changes_nothing(app):
++    before = app.get("/api/claims/72", user="nadia").json
++    assert app.post("/api/claims/72/approve", {}, user="nadia").status == 409  # 1646.02 > 1249.06
++    assert app.post("/api/claims/72/approve", {}, user="marco").status == 403  # 403 still comes first
++    assert app.post("/api/claims/72/approve", {"x": 1}, user="nadia").status == 409  # 409 beats 400
++    assert app.get("/api/claims/72", user="nadia").json == before
++    assert app.get("/api/cost_centres/2", user="nadia").json == SALES
++    assert app.post("/api/claims/72/reject", {"reason": "Over budget"}, user="nadia").status == 200
++
++
++def test_budget_is_compared_to_the_cent(app):
++    assert app.patch("/api/cost_centres/2", {"budget": 11869.36}, user="fiona").status == 200
++    assert app.post("/api/claims/58/approve", {}, user="nadia").status == 409
++    assert app.patch("/api/cost_centres/2", {"budget": 11869.37}, user="fiona").status == 200
++    assert app.post("/api/claims/58/approve", {}, user="nadia").status == 200
++    assert app.get("/api/cost_centres/2", user="nadia").json["remaining"] == 0.0
++
++
++def test_moving_a_draft_to_another_cost_centre_changes_whose_budget_counts(app):
++    # Wen's draft claim 1 (1271.32) is over Sales' remaining budget but within the travel pool's.
++    claim_path = "/api/claims/1"
++    app.patch(claim_path, {"cost_centre": 2}, user="wen")
++    app.post(f"{claim_path}/submit", {}, user="wen")
++    assert app.post(f"{claim_path}/approve", {}, user="marco").status == 409
++    claim = app.post("/api/claims", {"amount": 1271.32, "category": "other", "description": "Hotel",
++                                     "cost_centre": 4}, user="wen").json
++    app.post(f"/api/claims/{claim['id']}/submit", {}, user="wen")
++    assert app.post(f"/api/claims/{claim['id']}/approve", {}, user="marco").status == 200
++    assert app.get("/api/cost_centres/4", user="wen").json["remaining"] == 3728.68
++
++
++def test_paying_does_not_change_committed(app):
++    assert app.post("/api/claims/4/pay", {}, user="fiona").status == 200
++    assert app.get("/api/cost_centres/2", user="fiona").json == SALES
++    payload = app.get("/api/_outbox", user="fiona").json["items"][0]["payload"]
++    assert payload == {"claim": 4, "employee": 10, "amount": 558.67, "cost_centre": 2}
++
++
++# --- UI --------------------------------------------------------------------------------
++
++def test_cost_centre_pages(app):
++    assert parse_ui(app.get("/ui/cost_centres", user="priya").text).rows == [1, 2, 3, 4]
++    page = parse_ui(app.get("/ui/cost_centres/4", user="priya").text)
++    assert page.fields == {"code": "TRV", "name": "Travel pool", "department": "", "budget": "5000.0",
++                           "committed": "0.0", "remaining": "5000.0"}
++    assert page.actions == []
++    assert app.get("/ui/cost_centres/new", user="priya").status == 403
++    form = parse_ui(app.get("/ui/cost_centres/new", user="fiona").text)
++    assert form.creates == ["cost_centres"] and sorted(form.inputs) == ["budget", "code", "department", "name"]
++
++
++def test_approve_form_only_when_within_budget(app):
++    def actions(claim_id, user):
++        return parse_ui(app.get(f"/ui/claims/{claim_id}", user=user).text).actions
++
++    assert actions(58, "nadia") == ["approve", "reject"]
++    assert actions(72, "nadia") == ["reject"]
++    app.post("/api/claims/58/approve", {}, user="nadia")
++    assert actions(30, "nadia") == ["reject"]  # 290.03 > 130.63 left
+--- a/tests/test_expenses_ui.py
++++ b/tests/test_expenses_ui.py
+@@ -37,7 +37,7 @@
+ def test_claim_detail_fields(app):
+     page = parse_ui(app.get("/ui/claims/7", user="yusuf").text)
+     assert page.fields == {"employee": "14", "amount": "613.88", "category": "equipment",
+-                           "description": "Hotel night #7", "status": "rejected",
++                           "description": "Hotel night #7", "cost_centre": "1", "status": "rejected",
+                            "submitted_at": "2026-01-28T11:00:00", "decided_at": "2026-01-30T09:00:00",
+                            "decided_by": "4", "rejection_reason": "Missing receipt"}
+     assert page.actions == []
+@@ -69,7 +69,7 @@
+ 
+ def test_create_forms(app):
+     claims = parse_ui(app.get("/ui/claims/new", user="priya").text)
+-    assert claims.creates == ["claims"] and sorted(claims.inputs) == ["amount", "category", "description"]
++    assert claims.creates == ["claims"] and sorted(claims.inputs) == ["amount", "category", "cost_centre", "description"]
+     employees = parse_ui(app.get("/ui/employees/new", user="fiona").text)
+     assert employees.creates == ["employees"]
+     assert sorted(employees.inputs) == ["department", "manager", "name", "role", "username"]
+@@ -88,3 +88,20 @@
+     status, _, _ = _post_form(app, "/ui/employees", {"username": "ann", "name": "Ann", "role": "employee",
+                                                      "manager": "", "department": "Ops"}, "fiona")
+     assert status == 303 and app.get("/api/employees/16", user="ann").json["manager"] is None
++
++
++def test_cost_centre_forms_post_through_services(app):
++    status, headers, _ = _post_form(app, "/ui/claims", {"amount": "5", "category": "travel", "description": "Bus",
++                                                        "cost_centre": ""}, "rosa")
++    assert status == 303 and app.get("/api/claims/81", user="rosa").json["cost_centre"] == 2  # department default
++    _post_form(app, "/ui/claims", {"amount": "5", "category": "travel", "description": "Bus", "cost_centre": "4"}, "rosa")
++    assert app.get("/api/claims/82", user="rosa").json["cost_centre"] == 4
++    assert _post_form(app, "/ui/claims", {"amount": "5", "category": "travel", "description": "Bus",
++                                          "cost_centre": "99"}, "rosa")[0] == 400
++    form = {"code": "OPS", "name": "Operations", "department": "", "budget": "250.50"}
++    assert _post_form(app, "/ui/cost_centres", form, "rosa")[0] == 403
++    status, headers, _ = _post_form(app, "/ui/cost_centres", form, "fiona")
++    assert status == 303 and headers["Location"].endswith("/ui/cost_centres/5")
++    created = app.get("/api/cost_centres/5", user="rosa").json
++    assert (created["department"], created["budget"], created["remaining"]) == (None, 250.5, 250.5)
++    assert _post_form(app, "/ui/cost_centres", dict(form, code="ENG"), "fiona")[0] == 400
+--- a/tests/test_expenses_workflow.py
++++ b/tests/test_expenses_workflow.py
+@@ -45,7 +45,8 @@
+     assert r.json["decided_by"] == 3  # unchanged by payment
+     assert app.post("/api/claims/4/pay", {}, user="fiona").status == 409
+     assert app.get("/api/_outbox", user="uma").json["items"] == [
+-        {"id": 1, "channel": "payment", "payload": {"claim": 4, "employee": 10, "amount": 558.67}, "created_at": NOW}
++        {"id": 1, "channel": "payment", "payload": {"claim": 4, "employee": 10, "amount": 558.67, "cost_centre": 2},
++         "created_at": NOW}
+     ]
+ 
+ 
+@@ -57,7 +58,7 @@
+     assert app.post(f"{path}/pay", {}, user="fiona").status == 200
+     assert app.get(path, user="sam").json["status"] == "paid"
+     payload = app.get("/api/_outbox?channel=payment", user="sam").json["items"][-1]["payload"]
+-    assert payload == {"claim": claim["id"], "employee": 8, "amount": 120}
++    assert payload == {"claim": claim["id"], "employee": 8, "amount": 120, "cost_centre": 1}
+ 
+ 
+ def test_failed_action_leaves_no_trace(app):

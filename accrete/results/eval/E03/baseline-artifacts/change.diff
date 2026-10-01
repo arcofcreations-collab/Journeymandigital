@@ -1,0 +1,923 @@
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,7 @@
+ 
+ A facilities team at three sites tracks its staff, the assets it maintains and the work orders
+ raised against those assets. Requesters raise orders, supervisors assign them to technicians
+-(or technicians claim open orders themselves, up to a workload cap), technicians start and complete them, recording the spare parts they use (stock is kept per
++(or technicians claim open low-priority orders themselves, up to a workload cap), technicians start and complete them, recording the spare parts they use (stock is kept per
+ site; part usages are read-only history). Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External
+ behaviour follows `spec/CONTRACT.md` and `spec/apps/maintenance.md`.
+ 
+@@ -65,7 +65,7 @@
+ 
+ ```
+ open --assign--> assigned --start--> in_progress --complete--> completed
+-open --claim---> assigned                                    (technician self-dispatch)
++open --claim---> assigned                                    (technician self-dispatch, p3/p4 only)
+                  assigned --assign--> assigned               (re-assignment)
+ open | assigned | in_progress --cancel--> cancelled          (a non-supervisor requester: only from open)
+ in_progress --use_parts--> in_progress                       (assignee only; consumes stock)
+@@ -76,7 +76,8 @@
+ | transitions and timestamps | `services.assign_/start_/complete_/cancel_work_order` |
+ | who may run an action, from which statuses | `services._authorize_<action>` (+ `permissions.py`, `*_STATUSES` constants) |
+ | technician eligibility for `assign` | `services._assignment_problem` |
+-| who may `claim` | `permissions.can_claim_work_order` (active technician at the asset's site) |
++| who may `claim` | `permissions.can_claim_work_order` (active technician at the asset's site; order priority in `permissions.SELF_DISPATCH_PRIORITIES`, i.e. p3/p4) |
++| priority p1-p4 (`validation.WORK_ORDER_PRIORITIES`); no p4 on high-criticality assets | `services._ensure_priority_allowed` (create and PATCH; `HIGH_CRITICALITY_FORBIDDEN_PRIORITIES`) |
+ | workload cap (`assign`, `claim`) | `services.WORKLOAD_CAP`, `_ensure_below_workload_cap` (counts `validation.WORKLOAD_STATUSES`) |
+ | `dispatch` (`"supervisor"` / `"self"` / `null`) | set by `services._assign` (shared by `assign` and `claim`) |
+ | outbox messages `assignment`, `work_completed` | `services._assign` (assign and claim), `services.complete_work_order` |
+@@ -119,7 +120,9 @@
+ 2. Write plain SQLite DDL/DML. Don't add `BEGIN`/`COMMIT`: the runner wraps each file in a
+    transaction together with its `schema_version` row, so a failing migration leaves nothing behind.
+    (For changes SQLite's `ALTER TABLE` can't do, e.g. altering a CHECK constraint, use the
+-   create-copy-drop-rename recipe.)
++   create-copy-drop-rename recipe, as `0004_work_order_priority_scale.sql` does. The runner applies
++   migrations with foreign key enforcement off, so referenced tables can be rebuilt, and refuses to
++   commit one that leaves `PRAGMA foreign_key_check` violations. Recreate the table's indexes.)
+ 3. Update `repository.py` (SELECT lists, row → dict mapping, INSERT/UPDATE), `validation.py`
+    (writable/read-only fields and checks), `services.py` (`*_FIELDS` tuples used for filtering,
+    rules), the templates (detail `data-field`, list columns, `new.html` inputs) and `seed.py` if needed.
+@@ -160,6 +163,15 @@
+ * `dispatch` is stored, read-only (400 in create/PATCH bodies); migration 0003 backfilled it for
+   existing orders (`"self"` when the assignee is also `requested_by`, otherwise `"supervisor"`,
+   `null` without assignee). `seed.py` applies the same rule (`seed_dispatch`) because the seed predates it.
++* Priorities are `p1` (most urgent) to `p4`; `due_date` is `created_at`'s date + 1/3/7/30 days.
++  Anything else (old `urgent`/`normal`/`low`, `P1`, ...) is a 400; an old value as a list filter
++  just matches nothing. Setting `p4` (create or PATCH, even when unchanged) on an order whose asset
++  currently has `criticality` `high` is a 400, after the usual 403/409 checks. Migration 0004 mapped
++  existing orders (`urgent`->`p1`, `normal`->`p2` on high-criticality assets else `p3`, `low`->`p4`),
++  so some orders on high-criticality assets keep `p4`; their other fields stay editable. `seed.py`
++  maps the seed's old priorities the same way (`seed_priority`).
++* `claim` is a permission (403) only for `p3`/`p4` orders, so a technician claiming a `p1`/`p2`
++  order gets 403 even if the order is not open or they are at the cap. `assign` takes any priority.
+ * `use_parts`: after 404/403/409 (assignee, `in_progress`), any item whose `part` is an existing
+   part at the order's asset's site and whose `quantity` is an integer >= 1 but more than the part's
+   stock makes the whole call a 409, even if other items (or extra keys) are invalid. A part at
+--- a/maintenance_app/db.py
++++ b/maintenance_app/db.py
+@@ -81,10 +81,15 @@
+ def migrate(database_path, migrations_dir=MIGRATIONS_DIR):
+     """Apply every pending migration in order, each in its own transaction.
+ 
++    Migrations run with foreign key enforcement off, so a table that other tables reference
++    can be rebuilt (create-copy-drop-rename, the only way to change a CHECK constraint in
++    SQLite); ``PRAGMA foreign_key_check`` must then pass before each migration commits.
++
+     Returns the list of applied migration file names.
+     """
+     conn = connect(database_path)
+     try:
++        conn.execute("PRAGMA foreign_keys = OFF")  # only effective outside a transaction
+         done = applied_versions(conn)
+         applied = []
+         for version, name, path in available_migrations(migrations_dir):
+@@ -97,8 +102,14 @@
+                 conn.executescript(
+                     f"BEGIN;\n{sql}\n;"
+                     f"INSERT INTO schema_version (version, name, applied_at)"
+-                    f" VALUES ({version}, '{name}', '{applied_at}');\nCOMMIT;"
++                    f" VALUES ({version}, '{name}', '{applied_at}');"
+                 )
++                violations = conn.execute("PRAGMA foreign_key_check").fetchall()
++                if violations:
++                    raise sqlite3.IntegrityError(
++                        f"migration {os.path.basename(path)} leaves {len(violations)} broken foreign key(s)"
++                    )
++                conn.execute("COMMIT")
+             except sqlite3.Error:
+                 if conn.in_transaction:
+                     conn.execute("ROLLBACK")
+--- a/maintenance_app/migrations/0004_work_order_priority_scale.sql
++++ b/maintenance_app/migrations/0004_work_order_priority_scale.sql
+@@ -0,0 +1,53 @@
++-- Priorities become the four-level scale p1 (most urgent) .. p4, which also reflects the
++-- asset's criticality. Existing orders (all statuses) are mapped:
++--   urgent -> p1;  normal -> p2 on a high-criticality asset, otherwise p3;  low -> p4
++-- (low orders on high-criticality assets also become p4 and keep it; the API only refuses
++-- *setting* p4 on such orders). No other column changes.
++--
++-- The CHECK constraint on priority can't be altered in place, so the table is rebuilt
++-- (create-copy-drop-rename; the runner applies migrations with foreign keys off and checks
++-- them before committing).
++
++CREATE TABLE work_orders_new (
++    id              INTEGER PRIMARY KEY AUTOINCREMENT,
++    asset_id        INTEGER NOT NULL REFERENCES assets (id),
++    title           TEXT    NOT NULL,
++    description     TEXT,
++    priority        TEXT    NOT NULL CHECK (priority IN ('p1', 'p2', 'p3', 'p4')),
++    status          TEXT    NOT NULL DEFAULT 'open'
++                            CHECK (status IN ('open', 'assigned', 'in_progress', 'completed', 'cancelled')),
++    requested_by_id INTEGER NOT NULL REFERENCES staff (id),
++    created_at      TEXT    NOT NULL,  -- YYYY-MM-DDTHH:MM:SS (UTC)
++    assignee_id     INTEGER REFERENCES staff (id),
++    started_at      TEXT,              -- YYYY-MM-DDTHH:MM:SS (UTC)
++    completed_at    TEXT,              -- YYYY-MM-DDTHH:MM:SS (UTC)
++    resolution      TEXT,
++    labor_minutes   INTEGER CHECK (labor_minutes IS NULL OR labor_minutes >= 1),
++    cancel_reason   TEXT,
++    dispatch        TEXT    CHECK (dispatch IS NULL OR dispatch IN ('supervisor', 'self'))
++);
++
++INSERT INTO work_orders_new (id, asset_id, title, description, priority, status, requested_by_id, created_at,
++                             assignee_id, started_at, completed_at, resolution, labor_minutes, cancel_reason,
++                             dispatch)
++SELECT w.id, w.asset_id, w.title, w.description,
++       CASE w.priority
++           WHEN 'urgent' THEN 'p1'
++           WHEN 'normal' THEN CASE WHEN a.criticality = 'high' THEN 'p2' ELSE 'p3' END
++           WHEN 'low'    THEN 'p4'
++       END,
++       w.status, w.requested_by_id, w.created_at, w.assignee_id, w.started_at, w.completed_at, w.resolution,
++       w.labor_minutes, w.cancel_reason, w.dispatch
++  FROM work_orders AS w
++  JOIN assets AS a ON a.id = w.asset_id;
++
++-- Keep the id counter where it was, so new orders continue exactly as before.
++DELETE FROM sqlite_sequence WHERE name = 'work_orders_new';
++INSERT INTO sqlite_sequence (name, seq) SELECT 'work_orders_new', seq FROM sqlite_sequence WHERE name = 'work_orders';
++
++DROP TABLE work_orders;
++ALTER TABLE work_orders_new RENAME TO work_orders;
++
++CREATE INDEX work_orders_asset_id ON work_orders (asset_id);
++CREATE INDEX work_orders_requested_by_id ON work_orders (requested_by_id);
++CREATE INDEX work_orders_assignee_id ON work_orders (assignee_id);
+--- a/maintenance_app/permissions.py
++++ b/maintenance_app/permissions.py
+@@ -9,6 +9,10 @@
+ # Work order fields only a supervisor may change; the requester sending one gets a 403.
+ # (Other non-editable fields are a 400, reported by validation.)
+ WORK_ORDER_SUPERVISOR_ONLY = {"priority"}
++
++# Technicians may ``claim`` only orders with one of these (least urgent) priorities; the more
++# urgent ones are dispatched by supervisors (``assign`` takes any priority).
++SELF_DISPATCH_PRIORITIES = ("p3", "p4")
+ 
+ 
+ def is_supervisor(user):
+@@ -83,8 +87,12 @@
+ 
+ 
+ def can_claim_work_order(user, order, asset):
+-    """``claim``: active technicians at the site of the order's asset."""
+-    return is_technician(user) and user["active"] and user["site"] == asset["site"]
++    """``claim``: active technicians at the site of the order's asset, for orders whose current
++    priority allows self-dispatch."""
++    return (
++        is_technician(user) and user["active"] and user["site"] == asset["site"]
++        and order["priority"] in SELF_DISPATCH_PRIORITIES
++    )
+ 
+ 
+ def can_work_on_work_order(user, order):
+--- a/maintenance_app/services.py
++++ b/maintenance_app/services.py
+@@ -7,7 +7,7 @@
+ Work order workflow::
+ 
+     open --assign--> assigned --start--> in_progress --complete--> completed
+-    open --claim---> assigned                                    (technician self-dispatch)
++    open --claim---> assigned                                    (technician self-dispatch, p3/p4 only)
+                      assigned --assign--> assigned               (re-assignment)
+     open | assigned | in_progress --cancel--> cancelled          (requester: only from open)
+     in_progress --use_parts--> in_progress                       (consumes stock, records part usages)
+@@ -21,7 +21,10 @@
+ from .validation import DISPATCH_SELF, DISPATCH_SUPERVISOR, UNFINISHED_STATUSES, WORKLOAD_STATUSES
+ 
+ # Days from the creation date to ``due_date``, by priority.
+-DUE_DAYS = {"urgent": 1, "normal": 7, "low": 30}
++DUE_DAYS = {"p1": 1, "p2": 3, "p3": 7, "p4": 30}
++# Priorities that may not be set (on create or PATCH) on orders for a high-criticality asset.
++# Orders that already have one (from migration 0004) keep it.
++HIGH_CRITICALITY_FORBIDDEN_PRIORITIES = ("p4",)
+ 
+ # Statuses from which each state-dependent operation may start.
+ ASSIGNABLE_STATUSES = ("open", "assigned")
+@@ -224,6 +227,7 @@
+             raise ValidationError("No such asset.", {"asset": "no such asset"})
+         if asset["retired"]:
+             raise ValidationError("The asset is retired.", {"asset": "asset is retired"})
++        _ensure_priority_allowed(values["priority"], asset)
+         work_order_id = repository.insert_work_order(values, requested_by=ctx.user["id"], created_at=ctx.now_text)
+     return present_work_order(ctx, repository.get_work_order(work_order_id))
+ 
+@@ -234,6 +238,9 @@
+         fields = data.keys() if isinstance(data, dict) else ()
+         _authorize_edit(ctx.user, order, fields)
+         values = validation.clean_work_order(data, partial=True)
++        if "priority" in values:
++            # Also when the order already has that priority: the rule refuses *setting* it.
++            _ensure_priority_allowed(values["priority"], repository.get_asset(order["asset"]))
+         repository.update_work_order(work_order_id, values)
+     return present_work_order(ctx, repository.get_work_order(work_order_id))
+ 
+@@ -242,6 +249,16 @@
+     order = _load_work_order(work_order_id)
+     if not permissions.can_delete_work_order(ctx.user, order):
+         raise Forbidden("Work orders cannot be deleted.")
++
++
++def _ensure_priority_allowed(priority, asset):
++    """Orders for high-criticality assets may not be given a priority in
++    ``HIGH_CRITICALITY_FORBIDDEN_PRIORITIES`` (400)."""
++    if asset["criticality"] == "high" and priority in HIGH_CRITICALITY_FORBIDDEN_PRIORITIES:
++        raise ValidationError(
++            f"Work orders for high-criticality assets cannot have priority {priority}.",
++            {"priority": "not allowed for a high-criticality asset"},
++        )
+ 
+ 
+ def _authorize_edit(user, order, fields):
+@@ -267,7 +284,7 @@
+ def _authorize_claim(user, order):
+     asset = repository.get_asset(order["asset"])
+     if not permissions.can_claim_work_order(user, order, asset):
+-        raise Forbidden("Only active technicians at the asset's site can claim work orders.")
++        raise Forbidden("Only active technicians at the asset's site can claim work orders, and only p3 or p4 ones.")
+     _require_status(order, CLAIMABLE_STATUSES, "Only open work orders can be claimed.")
+     _ensure_below_workload_cap(user["id"])
+ 
+--- a/maintenance_app/templates/work_orders/new.html
++++ b/maintenance_app/templates/work_orders/new.html
+@@ -12,7 +12,7 @@
+   <label>Description <textarea name="description"></textarea></label>
+   <label>Priority
+     <select name="priority">
+-      {% for priority in priorities %}<option value="{{ priority }}"{% if priority == "normal" %} selected{% endif %}>{{ priority }}</option>{% endfor %}
++      {% for priority in priorities %}<option value="{{ priority }}"{% if priority == "p3" %} selected{% endif %}>{{ priority }}</option>{% endfor %}
+     </select>
+   </label>
+   <button type="submit">Create</button>
+--- a/maintenance_app/validation.py
++++ b/maintenance_app/validation.py
+@@ -13,7 +13,8 @@
+ 
+ STAFF_ROLES = ("requester", "technician", "supervisor")
+ ASSET_CRITICALITIES = ("low", "medium", "high")
+-WORK_ORDER_PRIORITIES = ("low", "normal", "urgent")
++# p1 is the most urgent. Priorities also reflect the asset's criticality (see ``services``).
++WORK_ORDER_PRIORITIES = ("p1", "p2", "p3", "p4")
+ WORK_ORDER_STATUSES = ("open", "assigned", "in_progress", "completed", "cancelled")
+ # Work orders in these states still need work; they count towards an asset's ``open_orders``.
+ UNFINISHED_STATUSES = ("open", "assigned", "in_progress")
+--- a/seed.py
++++ b/seed.py
+@@ -6,6 +6,9 @@
+ parts are data in migration ``0002_spare_parts.sql``, so they are created by ``db.migrate``.
+ The seed has no ``dispatch`` values; work orders get the same ones migration
+ ``0003_work_order_dispatch.sql`` gave the existing orders (see ``seed_dispatch``).
++The seed also still uses the old priorities (``urgent``/``normal``/``low``); they are mapped
++to p1-p4 exactly as migration ``0004_work_order_priority_scale.sql`` mapped existing orders
++(see ``seed_priority``).
+ """
+ import json
+ import os
+@@ -27,6 +30,16 @@
+     return "self" if order["assignee"] == order["requested_by"] else "supervisor"
+ 
+ 
++def seed_priority(order, criticality):
++    """``priority`` (p1-p4) for a seed work order: as mapped by migration 0004.
++
++    ``criticality`` is the criticality of the order's asset.
++    """
++    if order["priority"] == "normal":
++        return "p2" if criticality == "high" else "p3"
++    return {"urgent": "p1", "low": "p4"}[order["priority"]]
++
++
+ def load_seed(conn, seed):
+     # Staff and assets first, so the work orders' foreign keys hold row by row.
+     conn.executemany(
+@@ -39,13 +52,17 @@
+         " VALUES (:id, :tag, :name, :site, :criticality, :retired)",
+         seed["assets"],
+     )
++    criticality = {asset["id"]: asset["criticality"] for asset in seed["assets"]}
+     conn.executemany(
+         "INSERT INTO work_orders (id, asset_id, title, description, priority, status, requested_by_id,"
+         " created_at, assignee_id, started_at, completed_at, resolution, labor_minutes, cancel_reason, dispatch)"
+         " VALUES (:id, :asset, :title, :description, :priority, :status, :requested_by,"
+         " :created_at, :assignee, :started_at, :completed_at, :resolution, :labor_minutes, :cancel_reason,"
+         " :dispatch)",
+-        [{**order, "dispatch": seed_dispatch(order)} for order in seed["work_orders"]],
++        [
++            {**order, "priority": seed_priority(order, criticality[order["asset"]]), "dispatch": seed_dispatch(order)}
++            for order in seed["work_orders"]
++        ],
+     )
+ 
+ 
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -28,3 +28,18 @@
+ def seed():
+     with open(os.path.join(APP_DIR, "seed_data.json"), encoding="utf-8") as fh:
+         return json.load(fh)
++
++
++@pytest.fixture(scope="session")
++def migrated_priorities(seed):
++    """Expected p1-p4 priority of every seed work order (the seed still uses urgent/normal/low),
++    by the rule of migration 0004: urgent -> p1; normal -> p2 on a high-criticality asset,
++    otherwise p3; low -> p4."""
++    criticality = {a["id"]: a["criticality"] for a in seed["assets"]}
++
++    def migrated(order):
++        if order["priority"] == "normal":
++            return "p2" if criticality[order["asset"]] == "high" else "p3"
++        return {"urgent": "p1", "low": "p4"}[order["priority"]]
++
++    return {o["id"]: migrated(o) for o in seed["work_orders"]}
+--- a/tests/test_maintenance_actions.py
++++ b/tests/test_maintenance_actions.py
+@@ -136,7 +136,7 @@
+ # --- whole lifecycle ------------------------------------------------------------------
+ 
+ def test_full_lifecycle(app):
+-    order = app.post("/api/work_orders", {"asset": 25, "title": "Leak", "priority": "urgent"}, user="mei").json
++    order = app.post("/api/work_orders", {"asset": 25, "title": "Leak", "priority": "p1"}, user="mei").json
+     path = f"/api/work_orders/{order['id']}"
+     assert app.get(path, user="tess").status == 200  # technician at East
+     assert app.post(f"{path}/assign", {"technician": 12}, user="yara").status == 200
+--- a/tests/test_maintenance_basics.py
++++ b/tests/test_maintenance_basics.py
+@@ -24,7 +24,7 @@
+ 
+ def test_inactive_staff_are_valid_identities(app):
+     assert app.get("/api/work_orders", user="vera").status == 200  # inactive requester
+-    r = app.post("/api/work_orders", {"asset": 2, "title": "Noise", "priority": "low"}, user="vera")
++    r = app.post("/api/work_orders", {"asset": 2, "title": "Noise", "priority": "p4"}, user="vera")
+     assert r.status == 201 and r.json["requested_by"] == 14
+ 
+ 
+@@ -39,10 +39,13 @@
+     assert app.get("/ui/nothing", user="sofia").status == 404
+ 
+ 
+-def test_seed_data_is_loaded_with_same_ids(app, seed):
++def test_seed_data_is_loaded_with_same_ids(app, seed, migrated_priorities):
+     for collection in ("staff", "assets", "work_orders"):
+         items = app.get(f"/api/{collection}", user="sofia").json["items"]
+-        assert _without_derived(collection, items) == seed[collection]
++        expected = seed[collection]
++        if collection == "work_orders":  # the seed predates the p1-p4 scale (migration 0004)
++            expected = [{**o, "priority": migrated_priorities[o["id"]]} for o in expected]
++        assert _without_derived(collection, items) == expected
+ 
+ 
+ def test_database_is_fully_migrated(app):
+--- a/tests/test_maintenance_dispatch.py
++++ b/tests/test_maintenance_dispatch.py
+@@ -2,7 +2,8 @@
+ 
+ Workloads in the seed (assigned + in_progress orders per assignee): nils 3 (49, 62, 77),
+ olga 2 (75, 79), ravi 4 (53, 56, 68, 73: kept above the cap), sara 3, tess 2, umar 1 (inactive), wade 1.
+-Open North orders: 38, 52, 63, 65, 74, 82; open South orders: 54, 60, 71, 76, 78.
++Open North orders: 38 (p4), 52 (p3), 63 (p4), 65 (p2), 74 (p2), 82 (p1); open South orders: 54 (p2),
++60 (p4), 71 (p4), 76 (p1), 78 (p3). Technicians may claim only p3/p4 orders (see test_maintenance_priority).
+ """
+ import os
+ import sqlite3
+@@ -27,75 +28,76 @@
+ # --- claim ----------------------------------------------------------------------------
+ 
+ def test_claim(app):
+-    r = app.post("/api/work_orders/74/claim", {}, user="olga", now=NOW)
++    r = app.post("/api/work_orders/38/claim", {}, user="olga", now=NOW)
+     assert r.status == 200
+     assert (r.json["status"], r.json["assignee"], r.json["dispatch"]) == ("assigned", 9, "self")
+     assert _outbox(app) == [
+-        {"id": 1, "channel": "assignment", "payload": {"work_order": 74, "asset": 1, "technician": 9},
++        {"id": 1, "channel": "assignment", "payload": {"work_order": 38, "asset": 10, "technician": 9},
+          "created_at": NOW}
+     ]
+ 
+ 
+ def test_claim_permission(app):
+     for user in ("ruth", "sofia", "tomas", "umar", "ravi", "tess"):  # requester, supervisors, inactive, other sites
+-        assert app.post("/api/work_orders/74/claim", {}, user=user).status == 403, user
++        assert app.post("/api/work_orders/38/claim", {}, user=user).status == 403, user
+     assert app.post("/api/work_orders/2/claim", {}, user="ruth").status == 403  # 403 beats 409
+-    assert app.post("/api/work_orders/74/claim", {"x": 1}, user="ruth").status == 403  # 403 beats 400
++    assert app.post("/api/work_orders/38/claim", {"x": 1}, user="ruth").status == 403  # 403 beats 400
+     assert app.post("/api/work_orders/999/claim", {}, user="olga").status == 404
+-    assert _order(app, 74)["status"] == "open" and _outbox(app) == []
++    assert _order(app, 38)["status"] == "open" and _outbox(app) == []
+ 
+ 
+ def test_claim_uses_current_site_and_active_flag(app):
+     app.patch("/api/staff/9", {"active": False}, user="sofia")
+-    assert app.post("/api/work_orders/74/claim", {}, user="olga").status == 403
++    assert app.post("/api/work_orders/38/claim", {}, user="olga").status == 403
+     app.patch("/api/staff/9", {"active": True, "site": "South"}, user="sofia")
+-    assert app.post("/api/work_orders/74/claim", {}, user="olga").status == 403
+-    assert app.post("/api/work_orders/54/claim", {}, user="olga").status == 200
++    assert app.post("/api/work_orders/38/claim", {}, user="olga").status == 403
++    assert app.post("/api/work_orders/78/claim", {}, user="olga").status == 200
+ 
+ 
+ def test_claim_only_open_orders(app):
+-    for order_id in (75, 79, 4, 3):  # North: assigned, in_progress, completed, cancelled
++    for order_id in (75, 49, 5, 3):  # North, p3/p4: assigned, in_progress, completed, cancelled
+         assert app.post(f"/api/work_orders/{order_id}/claim", {}, user="olga").status == 409
+-    assert app.post("/api/work_orders/79/claim", {"x": 1}, user="olga").status == 409  # 409 beats 400
+-    assert app.post("/api/work_orders/74/claim", {"x": 1}, user="olga").status == 400
+-    assert app.post("/api/work_orders/74/claim", [], user="olga").status == 400
+-    assert _order(app, 74)["status"] == "open" and _outbox(app) == []
++    assert app.post("/api/work_orders/49/claim", {"x": 1}, user="olga").status == 409  # 409 beats 400
++    assert app.post("/api/work_orders/38/claim", {"x": 1}, user="olga").status == 400
++    assert app.post("/api/work_orders/38/claim", [], user="olga").status == 400
++    assert _order(app, 38)["status"] == "open" and _outbox(app) == []
+ 
+ 
+ def test_claim_workload_cap(app):
+-    assert app.post("/api/work_orders/74/claim", {}, user="nils").status == 409  # already 3
+-    assert app.post("/api/work_orders/54/claim", {}, user="ravi").status == 409  # already 4
+-    assert app.post("/api/work_orders/74/claim", {}, user="olga").status == 200  # 2 -> 3
+-    assert app.post("/api/work_orders/82/claim", {}, user="olga").status == 409
+-    assert app.post("/api/work_orders/82/claim", {"x": 1}, user="olga").status == 409  # 409 beats 400
+-    assert [m["payload"]["work_order"] for m in _outbox(app)] == [74]
+-    assert _order(app, 82)["status"] == "open"
++    assert app.post("/api/work_orders/38/claim", {}, user="nils").status == 409  # already 3
++    assert app.post("/api/work_orders/60/claim", {}, user="ravi").status == 409  # already 4
++    assert app.post("/api/work_orders/38/claim", {}, user="olga").status == 200  # 2 -> 3
++    assert app.post("/api/work_orders/52/claim", {}, user="olga").status == 409
++    assert app.post("/api/work_orders/52/claim", {"x": 1}, user="olga").status == 409  # 409 beats 400
++    assert [m["payload"]["work_order"] for m in _outbox(app)] == [38]
++    assert _order(app, 52)["status"] == "open"
+ 
+ 
+ def test_finished_and_cancelled_orders_do_not_count(app):
+     app.post("/api/work_orders/77/cancel", {"reason": "dup"}, user="sofia")  # nils 3 -> 2
+-    assert app.post("/api/work_orders/74/claim", {}, user="nils").status == 200
++    assert app.post("/api/work_orders/38/claim", {}, user="nils").status == 200
+     app.post("/api/work_orders/79/complete", {"resolution": "ok", "labor_minutes": 5}, user="olga")  # olga 2 -> 1
+-    assert app.post("/api/work_orders/82/claim", {}, user="olga").status == 200
++    assert app.post("/api/work_orders/52/claim", {}, user="olga").status == 200
+     assert app.post("/api/work_orders/63/claim", {}, user="olga").status == 200
++    assert app.patch("/api/work_orders/65", {"priority": "p3"}, user="sofia").status == 200  # now claimable
+     assert app.post("/api/work_orders/65/claim", {}, user="olga").status == 409
+ 
+ 
+ def test_claimed_order_follows_the_normal_workflow(app):
+-    app.post("/api/work_orders/74/claim", {}, user="olga")
+-    assert app.post("/api/work_orders/74/cancel", {"reason": "x"}, user="ruth").status == 409  # requester: open only
+-    assert app.patch("/api/work_orders/74", {"title": "x"}, user="ruth").status == 409
+-    assert app.post("/api/work_orders/74/start", {}, user="nils").status == 403
+-    assert app.post("/api/work_orders/74/start", {}, user="olga").status == 200
+-    r = app.post("/api/work_orders/74/complete", {"resolution": "Done", "labor_minutes": 15}, user="olga")
++    app.post("/api/work_orders/38/claim", {}, user="olga")
++    assert app.post("/api/work_orders/38/cancel", {"reason": "x"}, user="ruth").status == 409  # requester: open only
++    assert app.patch("/api/work_orders/38", {"title": "x"}, user="ruth").status == 409
++    assert app.post("/api/work_orders/38/start", {}, user="nils").status == 403
++    assert app.post("/api/work_orders/38/start", {}, user="olga").status == 200
++    r = app.post("/api/work_orders/38/complete", {"resolution": "Done", "labor_minutes": 15}, user="olga")
+     assert r.status == 200 and r.json["status"] == "completed" and r.json["dispatch"] == "self"
+-    assert _outbox(app)[-1]["payload"] == {"work_order": 74, "asset": 1, "technician": 9, "labor_minutes": 15,
++    assert _outbox(app)[-1]["payload"] == {"work_order": 38, "asset": 10, "technician": 9, "labor_minutes": 15,
+                                            "parts_cost": 0}
+ 
+ 
+ def test_supervisor_can_reassign_a_claimed_order(app):
+-    app.post("/api/work_orders/74/claim", {}, user="olga")
+-    r = app.post("/api/work_orders/74/assign", {"technician": 9}, user="sofia")
++    app.post("/api/work_orders/38/claim", {}, user="olga")
++    r = app.post("/api/work_orders/38/assign", {"technician": 9}, user="sofia")
+     assert r.status == 200 and r.json["dispatch"] == "supervisor"
+ 
+ 
+@@ -135,15 +137,15 @@
+     workload += app.get("/api/work_orders?assignee=10&status=in_progress", user="sofia").json["items"]
+     assert sorted(o["id"] for o in workload) == [53, 56, 68, 73]
+     app.post("/api/work_orders/73/cancel", {"reason": "x"}, user="tomas")  # 4 -> 3: still at the cap
+-    assert app.post("/api/work_orders/54/claim", {}, user="ravi").status == 409
++    assert app.post("/api/work_orders/60/claim", {}, user="ravi").status == 409
+     app.post("/api/work_orders/68/assign", {"technician": 15}, user="tomas")  # 3 -> 2
+-    assert app.post("/api/work_orders/54/claim", {}, user="ravi").status == 200
++    assert app.post("/api/work_orders/60/claim", {}, user="ravi").status == 200
+ 
+ 
+ # --- dispatch field -------------------------------------------------------------------
+ 
+ def test_dispatch_is_read_only(app):
+-    body = {"asset": 1, "title": "Noise", "priority": "low"}
++    body = {"asset": 1, "title": "Noise", "priority": "p3"}
+     assert app.post("/api/work_orders", {**body, "dispatch": None}, user="ruth").status == 400
+     assert app.post("/api/work_orders", {**body, "dispatch": "self"}, user="ruth").status == 400
+     r = app.post("/api/work_orders", body, user="ruth")
+@@ -162,8 +164,8 @@
+     assert ids("dispatch=null") == unassigned
+     assert ids("dispatch=self") == own
+     assert len(ids("dispatch=supervisor")) == len(seed["work_orders"]) - len(unassigned) - len(own)
+-    app.post("/api/work_orders/74/claim", {}, user="olga")
+-    assert 74 in ids("dispatch=self&status=assigned")
++    app.post("/api/work_orders/38/claim", {}, user="olga")
++    assert 38 in ids("dispatch=self&status=assigned")
+ 
+ 
+ def test_existing_orders_are_migrated(app, seed):
+@@ -186,17 +188,18 @@
+ # --- UI -------------------------------------------------------------------------------
+ 
+ def test_claim_form_shown_exactly_when_claim_would_succeed(app):
+-    assert "claim" in _actions(app, 74, "olga")
+-    assert "claim" not in _actions(app, 74, "nils")  # at the cap
+-    assert "claim" not in _actions(app, 74, "umar")  # inactive
+-    assert "claim" not in _actions(app, 74, "sofia")  # supervisor
+-    assert "claim" not in _actions(app, 74, "ruth")  # requester
++    assert "claim" in _actions(app, 38, "olga")
++    assert "claim" not in _actions(app, 74, "olga")  # p2: only p3/p4 can be claimed
++    assert "claim" not in _actions(app, 38, "nils")  # at the cap
++    assert "claim" not in _actions(app, 38, "umar")  # inactive
++    assert "claim" not in _actions(app, 38, "sofia")  # supervisor
++    assert "claim" not in _actions(app, 38, "ruth")  # requester
+     assert "claim" not in _actions(app, 75, "olga")  # not open
+-    assert "claim" not in _actions(app, 54, "ravi")  # above the cap
+-    assert _actions(app, 54, "wade") == ["claim"]
+-    app.post("/api/work_orders/74/claim", {}, user="olga")
+-    assert "claim" not in _actions(app, 82, "olga")  # now at the cap
+-    page = parse_ui(app.get("/ui/work_orders/74", user="olga").text)
++    assert "claim" not in _actions(app, 60, "ravi")  # above the cap
++    assert _actions(app, 60, "wade") == ["claim"]
++    app.post("/api/work_orders/38/claim", {}, user="olga")
++    assert "claim" not in _actions(app, 52, "olga")  # now at the cap
++    page = parse_ui(app.get("/ui/work_orders/38", user="olga").text)
+     assert page.fields["dispatch"] == "self"
+ 
+ 
+@@ -210,8 +213,8 @@
+ def test_ui_claim_form_posts_through_service(app):
+     from test_maintenance_ui import _post_form
+ 
+-    status, headers, _ = _post_form(app, "/ui/work_orders/74/claim", {}, "olga")
+-    assert status == 303 and headers["Location"].endswith("/ui/work_orders/74")
+-    assert _order(app, 74)["dispatch"] == "self"
+-    assert _post_form(app, "/ui/work_orders/82/claim", {}, "olga")[0] == 409
+-    assert _post_form(app, "/ui/work_orders/82/claim", {}, "ruth")[0] == 403
++    status, headers, _ = _post_form(app, "/ui/work_orders/38/claim", {}, "olga")
++    assert status == 303 and headers["Location"].endswith("/ui/work_orders/38")
++    assert _order(app, 38)["dispatch"] == "self"
++    assert _post_form(app, "/ui/work_orders/52/claim", {}, "olga")[0] == 409
++    assert _post_form(app, "/ui/work_orders/52/claim", {}, "ruth")[0] == 403
+--- a/tests/test_maintenance_parts.py
++++ b/tests/test_maintenance_parts.py
+@@ -201,7 +201,7 @@
+ 
+ 
+ def test_parts_cost_cannot_be_sent(app):
+-    assert app.post("/api/work_orders", {"asset": 1, "title": "x", "priority": "low", "parts_cost": 0},
++    assert app.post("/api/work_orders", {"asset": 1, "title": "x", "priority": "p3", "parts_cost": 0},
+                     user="ruth").status == 400
+     assert app.patch("/api/work_orders/74", {"parts_cost": 0}, user="sofia").status == 400
+ 
+--- a/tests/test_maintenance_priority.py
++++ b/tests/test_maintenance_priority.py
+@@ -0,0 +1,188 @@
++"""The p1-p4 priority scale (E03): values, due dates, the high-criticality rule, the claim
++restriction and the migration of existing orders.
++
++High-criticality assets in the seed: 1, 3, 4, 5, 13 (North), 14, 15, 16, 21 (South), 26, 31 (East).
++Migrated priorities used below: 74 p2 (open, high), 52 p3 (open, medium), 38 p4 (open, low),
++82 p1 (open, high), 64 p4 (assigned, high: kept from `low`), 79 p1 (in_progress), 4 p2 (completed, high).
++"""
++import os
++import sqlite3
++
++from accept_client import parse_ui
++
++
++def _create(app, priority, asset=2, user="sofia", now="2026-03-01T12:00:00"):
++    return app.post("/api/work_orders", {"asset": asset, "title": "Check", "priority": priority}, user=user, now=now)
++
++
++# --- values and due dates -------------------------------------------------------------
++
++def test_create_with_each_priority_and_due_date(app):
++    for priority, due in (("p1", "2026-03-02"), ("p2", "2026-03-04"), ("p3", "2026-03-08"), ("p4", "2026-03-31")):
++        r = _create(app, priority, now="2026-03-01T23:59:59")
++        assert r.status == 201 and (r.json["priority"], r.json["due_date"]) == (priority, due), priority
++
++
++def test_old_and_other_spellings_are_rejected(app):
++    for priority in ("urgent", "normal", "low", "P1", "p0", "p5", " p1", "1", 1, None, True):
++        assert _create(app, priority).status == 400, priority
++        r = app.patch("/api/work_orders/52", {"priority": priority}, user="sofia")
++        assert r.status == 400 and "priority" in r.json["fields"], priority
++    assert app.get("/api/work_orders/52", user="sofia").json["priority"] == "p3"
++
++
++def test_filter_with_old_value_matches_nothing(app, migrated_priorities):
++    for old in ("urgent", "normal", "low"):
++        r = app.get(f"/api/work_orders?priority={old}", user="sofia")
++        assert r.status == 200 and r.json["items"] == []
++    expected = [order_id for order_id, priority in migrated_priorities.items() if priority == "p4"]
++    assert [o["id"] for o in app.get("/api/work_orders?priority=p4", user="sofia").json["items"]] == expected
++
++
++def test_overdue_follows_the_new_due_dates(app):
++    order = app.get("/api/work_orders/74", user="sofia").json  # p2, created 2026-02-26
++    assert (order["due_date"], order["overdue"]) == ("2026-03-01", False)
++    assert app.get("/api/work_orders/74", user="sofia", now="2026-03-02T00:00:00").json["overdue"] is True
++    order = app.get("/api/work_orders/4", user="sofia").json  # p2, completed: never overdue
++    assert (order["due_date"], order["overdue"]) == ("2025-10-12", False)
++
++
++# --- p4 is not allowed for high-criticality assets ------------------------------------
++
++def test_p4_refused_for_high_criticality_asset_on_create(app):
++    r = _create(app, "p4", asset=1)
++    assert r.status == 400 and "priority" in r.json["fields"]
++    assert _create(app, "p4", asset=1, user="ruth").status == 400
++    assert _create(app, "p3", asset=1).status == 201
++    assert _create(app, "p4", asset=2).status == 201  # medium
++    assert _create(app, "p4", asset=9).status == 201  # low
++    assert len(app.get("/api/work_orders?asset=1", user="sofia").json["items"]) == 2
++
++
++def test_p4_refused_for_high_criticality_asset_on_patch(app):
++    before = app.get("/api/work_orders/74", user="sofia").json
++    r = app.patch("/api/work_orders/74", {"priority": "p4"}, user="sofia")
++    assert r.status == 400 and "priority" in r.json["fields"]
++    assert app.patch("/api/work_orders/74", {"title": "x", "priority": "p4"}, user="sofia").status == 400
++    assert app.get("/api/work_orders/74", user="sofia").json == before  # nothing changed
++    assert app.patch("/api/work_orders/52", {"priority": "p4"}, user="sofia").json["priority"] == "p4"  # medium
++
++
++def test_rule_follows_the_assets_current_criticality(app):
++    assert app.patch("/api/assets/8", {"criticality": "high"}, user="sofia").status == 200  # asset of 52
++    assert app.patch("/api/work_orders/52", {"priority": "p4"}, user="sofia").status == 400
++    assert app.patch("/api/assets/1", {"criticality": "medium"}, user="sofia").status == 200  # asset of 74
++    assert app.patch("/api/work_orders/74", {"priority": "p4"}, user="sofia").json["priority"] == "p4"
++
++
++def test_existing_p4_on_high_criticality_asset_is_kept(app):
++    order = app.get("/api/work_orders/64", user="sofia").json  # was low, asset 21 is high
++    assert order["priority"] == "p4" and order["status"] == "assigned"
++    r = app.patch("/api/work_orders/64", {"priority": "p4"}, user="sofia")  # setting it again is refused
++    assert r.status == 400 and "priority" in r.json["fields"]
++    r = app.patch("/api/work_orders/64", {"title": "Generator check", "description": "Monthly"}, user="tomas")
++    assert r.status == 200 and (r.json["title"], r.json["priority"]) == ("Generator check", "p4")
++    assert app.patch("/api/work_orders/64", {"priority": "p3"}, user="tomas").json["priority"] == "p3"
++    assert app.patch("/api/work_orders/64", {"priority": "p4"}, user="tomas").status == 400  # no way back
++
++
++def test_precedence_of_the_p4_rule(app):
++    assert _create(app, "p4", asset=14, user="ruth").status == 403  # other site: 403 beats 400
++    assert _create(app, "p4", asset=14, user="nils").status == 403
++    assert app.patch("/api/work_orders/74", {"priority": "p4"}, user="ruth").status == 403  # requester
++    assert app.patch("/api/work_orders/74", {"priority": "p4"}, user="kofi").status == 403  # unrelated
++    assert app.patch("/api/work_orders/4", {"priority": "p4"}, user="sofia").status == 409  # completed, high
++    assert app.patch("/api/work_orders/6", {"priority": "p4"}, user="sofia").status == 409  # cancelled, high
++    assert app.get("/api/_outbox", user="sofia").json["items"] == []
++
++
++# --- claim only p3/p4 -----------------------------------------------------------------
++
++def test_technicians_claim_only_p3_and_p4(app):
++    for order_id in (74, 65, 82):  # p2, p2, p1 at North
++        r = app.post(f"/api/work_orders/{order_id}/claim", {}, user="olga")
++        assert r.status == 403 and r.json["error"] == "forbidden", order_id
++    assert app.post("/api/work_orders/52/claim", {}, user="olga").json["priority"] == "p3"
++    assert app.post("/api/work_orders/78/claim", {}, user="wade").json["priority"] == "p3"
++    assert app.post("/api/work_orders/60/claim", {}, user="sara").status == 409  # p4, sara at the cap
++    assert [m["payload"]["work_order"] for m in app.get("/api/_outbox", user="sofia").json["items"]] == [52, 78]
++
++
++def test_claim_priority_403_beats_409(app):
++    assert app.post("/api/work_orders/74/claim", {}, user="nils").status == 403  # p2, nils at the cap
++    assert app.post("/api/work_orders/54/claim", {}, user="ravi").status == 403  # p2, ravi above the cap
++    assert app.post("/api/work_orders/79/claim", {}, user="olga").status == 403  # p1, in_progress
++    assert app.post("/api/work_orders/4/claim", {}, user="olga").status == 403  # p2, completed
++    assert app.post("/api/work_orders/74/claim", {"x": 1}, user="olga").status == 403  # 403 beats 400
++    assert app.post("/api/work_orders/75/claim", {}, user="olga").status == 409  # p3, assigned
++
++
++def test_claim_follows_the_current_priority(app):
++    assert app.patch("/api/work_orders/74", {"priority": "p3"}, user="sofia").status == 200
++    assert app.post("/api/work_orders/74/claim", {}, user="olga").status == 200
++    assert app.patch("/api/work_orders/38", {"priority": "p2"}, user="sofia").status == 200
++    assert app.post("/api/work_orders/38/claim", {}, user="olga").status == 403
++
++
++def test_supervisors_assign_any_priority(app):
++    r = app.post("/api/work_orders/82/assign", {"technician": 9}, user="sofia")  # p1
++    assert r.status == 200 and (r.json["assignee"], r.json["dispatch"]) == (9, "supervisor")
++    assert app.post("/api/work_orders/76/assign", {"technician": 15}, user="tomas").status == 200  # p1
++    assert app.post("/api/work_orders/74/assign", {"technician": 9}, user="sofia").status == 409  # olga now at cap
++
++
++def test_claim_form_follows_priority(app):
++    def actions(order_id, user):
++        return parse_ui(app.get(f"/ui/work_orders/{order_id}", user=user).text).actions
++
++    assert actions(74, "olga") == [] and actions(82, "olga") == []
++    assert actions(52, "olga") == ["claim"] and actions(38, "olga") == ["claim"]
++    assert actions(54, "wade") == [] and actions(78, "wade") == ["claim"]
++    app.patch("/api/work_orders/74", {"priority": "p4"}, user="sofia")  # refused (high criticality)
++    assert actions(74, "olga") == []
++    app.patch("/api/work_orders/74", {"priority": "p3"}, user="sofia")
++    assert actions(74, "olga") == ["claim"]
++
++
++def test_new_work_order_form_offers_the_new_scale(app):
++    page = app.get("/ui/work_orders/new", user="ruth").text
++    for priority in ("p1", "p2", "p3", "p4"):
++        assert f'value="{priority}"' in page
++    for old in ("urgent", "normal", "low"):
++        assert f'value="{old}"' not in page
++
++
++# --- migration ------------------------------------------------------------------------
++
++def test_existing_orders_are_migrated(app, seed, migrated_priorities):
++    orders = {o["id"]: o for o in app.get("/api/work_orders", user="sofia").json["items"]}
++    assert {i: o["priority"] for i, o in orders.items()} == migrated_priorities
++    # urgent -> p1; normal -> p2 (high) / p3 (medium, low); low -> p4 (also on high assets)
++    assert [orders[i]["priority"] for i in (77, 27, 74, 52, 75, 38, 64, 6)] == \
++        ["p1", "p1", "p2", "p3", "p3", "p4", "p4", "p4"]
++    assert orders[6]["status"] == "cancelled" and orders[26]["status"] == "completed"  # all statuses
++    seed_orders = {o["id"]: o for o in seed["work_orders"]}
++    for order_id, order in orders.items():  # nothing else changed
++        expected = {k: v for k, v in seed_orders[order_id].items() if k != "priority"}
++        assert {k: order[k] for k in expected} == expected
++
++
++def test_migrated_database(app):
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    try:
++        priorities = {row[0] for row in conn.execute("SELECT DISTINCT priority FROM work_orders")}
++        assert priorities == {"p1", "p2", "p3", "p4"}
++        assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'work_orders'").fetchone()[0] == 82
++        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
++        indexes = {row[0] for row in conn.execute(
++            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'work_orders' AND sql IS NOT NULL")}
++        assert indexes == {"work_orders_asset_id", "work_orders_requested_by_id", "work_orders_assignee_id"}
++        try:
++            conn.execute("UPDATE work_orders SET priority = 'urgent' WHERE id = 1")
++        except sqlite3.IntegrityError:
++            pass
++        else:
++            raise AssertionError("the schema should only accept p1-p4")
++    finally:
++        conn.close()
++    assert app.post("/api/work_orders", {"asset": 2, "title": "x", "priority": "p3"}, user="sofia").json["id"] == 83
+--- a/tests/test_maintenance_staff_assets.py
++++ b/tests/test_maintenance_staff_assets.py
+@@ -80,7 +80,7 @@
+ 
+ 
+ def test_open_orders_follow_work_orders(app):
+-    order = app.post("/api/work_orders", {"asset": 31, "title": "Test", "priority": "low"}, user="yara").json
++    order = app.post("/api/work_orders", {"asset": 31, "title": "Test", "priority": "p3"}, user="yara").json
+     assert app.get("/api/assets/31", user="yara").json["open_orders"] == 1
+     app.post(f"/api/work_orders/{order['id']}/cancel", {"reason": "dup"}, user="yara")
+     assert app.get("/api/assets/31", user="yara").json["open_orders"] == 0
+--- a/tests/test_maintenance_ui.py
++++ b/tests/test_maintenance_ui.py
+@@ -43,7 +43,7 @@
+ def test_work_order_detail_fields(app):
+     page = parse_ui(app.get("/ui/work_orders/79", user="olga").text)
+     assert page.fields == {
+-        "asset": "13", "title": "Zone 3 fault", "description": "", "priority": "urgent", "status": "in_progress",
++        "asset": "13", "title": "Zone 3 fault", "description": "", "priority": "p1", "status": "in_progress",
+         "requested_by": "1", "created_at": "2026-02-28T15:00:00", "assignee": "9",
+         "started_at": "2026-02-28T16:00:00", "completed_at": "", "resolution": "", "labor_minutes": "",
+         "cancel_reason": "", "dispatch": "supervisor", "parts_cost": "0", "due_date": "2026-03-01",
+@@ -66,7 +66,8 @@
+ def test_actions_depend_on_role_and_state(app):
+     assert _actions(app, 74, "sofia") == ["assign", "cancel"]  # open
+     assert _actions(app, 74, "ruth") == ["cancel"]  # requester, open
+-    assert _actions(app, 74, "olga") == ["claim"]  # technician at the site, below the workload cap
++    assert _actions(app, 74, "olga") == []  # p2: technicians cannot claim it
++    assert _actions(app, 52, "olga") == ["claim"]  # p3, technician at the site, below the workload cap
+     assert _actions(app, 77, "sofia") == ["assign", "cancel"]  # assigned: re-assign
+     assert _actions(app, 77, "ruth") == []  # requester, no longer open
+     assert _actions(app, 77, "nils") == ["start"]
+@@ -95,11 +96,11 @@
+ 
+ def test_ui_forms_post_through_services(app):
+     status, headers, _ = _post_form(app, "/ui/work_orders",
+-                                    {"asset": "2", "title": "Drip", "description": "", "priority": "low"}, "ruth")
++                                    {"asset": "2", "title": "Drip", "description": "", "priority": "p4"}, "ruth")
+     assert status == 303 and headers["Location"].endswith("/ui/work_orders/83")
+     created = app.get("/api/work_orders/83", user="ruth").json
+-    assert (created["asset"], created["description"], created["priority"]) == (2, None, "low")
+-    assert _post_form(app, "/ui/work_orders", {"asset": "14", "title": "x", "priority": "low"}, "ruth")[0] == 403
++    assert (created["asset"], created["description"], created["priority"]) == (2, None, "p4")
++    assert _post_form(app, "/ui/work_orders", {"asset": "14", "title": "x", "priority": "p4"}, "ruth")[0] == 403
+     assert _post_form(app, "/ui/work_orders/83/assign", {"technician": "8"}, "sofia")[0] == 409  # nils is at the cap
+     assert _post_form(app, "/ui/work_orders/83/assign", {"technician": "9"}, "sofia")[0] == 303
+     assert _post_form(app, "/ui/work_orders/83/start", {}, "olga")[0] == 303
+--- a/tests/test_maintenance_work_orders.py
++++ b/tests/test_maintenance_work_orders.py
+@@ -2,7 +2,7 @@
+ from datetime import date, timedelta
+ 
+ NOW = "2026-03-01T12:00:00"
+-NEW_ORDER = {"asset": 1, "title": "Rattling fan", "priority": "normal"}
++NEW_ORDER = {"asset": 1, "title": "Rattling fan", "priority": "p2"}
+ 
+ 
+ def _readable_ids(seed, username):
+@@ -42,9 +42,9 @@
+ 
+ 
+ def test_derived_fields(app):
+-    order = app.get("/api/work_orders/30", user="mei").json  # low, created 2026-01-05, open
++    order = app.get("/api/work_orders/30", user="mei").json  # p4 (was low), created 2026-01-05, open
+     assert order["due_date"] == "2026-02-04" and order["overdue"] is True
+-    order = app.get("/api/work_orders/77", user="ruth").json  # urgent, created 2026-02-28, assigned
++    order = app.get("/api/work_orders/77", user="ruth").json  # p1 (was urgent), created 2026-02-28, assigned
+     assert order["due_date"] == "2026-03-01" and order["overdue"] is False
+     assert app.get("/api/work_orders/77", user="ruth", now="2026-03-02T00:00:00").json["overdue"] is True
+     finished = app.get("/api/work_orders/2", user="sofia").json
+@@ -52,19 +52,23 @@
+ 
+ 
+ def test_due_date_follows_priority(app):
+-    r = app.patch("/api/work_orders/74", {"priority": "urgent"}, user="sofia")
++    # 74 is created 2026-02-26 on a high-criticality asset (so p4 is not allowed); 52 on a medium one.
++    assert app.get("/api/work_orders/74", user="sofia").json["due_date"] == "2026-03-01"  # p2: +3 days
++    r = app.patch("/api/work_orders/74", {"priority": "p1"}, user="sofia")
+     assert r.json["due_date"] == "2026-02-27" and r.json["overdue"] is True
+-    r = app.patch("/api/work_orders/74", {"priority": "low"}, user="sofia")
+-    assert r.json["due_date"] == "2026-03-28" and r.json["overdue"] is False
++    r = app.patch("/api/work_orders/74", {"priority": "p3"}, user="sofia")
++    assert r.json["due_date"] == "2026-03-05" and r.json["overdue"] is False
++    r = app.patch("/api/work_orders/52", {"priority": "p4"}, user="sofia")  # created 2026-02-10
++    assert r.json["due_date"] == "2026-03-12" and r.json["overdue"] is False
+ 
+ 
+-def test_overdue_filter(app, seed):
++def test_overdue_filter(app, seed, migrated_priorities):
+     today = date(2026, 3, 1)
+-    days = {"urgent": 1, "normal": 7, "low": 30}
++    days = {"p1": 1, "p2": 3, "p3": 7, "p4": 30}
+     expected = [
+         o["id"] for o in seed["work_orders"]
+         if o["status"] in ("open", "assigned", "in_progress")
+-        and today > date.fromisoformat(o["created_at"][:10]) + timedelta(days=days[o["priority"]])
++        and today > date.fromisoformat(o["created_at"][:10]) + timedelta(days=days[migrated_priorities[o["id"]]])
+     ]
+     assert expected
+     assert [o["id"] for o in app.get("/api/work_orders?overdue=true", user="sofia").json["items"]] == expected
+@@ -76,10 +80,10 @@
+     r = app.post("/api/work_orders", NEW_ORDER, user="ruth", now="2026-03-03T08:15:00")
+     assert r.status == 201
+     assert r.json == {
+-        "id": 83, "asset": 1, "title": "Rattling fan", "description": None, "priority": "normal",
++        "id": 83, "asset": 1, "title": "Rattling fan", "description": None, "priority": "p2",
+         "status": "open", "requested_by": 3, "created_at": "2026-03-03T08:15:00", "assignee": None,
+         "started_at": None, "completed_at": None, "resolution": None, "labor_minutes": None,
+-        "cancel_reason": None, "dispatch": None, "due_date": "2026-03-10", "overdue": False, "parts_cost": 0,
++        "cancel_reason": None, "dispatch": None, "due_date": "2026-03-06", "overdue": False, "parts_cost": 0,
+     }
+     assert app.get("/api/work_orders/83", user="ruth").json == r.json
+     assert app.get("/api/_outbox", user="ruth").json["items"] == []
+@@ -109,7 +113,8 @@
+     assert create(asset="1").status == 400
+     assert create(asset=True).status == 400
+     assert create(title="  ").status == 400
+-    assert create(priority="high").status == 400
++    for priority in ("high", "urgent", "normal", "low", "P1", "p5", "", None, 1):
++        assert create(priority=priority).status == 400, priority
+     assert create(description=5).status == 400
+     for field, value in (("status", "open"), ("requested_by", 3), ("id", 1), ("due_date", "2026-03-02"),
+                          ("assignee", 8), ("colour", "red")):
+@@ -123,8 +128,8 @@
+ # --- editing --------------------------------------------------------------------------
+ 
+ def test_supervisor_edits_unfinished_orders(app):
+-    r = app.patch("/api/work_orders/79", {"title": "Zone 3", "description": None, "priority": "low"}, user="tomas")
+-    assert r.status == 200 and (r.json["title"], r.json["priority"]) == ("Zone 3", "low")
++    r = app.patch("/api/work_orders/79", {"title": "Zone 3", "description": None, "priority": "p3"}, user="tomas")
++    assert r.status == 200 and (r.json["title"], r.json["priority"]) == ("Zone 3", "p3")
+     assert app.patch("/api/work_orders/2", {"title": "x"}, user="sofia").status == 409  # completed
+     assert app.patch("/api/work_orders/1", {"title": "x"}, user="sofia").status == 409  # cancelled
+     assert app.patch("/api/work_orders/2", {"asset": 3}, user="sofia").status == 409  # 409 beats 400
+@@ -133,9 +138,9 @@
+ def test_requester_edits_open_orders_without_priority(app):
+     r = app.patch("/api/work_orders/74", {"title": "Fan noise", "description": "Loud"}, user="ruth")
+     assert r.status == 200 and (r.json["title"], r.json["description"]) == ("Fan noise", "Loud")
+-    assert app.patch("/api/work_orders/74", {"priority": "urgent"}, user="ruth").status == 403
++    assert app.patch("/api/work_orders/74", {"priority": "p1"}, user="ruth").status == 403
+     assert app.patch("/api/work_orders/77", {"title": "x"}, user="ruth").status == 409  # assigned
+-    assert app.patch("/api/work_orders/77", {"priority": "low"}, user="ruth").status == 403  # 403 beats 409
++    assert app.patch("/api/work_orders/77", {"priority": "p3"}, user="ruth").status == 403  # 403 beats 409
+ 
+ 
+ def test_others_cannot_edit(app):
+@@ -149,7 +154,8 @@
+     assert app.patch("/api/work_orders/74", {"asset": 1}, user="sofia").status == 400
+     assert app.patch("/api/work_orders/74", {"status": "completed"}, user="sofia").status == 400
+     assert app.patch("/api/work_orders/74", {"title": ""}, user="sofia").status == 400
+-    assert app.patch("/api/work_orders/74", {"priority": "asap"}, user="sofia").status == 400
++    for priority in ("asap", "urgent", "normal", "low", "P2", None):
++        assert app.patch("/api/work_orders/74", {"priority": priority}, user="sofia").status == 400, priority
+     assert app.patch("/api/work_orders/74", {"overdue": False}, user="sofia").status == 400
+     assert app.patch("/api/work_orders/74", {}, user="ruth").status == 200
+ 

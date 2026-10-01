@@ -30,5 +30,7 @@
  "self_timed_s": 92.8,
  "duration_ms": 97683,
  "tool_uses": 17,
- "tokens": 78083
+ "tokens": 78083,
+ "change_lines": 110,
+ "files_touched": 1
 }

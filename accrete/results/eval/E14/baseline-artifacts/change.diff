@@ -1,0 +1,817 @@
+--- a/README.md
++++ b/README.md
+@@ -19,7 +19,7 @@
+   validation.py           request-body checks (shape, types, required fields, enums)
+   repository.py           all SQL; returns API-shaped dicts (book_id column -> "book" field)
+   permissions.py          who may do what (pure functions of user + record)
+-  services.py             business rules and actions (borrow, return); one function per operation
++  services.py             business rules and actions (borrow, return, declare_lost, found); one function per operation
+   filters.py              ?field=value list filtering (works on derived fields too)
+   routes_api.py           /api/... JSON endpoints (thin: parse, call service, respond)
+   routes_ui.py            /ui/... HTML pages and their form handlers
+@@ -48,17 +48,19 @@
+ 
+ | Rule | Location |
+ |---|---|
+-| copy `status` (on_loan/available) | `repository._COPY_ON_LOAN` (SQL `EXISTS`) |
+-| book `status` (available/on_loan/unavailable), `available_copies` | `repository._BOOK_SELECT`, `repository._book_status` |
++| a loan is open until returned or lost | `repository._LOAN_OPEN` (SQL), `services.is_open` |
++| copy `status` (lost/on_loan/available) | `repository._COPY_ON_LOAN`, `repository._copy_status` |
++| book `status` (available/on_loan/unavailable; lost copies ignored), `available_copies` | `repository._BOOK_SELECT`, `repository._book_status` |
+ | a loan's `book` is its copy's book (only `copy_id` is stored) | `repository._LOAN_SELECT` |
+ | loan `overdue` (depends on X-Now) | `services.present_loan` |
+ | 14-day loan period, max 3 open loans | `services.LOAN_PERIOD`, `services.MAX_OPEN_LOANS` |
+ | borrow (lends the lowest-id available copy) / return | `services.borrow_book`, `services.return_loan` |
++| declare a loan lost (closes it, copy `lost`) / copy found | `services.declare_loan_lost`, `services.mark_copy_found` |
+ | copy's `book` fixed after creation; delete blocked by loans | `validation.clean_copy`, `services.delete_copy` |
+ | deleting a book deletes its copies | `repository.delete_book` |
+-| outbox message `loan_created` | `services.borrow_book` → `repository.add_outbox_message` |
++| outbox messages `loan_created`, `copy_lost` | `services.borrow_book`, `services.declare_loan_lost` → `repository.add_outbox_message` |
+ | who can read/edit what | `permissions.py` |
+-| actions shown on detail pages | `services.book_actions`, `services.loan_actions` |
++| actions shown on detail pages | `services.book_actions`, `services.loan_actions`, `services.copy_actions` |
+ 
+ ## Running the tests
+ 
+@@ -112,4 +114,8 @@
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the
+   heading. The borrow form is shown when the book has an available copy and (for members) the caller
+   is active with fewer than 3 open loans; librarians get a member picker.
++* Lost copies: `lost` (copies) and `lost_at` (loans) are read-only; sending `lost` in a copy body → 400.
++  A loan with `lost_at` is closed (not open, never overdue, `return` → 409) but keeps `returned_at` null.
++  `declare_lost` and `found` take `{}` (other fields → 400, after the 403/409 checks); a member gets 403
++  even on their own loan. Copy `status` is `lost` before `on_loan`/`available`.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/library_app/migrations/0003_lost_copies.sql
++++ b/library_app/migrations/0003_lost_copies.sql
+@@ -0,0 +1,15 @@
++-- Lost copies: a loan can be closed by declaring its copy lost (loans.lost_at), which takes
++-- the copy out of circulation (copies.lost) until it is found again.
++
++ALTER TABLE loans ADD COLUMN lost_at TEXT;  -- YYYY-MM-DDTHH:MM:SS (UTC) or NULL
++ALTER TABLE copies ADD COLUMN lost INTEGER NOT NULL DEFAULT 0 CHECK (lost IN (0, 1));
++
++-- A loan is open while it is neither returned nor lost; a found copy can be lent again
++-- even though its lost loan keeps returned_at NULL.
++DROP INDEX loans_one_open_loan_per_copy;
++CREATE UNIQUE INDEX loans_one_open_loan_per_copy ON loans (copy_id)
++    WHERE returned_at IS NULL AND lost_at IS NULL;
++
++-- Loans 46 (copy 4) and 50 (copy 16) were reported lost. No outbox messages for this.
++UPDATE loans SET lost_at = '2026-02-28T10:00:00' WHERE id IN (46, 50);
++UPDATE copies SET lost = 1 WHERE id IN (4, 16);
+--- a/library_app/permissions.py
++++ b/library_app/permissions.py
+@@ -65,3 +65,6 @@
+ def can_return_loan(user, loan):
+     return is_librarian(user) or loan["member"] == user["id"]
+ 
++
++def can_declare_loan_lost(user, loan):
++    return is_librarian(user)
+--- a/library_app/repository.py
++++ b/library_app/repository.py
+@@ -7,6 +7,10 @@
+ import json
+ 
+ from .db import get_db
++
++# A loan is open (its copy is out with the member) until it is returned or declared lost.
++# SQL condition on a loan aliased ``l``.
++_LOAN_OPEN = "(l.returned_at IS NULL AND l.lost_at IS NULL)"
+ 
+ # --- members --------------------------------------------------------------------------
+ 
+@@ -67,27 +71,29 @@
+ 
+ def count_open_loans(member_id):
+     return get_db().execute(
+-        "SELECT COUNT(*) FROM loans WHERE member_id = ? AND returned_at IS NULL", (member_id,)
++        f"SELECT COUNT(*) FROM loans l WHERE l.member_id = ? AND {_LOAN_OPEN}", (member_id,)
+     ).fetchone()[0]
+ 
+ 
+ # --- books ----------------------------------------------------------------------------
+ 
+-# A copy is on loan while it has a loan with no returned_at.
+-_COPY_ON_LOAN = "EXISTS (SELECT 1 FROM loans l WHERE l.copy_id = c.id AND l.returned_at IS NULL)"
+-
++# A copy is on loan while it has an open loan; it is available when neither lost nor on loan.
++_COPY_ON_LOAN = f"EXISTS (SELECT 1 FROM loans l WHERE l.copy_id = c.id AND {_LOAN_OPEN})"
++_COPY_AVAILABLE = f"(NOT c.lost AND NOT {_COPY_ON_LOAN})"
++
++# Lost copies are out of circulation and don't count towards a book's status.
+ _BOOK_SELECT = f"""
+     SELECT b.id, b.title, b.author, b.isbn, b.year,
+-           (SELECT COUNT(*) FROM copies c WHERE c.book_id = b.id) AS copies,
+-           (SELECT COUNT(*) FROM copies c WHERE c.book_id = b.id AND NOT {_COPY_ON_LOAN}) AS available_copies
++           (SELECT COUNT(*) FROM copies c WHERE c.book_id = b.id AND NOT c.lost) AS copies_in_circulation,
++           (SELECT COUNT(*) FROM copies c WHERE c.book_id = b.id AND {_COPY_AVAILABLE}) AS available_copies
+     FROM books b
+ """
+ 
+ 
+-def _book_status(copies, available_copies):
++def _book_status(copies_in_circulation, available_copies):
+     if available_copies:
+         return "available"
+-    return "on_loan" if copies else "unavailable"
++    return "on_loan" if copies_in_circulation else "unavailable"
+ 
+ 
+ def _book(row):
+@@ -99,7 +105,7 @@
+         "author": row["author"],
+         "isbn": row["isbn"],
+         "year": row["year"],
+-        "status": _book_status(row["copies"], row["available_copies"]),
++        "status": _book_status(row["copies_in_circulation"], row["available_copies"]),
+         "available_copies": row["available_copies"],
+     }
+ 
+@@ -145,7 +151,13 @@
+ 
+ # --- copies ---------------------------------------------------------------------------
+ 
+-_COPY_SELECT = f"SELECT c.id, c.book_id, c.barcode, {_COPY_ON_LOAN} AS on_loan FROM copies c"
++_COPY_SELECT = f"SELECT c.id, c.book_id, c.barcode, c.lost, {_COPY_ON_LOAN} AS on_loan FROM copies c"
++
++
++def _copy_status(row):
++    if row["lost"]:
++        return "lost"
++    return "on_loan" if row["on_loan"] else "available"
+ 
+ 
+ def _copy(row):
+@@ -155,7 +167,8 @@
+         "id": row["id"],
+         "book": row["book_id"],
+         "barcode": row["barcode"],
+-        "status": "on_loan" if row["on_loan"] else "available",
++        "lost": bool(row["lost"]),
++        "status": _copy_status(row),
+     }
+ 
+ 
+@@ -172,9 +185,9 @@
+ 
+ 
+ def first_available_copy_id(book_id):
+-    """The lowest id among the book's copies that are not on loan, or None."""
++    """The lowest id among the book's available copies (not lost, not on loan), or None."""
+     row = get_db().execute(
+-        f"SELECT c.id FROM copies c WHERE c.book_id = ? AND NOT {_COPY_ON_LOAN} ORDER BY c.id LIMIT 1", (book_id,)
++        f"SELECT c.id FROM copies c WHERE c.book_id = ? AND {_COPY_AVAILABLE} ORDER BY c.id LIMIT 1", (book_id,)
+     ).fetchone()
+     return None if row is None else row["id"]
+ 
+@@ -197,6 +210,10 @@
+     _update("copies", {"barcode": "barcode"}, copy_id, values)
+ 
+ 
++def set_copy_lost(copy_id, lost):
++    get_db().execute("UPDATE copies SET lost = ? WHERE id = ?", (int(lost), copy_id))
++
++
+ def delete_copy(copy_id):
+     get_db().execute("DELETE FROM copies WHERE id = ?", (copy_id,))
+ 
+@@ -210,7 +227,7 @@
+ 
+ # A loan's book is the book of the copy it lent (a copy's book never changes).
+ _LOAN_SELECT = """
+-    SELECT l.id, c.book_id, l.copy_id, l.member_id, l.borrowed_at, l.due_at, l.returned_at
++    SELECT l.id, c.book_id, l.copy_id, l.member_id, l.borrowed_at, l.due_at, l.returned_at, l.lost_at
+     FROM loans l JOIN copies c ON c.id = l.copy_id
+ """
+ 
+@@ -226,6 +243,7 @@
+         "borrowed_at": row["borrowed_at"],
+         "due_at": row["due_at"],
+         "returned_at": row["returned_at"],
++        "lost_at": row["lost_at"],
+     }
+ 
+ 
+@@ -247,6 +265,10 @@
+ 
+ def mark_loan_returned(loan_id, returned_at):
+     get_db().execute("UPDATE loans SET returned_at = ? WHERE id = ?", (returned_at, loan_id))
++
++
++def mark_loan_lost(loan_id, lost_at):
++    get_db().execute("UPDATE loans SET lost_at = ? WHERE id = ?", (lost_at, loan_id))
+ 
+ 
+ # --- outbox ---------------------------------------------------------------------------
+--- a/library_app/routes_api.py
++++ b/library_app/routes_api.py
+@@ -118,6 +118,11 @@
+     return "", 204
+ 
+ 
++@bp.post("/copies/<int:copy_id>/found")
++def mark_copy_found(copy_id):
++    return services.mark_copy_found(current_context(), copy_id, _body())
++
++
+ # --- loans ----------------------------------------------------------------------------
+ 
+ @bp.get("/loans")
+@@ -151,6 +156,11 @@
+     return services.return_loan(current_context(), loan_id, _body())
+ 
+ 
++@bp.post("/loans/<int:loan_id>/declare_lost")
++def declare_loan_lost(loan_id):
++    return services.declare_loan_lost(current_context(), loan_id, _body())
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ @bp.get("/_outbox")
+--- a/library_app/routes_ui.py
++++ b/library_app/routes_ui.py
+@@ -136,8 +136,15 @@
+ 
+ @bp.get("/copies/<int:copy_id>")
+ def show_copy(copy_id):
+-    copy = services.get_copy(current_context(), copy_id)
+-    return render_template("copies/detail.html", copy=copy)
++    ctx = current_context()
++    copy = services.get_copy(ctx, copy_id)
++    return render_template("copies/detail.html", copy=copy, actions=services.copy_actions(ctx, copy))
++
++
++@bp.post("/copies/<int:copy_id>/found")
++def mark_copy_found(copy_id):
++    services.mark_copy_found(current_context(), copy_id, {})
++    return redirect(url_for("ui.show_copy", copy_id=copy_id), 303)
+ 
+ 
+ # --- loans ----------------------------------------------------------------------------
+@@ -165,3 +172,9 @@
+ def return_loan(loan_id):
+     services.return_loan(current_context(), loan_id, {})
+     return redirect(url_for("ui.show_loan", loan_id=loan_id), 303)
++
++
++@bp.post("/loans/<int:loan_id>/declare_lost")
++def declare_loan_lost(loan_id):
++    services.declare_loan_lost(current_context(), loan_id, {})
++    return redirect(url_for("ui.show_loan", loan_id=loan_id), 303)
+--- a/library_app/services.py
++++ b/library_app/services.py
+@@ -16,8 +16,8 @@
+ 
+ MEMBER_FIELDS = ("id", "username", "name", "role", "active")
+ BOOK_FIELDS = ("id", "title", "author", "isbn", "year", "status", "available_copies")
+-COPY_FIELDS = ("id", "book", "barcode", "status")
+-LOAN_FIELDS = ("id", "book", "copy", "member", "borrowed_at", "due_at", "returned_at", "overdue")
++COPY_FIELDS = ("id", "book", "barcode", "lost", "status")
++LOAN_FIELDS = ("id", "book", "copy", "member", "borrowed_at", "due_at", "returned_at", "lost_at", "overdue")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -250,6 +250,26 @@
+         repository.delete_copy(copy_id)
+ 
+ 
++def mark_copy_found(ctx, copy_id, params):
++    """A lost copy turned up: it is back in circulation (its lost loan stays closed)."""
++    with transaction():
++        copy = _load_copy(copy_id)
++        if not permissions.can_manage_copies(ctx.user):
++            raise Forbidden("Only librarians can mark copies as found.")
++        if not copy["lost"]:
++            raise Conflict("The copy is not lost.")
++        validation.clean_no_params(params)
++        repository.set_copy_lost(copy_id, False)
++    return repository.get_copy(copy_id)
++
++
++def copy_actions(ctx, copy):
++    """Names of the actions the caller could successfully start on ``copy`` right now."""
++    if copy["lost"] and permissions.can_manage_copies(ctx.user):
++        return ["found"]
++    return []
++
++
+ def _load_copy(copy_id):
+     copy = repository.get_copy(copy_id)
+     if copy is None:
+@@ -264,9 +284,14 @@
+ 
+ # --- loans ----------------------------------------------------------------------------
+ 
++def is_open(loan):
++    """A loan is open until it is returned or declared lost."""
++    return loan["returned_at"] is None and loan["lost_at"] is None
++
++
+ def present_loan(ctx, loan):
+     """Add the derived ``overdue`` field, which depends on the request's clock."""
+-    overdue = loan["returned_at"] is None and ctx.today.isoformat() > loan["due_at"]
++    overdue = is_open(loan) and ctx.today.isoformat() > loan["due_at"]
+     return {**loan, "overdue": overdue}
+ 
+ 
+@@ -282,7 +307,8 @@
+     return present_loan(ctx, loan)
+ 
+ 
+-# Loans are created only by borrowing a book and changed only by returning it: nobody may
++# Loans are created only by borrowing a book and changed only by the return and
++# declare_lost actions: nobody may
+ # create, update or delete them directly (an unknown loan id is still a 404 first).
+ 
+ def ensure_can_create_loan(ctx):
+@@ -297,7 +323,7 @@
+ 
+ def update_loan(ctx, loan_id, data):
+     _load_loan(loan_id)
+-    raise Forbidden("Loans change only through the return action.")
++    raise Forbidden("Loans change only through the return and declare_lost actions.")
+ 
+ 
+ def delete_loan(ctx, loan_id):
+@@ -310,17 +336,42 @@
+         loan = _load_loan(loan_id)
+         if not permissions.can_return_loan(ctx.user, loan):
+             raise Forbidden("Only the borrower or a librarian can return a loan.")
+-        if loan["returned_at"] is not None:
+-            raise Conflict("The loan has already been returned.")
++        if not is_open(loan):
++            raise Conflict("The loan is closed (returned or lost).")
+         validation.clean_no_params(params)
+         repository.mark_loan_returned(loan_id, ctx.now_text)
+     return present_loan(ctx, repository.get_loan(loan_id))
+ 
+ 
++def declare_loan_lost(ctx, loan_id, params):
++    """Close an open loan whose copy never came back and take the copy out of circulation."""
++    with transaction():
++        loan = _load_loan(loan_id)
++        if not permissions.can_declare_loan_lost(ctx.user, loan):
++            raise Forbidden("Only librarians can declare a loan lost.")
++        if not is_open(loan):
++            raise Conflict("Only an open loan can be declared lost.")
++        validation.clean_no_params(params)
++        repository.mark_loan_lost(loan_id, ctx.now_text)
++        repository.set_copy_lost(loan["copy"], True)
++        repository.add_outbox_message(
++            "copy_lost",
++            {"loan": loan_id, "copy": loan["copy"], "book": loan["book"], "member": loan["member"]},
++            ctx.now_text,
++        )
++    return present_loan(ctx, repository.get_loan(loan_id))
++
++
+ def loan_actions(ctx, loan):
+-    if loan["returned_at"] is None and permissions.can_return_loan(ctx.user, loan):
+-        return ["return"]
+-    return []
++    """Names of the actions the caller could successfully start on ``loan`` right now."""
++    if not is_open(loan):
++        return []
++    actions = []
++    if permissions.can_return_loan(ctx.user, loan):
++        actions.append("return")
++    if permissions.can_declare_loan_lost(ctx.user, loan):
++        actions.append("declare_lost")
++    return actions
+ 
+ 
+ def _load_loan(loan_id):
+--- a/library_app/templates/copies/detail.html
++++ b/library_app/templates/copies/detail.html
+@@ -6,6 +6,13 @@
+ <dl>
+   {{ field("book", copy.book, href=url_for('ui.show_book', book_id=copy.book)) }}
+   {{ field("barcode", copy.barcode) }}
++  {{ field("lost", copy.lost) }}
+   {{ field("status", copy.status) }}
+ </dl>
++
++{% if "found" in actions %}
++<form data-action="found" method="post" action="{{ url_for('ui.mark_copy_found', copy_id=copy.id) }}">
++  <button type="submit">Mark as found</button>
++</form>
++{% endif %}
+ {% endblock %}
+--- a/library_app/templates/loans/detail.html
++++ b/library_app/templates/loans/detail.html
+@@ -11,6 +11,7 @@
+   {{ field("borrowed_at", loan.borrowed_at) }}
+   {{ field("due_at", loan.due_at) }}
+   {{ field("returned_at", loan.returned_at) }}
++  {{ field("lost_at", loan.lost_at) }}
+   {{ field("overdue", loan.overdue) }}
+ </dl>
+ 
+@@ -19,4 +20,9 @@
+   <button type="submit">Return</button>
+ </form>
+ {% endif %}
++{% if "declare_lost" in actions %}
++<form data-action="declare_lost" method="post" action="{{ url_for('ui.declare_loan_lost', loan_id=loan.id) }}">
++  <button type="submit">Declare copy lost</button>
++</form>
++{% endif %}
+ {% endblock %}
+--- a/library_app/templates/loans/list.html
++++ b/library_app/templates/loans/list.html
+@@ -4,7 +4,7 @@
+ {% block content %}
+ <h1>Loans</h1>
+ <table>
+-  <thead><tr><th>Loan</th><th>Book</th><th>Copy</th><th>Member</th><th>Borrowed</th><th>Due</th><th>Returned</th><th>Overdue</th></tr></thead>
++  <thead><tr><th>Loan</th><th>Book</th><th>Copy</th><th>Member</th><th>Borrowed</th><th>Due</th><th>Returned</th><th>Lost</th><th>Overdue</th></tr></thead>
+   <tbody>
+   {% for loan in loans %}
+     <tr data-id="{{ loan.id }}">
+@@ -15,6 +15,7 @@
+       <td>{{ loan.borrowed_at }}</td>
+       <td>{{ loan.due_at }}</td>
+       <td>{{ loan.returned_at|display }}</td>
++      <td>{{ loan.lost_at|display }}</td>
+       <td>{{ loan.overdue|display }}</td>
+     </tr>
+   {% endfor %}
+--- a/seed.py
++++ b/seed.py
+@@ -27,14 +27,14 @@
+         [{**b, "year": b.get("year")} for b in seed["books"]],
+     )
+     conn.executemany(
+-        "INSERT INTO copies (id, book_id, barcode) VALUES (:id, :book, :barcode)",
+-        seed["copies"],
++        "INSERT INTO copies (id, book_id, barcode, lost) VALUES (:id, :book, :barcode, :lost)",
++        [{**c, "lost": int(c.get("lost", False))} for c in seed["copies"]],
+     )
+     # A loan's book is its copy's book, so only the copy is stored.
+     conn.executemany(
+-        "INSERT INTO loans (id, copy_id, member_id, borrowed_at, due_at, returned_at)"
+-        " VALUES (:id, :copy, :member, :borrowed_at, :due_at, :returned_at)",
+-        seed["loans"],
++        "INSERT INTO loans (id, copy_id, member_id, borrowed_at, due_at, returned_at, lost_at)"
++        " VALUES (:id, :copy, :member, :borrowed_at, :due_at, :returned_at, :lost_at)",
++        [{**l, "lost_at": l.get("lost_at")} for l in seed["loans"]],
+     )
+ 
+ 
+--- a/tests/test_library_basics.py
++++ b/tests/test_library_basics.py
+@@ -33,7 +33,7 @@
+ 
+ 
+ def test_missing_x_now_uses_real_clock(app):
+-    r = app.get("/api/loans/46", user="ada", now=None)
++    r = app.get("/api/loans/47", user="ada", now=None)
+     assert r.status == 200 and r.json["overdue"] is True
+ 
+ 
+--- a/tests/test_library_books.py
++++ b/tests/test_library_books.py
+@@ -7,9 +7,10 @@
+     books = app.get("/api/books", user="lena").json["items"]
+     assert len(books) == 40
+     by_id = {b["id"]: b for b in books}
+-    assert by_id[4]["status"] == "on_loan"  # open loan 46
++    assert by_id[8]["status"] == "on_loan"  # open loan 47
++    assert by_id[4]["status"] == "unavailable"  # its only copy is lost
+     assert by_id[2]["status"] == "available"
+-    assert app.get("/api/books/4", user="chen").json["status"] == "on_loan"
++    assert app.get("/api/books/8", user="chen").json["status"] == "on_loan"
+ 
+ 
+ def test_librarian_creates_book(app):
+--- a/tests/test_library_copies.py
++++ b/tests/test_library_copies.py
+@@ -13,14 +13,14 @@
+     copies = app.get("/api/copies", user="chen").json["items"]
+     assert [c["id"] for c in copies] == list(range(1, 43))
+     assert all(c["book"] == c["id"] and c["barcode"] == f"C{c['id']:04d}" for c in copies[:40])
+-    assert copies[40] == {"id": 41, "book": 1, "barcode": "C0001-2", "status": "available"}
+-    assert copies[41] == {"id": 42, "book": 22, "barcode": "C0022-2", "status": "available"}
++    assert copies[40] == {"id": 41, "book": 1, "barcode": "C0001-2", "lost": False, "status": "available"}
++    assert copies[41] == {"id": 42, "book": 22, "barcode": "C0022-2", "lost": False, "status": "available"}
+ 
+ 
+ def test_existing_loans_lent_the_original_copy(app):
+     loans = app.get("/api/loans", user="ada").json["items"]
+     assert len(loans) == 60 and all(l["copy"] == l["book"] for l in loans)
+-    open_copies = {l["copy"] for l in loans if l["returned_at"] is None}
++    open_copies = {l["copy"] for l in loans if l["returned_at"] is None and l["lost_at"] is None}
+     on_loan = app.get("/api/copies?status=on_loan", user="ada").json["items"]
+     assert {c["id"] for c in on_loan} == open_copies
+ 
+@@ -29,10 +29,11 @@
+     books = {b["id"]: b for b in app.get("/api/books", user="lena").json["items"]}
+     assert books[1]["status"] == "available" and books[1]["available_copies"] == 1  # second copy
+     assert books[22]["status"] == "available" and books[22]["available_copies"] == 1
+-    assert books[4]["status"] == "on_loan" and books[4]["available_copies"] == 0
++    assert books[8]["status"] == "on_loan" and books[8]["available_copies"] == 0
++    assert books[4]["status"] == "unavailable" and books[4]["available_copies"] == 0  # copy 4 lost
+     assert books[2]["status"] == "available" and books[2]["available_copies"] == 1
+     assert [b["id"] for b in app.get("/api/books?available_copies=0", user="chen").json["items"]] == \
+-           [b["id"] for b in books.values() if b["status"] == "on_loan"]
++           [b["id"] for b in books.values() if b["status"] != "available"]
+ 
+ 
+ def test_migration_upgrades_a_database_without_copies(app, seed):
+@@ -53,7 +54,7 @@
+ 
+     upgraded = fresh_app(app.workdir)
+     copies = upgraded.get("/api/copies", user="ada").json["items"]
+-    assert [{k: v for k, v in c.items() if k != "status"} for c in copies] == seed["copies"]
++    assert [{k: v for k, v in c.items() if k != "status"} for c in copies] == seed["copies"]  # incl. lost
+     loans = upgraded.get("/api/loans", user="ada").json["items"]
+     assert [{k: v for k, v in l.items() if k != "overdue"} for l in loans] == seed["loans"]
+     assert upgraded.post("/api/copies", {"book": 3, "barcode": "NEW"}, user="ada").json["id"] == 43
+@@ -65,7 +66,8 @@
+ 
+ def test_any_user_reads_copies(app):
+     assert len(app.get("/api/copies", user="lena").json["items"]) == 42
+-    assert app.get("/api/copies/1", user="chen").json == {"id": 1, "book": 1, "barcode": "C0001", "status": "on_loan"}
++    assert app.get("/api/copies/1", user="chen").json == \
++           {"id": 1, "book": 1, "barcode": "C0001", "lost": False, "status": "on_loan"}
+     assert [c["id"] for c in app.get("/api/copies?book=1", user="chen").json["items"]] == [1, 41]
+     assert app.get("/api/copies/999", user="chen").status == 404
+ 
+@@ -74,7 +76,8 @@
+     book = app.post("/api/books", NEW_BOOK, user="ada").json
+     assert book["status"] == "unavailable" and book["available_copies"] == 0
+     r = app.post("/api/copies", {"book": book["id"], "barcode": "D-1"}, user="ada")
+-    assert r.status == 201 and r.json == {"id": 43, "book": book["id"], "barcode": "D-1", "status": "available"}
++    assert r.status == 201 and r.json == {"id": 43, "book": book["id"], "barcode": "D-1", "lost": False,
++                                          "status": "available"}
+     book = app.get(f"/api/books/{book['id']}", user="chen").json
+     assert book["status"] == "available" and book["available_copies"] == 1
+ 
+@@ -104,7 +107,8 @@
+ 
+ def test_copy_patch(app):
+     r = app.patch("/api/copies/3", {"barcode": "C0003-A"}, user="ada")
+-    assert r.status == 200 and r.json == {"id": 3, "book": 3, "barcode": "C0003-A", "status": "available"}
++    assert r.status == 200
++    assert r.json == {"id": 3, "book": 3, "barcode": "C0003-A", "lost": False, "status": "available"}
+     assert app.patch("/api/copies/3", {"barcode": "C0003-A"}, user="ada").status == 200  # unchanged is fine
+     assert app.patch("/api/copies/3", {"barcode": "C0004"}, user="ada").status == 400  # duplicate
+     assert app.patch("/api/copies/3", {"barcode": ""}, user="ada").status == 400
+@@ -167,7 +171,8 @@
+ 
+ def test_copy_pages(app):
+     page = parse_ui(app.get("/ui/copies/41", user="lena").text)
+-    assert page.fields == {"book": "1", "barcode": "C0001-2", "status": "available"} and page.actions == []
++    assert page.fields == {"book": "1", "barcode": "C0001-2", "lost": "false", "status": "available"}
++    assert page.actions == []
+     assert parse_ui(app.get("/ui/copies", user="lena").text).rows == list(range(1, 43))
+     assert app.get("/ui/copies/999", user="lena").status == 404
+     assert parse_ui(app.get("/ui/loans/55", user="ada").text).fields["copy"] == "1"
+--- a/tests/test_library_loans.py
++++ b/tests/test_library_loans.py
+@@ -8,7 +8,7 @@
+     assert r.status == 200 and r.json["id"] == 3 and r.json["status"] == "on_loan"
+     loan = app.get("/api/loans?book=3&returned_at=null", user="chen").json["items"][0]
+     assert loan == {"id": 61, "book": 3, "copy": 3, "member": 3, "borrowed_at": NOW, "due_at": "2026-03-15",
+-                    "returned_at": None, "overdue": False}
++                    "returned_at": None, "lost_at": None, "overdue": False}
+     outbox = app.get("/api/_outbox", user="dara").json["items"]
+     assert outbox == [{"id": 1, "channel": "loan_created",
+                        "payload": {"loan": 61, "book": 3, "member": 3, "copy": 3}, "created_at": NOW}]
+@@ -23,7 +23,7 @@
+ 
+ 
+ def test_member_with_three_open_loans_cannot_borrow(app):
+-    assert app.post("/api/books/3/borrow", {}, user="jo").status == 409
++    assert app.post("/api/books/3/borrow", {}, user="hana").status == 409
+     assert app.post("/api/books/3/borrow", {}, user="ivan").status == 200  # ivan has 2
+     assert app.post("/api/books/2/borrow", {}, user="ivan").status == 409
+ 
+@@ -71,7 +71,7 @@
+     assert app.get("/api/loans/52", user="chen", now="2026-03-05T00:00:00").json["overdue"] is True
+     assert app.get("/api/loans/1", user="ada", now="2027-01-01T00:00:00").json["overdue"] is False  # returned
+     overdue = app.get("/api/loans?overdue=true", user="ada", now="2026-03-01T12:00:00").json["items"]
+-    assert [l["id"] for l in overdue] == [46, 47, 48, 49, 50]
++    assert [l["id"] for l in overdue] == [47, 48, 49]  # 46 and 50 are lost, hence closed
+ 
+ 
+ def test_member_reads_only_own_loans(app):
+--- a/tests/test_library_lost.py
++++ b/tests/test_library_lost.py
+@@ -0,0 +1,200 @@
++"""Lost copies: declare_lost on loans, found on copies, and how lost copies affect status and borrowing."""
++import os
++import sqlite3
++
++from accept_client import fresh_app, parse_ui
++
++NOW = "2026-03-01T10:00:00"
++
++
++# --- migrated data --------------------------------------------------------------------
++
++def test_reported_losses_are_migrated(app):
++    loans = app.get("/api/loans", user="ada").json["items"]
++    assert {l["id"]: l["lost_at"] for l in loans if l["lost_at"] is not None} == \
++           {46: "2026-02-28T10:00:00", 50: "2026-02-28T10:00:00"}
++    assert all(l["returned_at"] is None and l["overdue"] is False for l in loans if l["lost_at"])
++    copies = app.get("/api/copies", user="ada").json["items"]
++    assert [c["id"] for c in copies if c["lost"]] == [4, 16]
++    assert app.get("/api/copies/4", user="ada").json["status"] == "lost"
++    assert [c["id"] for c in app.get("/api/copies?status=lost", user="ada").json["items"]] == [4, 16]
++    for book_id in (4, 16):
++        book = app.get(f"/api/books/{book_id}", user="chen").json
++        assert book["status"] == "unavailable" and book["available_copies"] == 0
++    jo_open = [l["id"] for l in app.get("/api/loans", user="jo").json["items"]
++               if l["returned_at"] is None and l["lost_at"] is None]
++    assert jo_open == [57]
++    assert app.get("/api/_outbox", user="ada").json["items"] == []
++
++
++def test_migration_upgrades_a_database_without_lost_fields(app, seed):
++    """Rebuild the E08 database (0001 + 0002 + records without lost fields) and let startup migrate it."""
++    path = os.path.join(app.workdir, "data.db")
++    os.remove(path)
++    migrations = os.path.join(app.workdir, "library_app", "migrations")
++    conn = sqlite3.connect(path)
++    conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)")
++    for version, name in ((1, "initial"), (2, "copies")):
++        with open(os.path.join(migrations, f"{version:04d}_{name}.sql")) as fh:
++            conn.executescript(fh.read())
++        conn.execute("INSERT INTO schema_version VALUES (?, ?, '2026-01-01T00:00:00')", (version, name))
++    conn.executemany("INSERT INTO members VALUES (:id, :username, :name, :role, :active)", seed["members"])
++    conn.executemany("INSERT INTO books VALUES (:id, :title, :author, :isbn, :year)", seed["books"])
++    conn.executemany("INSERT INTO copies VALUES (:id, :book, :barcode)", seed["copies"])
++    conn.executemany("INSERT INTO loans VALUES (:id, :copy, :member, :borrowed_at, :due_at, :returned_at)",
++                     seed["loans"])
++    conn.commit()
++    conn.close()
++
++    upgraded = fresh_app(app.workdir)
++    copies = upgraded.get("/api/copies", user="ada").json["items"]
++    assert [{k: v for k, v in c.items() if k != "status"} for c in copies] == seed["copies"]
++    loans = upgraded.get("/api/loans", user="ada").json["items"]
++    assert [{k: v for k, v in l.items() if k != "overdue"} for l in loans] == seed["loans"]
++    assert upgraded.get("/api/_outbox", user="ada").json["items"] == []
++    # The lost loan of copy 4 no longer blocks lending that copy once it is found.
++    assert upgraded.post("/api/copies/4/found", {}, user="ada").status == 200
++    assert upgraded.post("/api/books/4/borrow", {}, user="chen").status == 200
++    assert upgraded.get("/api/loans/61", user="chen").json["copy"] == 4
++
++
++# --- declare_lost ---------------------------------------------------------------------
++
++def test_librarian_declares_loan_lost(app):
++    r = app.post("/api/loans/52/declare_lost", {}, user="ada", now=NOW)
++    assert r.status == 200
++    assert r.json == {"id": 52, "book": 22, "copy": 22, "member": 3, "borrowed_at": "2026-02-18T16:00:00",
++                      "due_at": "2026-03-04", "returned_at": None, "lost_at": NOW, "overdue": False}
++    assert app.get("/api/copies/22", user="chen").json == \
++           {"id": 22, "book": 22, "barcode": "C0022", "lost": True, "status": "lost"}
++    assert app.get("/api/_outbox", user="chen").json["items"] == [
++        {"id": 1, "channel": "copy_lost", "payload": {"loan": 52, "copy": 22, "book": 22, "member": 3},
++         "created_at": NOW}]
++    book = app.get("/api/books/22", user="chen").json
++    assert book["status"] == "available" and book["available_copies"] == 1  # second copy 42
++
++
++def test_lost_loan_is_closed(app):
++    assert app.post("/api/loans/47/declare_lost", {}, user="ben").status == 200
++    assert app.get("/api/loans/47", user="gus", now="2027-01-01T00:00:00").json["overdue"] is False
++    assert app.post("/api/loans/47/return", {}, user="gus").status == 409
++    assert app.post("/api/loans/47/return", {}, user="ben").status == 409
++    assert app.post("/api/loans/47/declare_lost", {}, user="ben").status == 409
++    assert app.get("/api/loans/47", user="gus").json["returned_at"] is None
++    assert len(app.get("/api/_outbox", user="ada").json["items"]) == 1
++
++
++def test_lost_loans_do_not_count_towards_the_limit(app):
++    assert app.post("/api/books/3/borrow", {}, user="hana").status == 409  # 3 open loans
++    assert app.post("/api/loans/51/declare_lost", {}, user="ada").status == 200
++    assert app.post("/api/books/3/borrow", {}, user="hana").status == 200
++    # jo's two lost loans don't count: one open loan, so two more borrows succeed.
++    assert app.post("/api/books/2/borrow", {}, user="jo").status == 200
++    assert app.post("/api/books/6/borrow", {}, user="jo").status == 200
++    assert app.post("/api/books/12/borrow", {}, user="jo").status == 409
++
++
++def test_declare_lost_refusals_change_nothing(app):
++    assert app.post("/api/loans/52/declare_lost", {}, user="chen").status == 403  # the borrower
++    assert app.post("/api/loans/1/declare_lost", {}, user="dara").status == 403  # 403 beats 409
++    assert app.post("/api/loans/999/declare_lost", {}, user="ada").status == 404
++    assert app.post("/api/loans/1/declare_lost", {}, user="ada").status == 409  # returned
++    assert app.post("/api/loans/46/declare_lost", {}, user="ada").status == 409  # already lost
++    assert app.post("/api/loans/1/declare_lost", {"x": 1}, user="ada").status == 409  # 409 beats 400
++    assert app.post("/api/loans/52/declare_lost", {"lost_at": NOW}, user="ada").status == 400
++    assert app.get("/api/loans/52", user="ada").json["lost_at"] is None
++    assert app.get("/api/copies/22", user="ada").json["lost"] is False
++    assert app.get("/api/_outbox", user="ada").json["items"] == []
++
++
++def test_lost_fields_are_read_only(app):
++    assert app.post("/api/copies", {"book": 3, "barcode": "X", "lost": False}, user="ada").status == 400
++    assert app.patch("/api/copies/3", {"lost": True}, user="ada").status == 400
++    assert app.patch("/api/copies/4", {"lost": False}, user="ada").status == 400
++    assert app.patch("/api/copies/3", {"lost": True}, user="chen").status == 403
++    assert app.patch("/api/loans/52", {"lost_at": NOW}, user="ada").status == 403
++    assert app.get("/api/copies/3", user="ada").json["lost"] is False
++
++
++# --- found ----------------------------------------------------------------------------
++
++def test_found_copy_is_back_in_circulation(app):
++    r = app.post("/api/copies/4/found", {}, user="ada", now=NOW)
++    assert r.status == 200 and r.json == {"id": 4, "book": 4, "barcode": "C0004", "lost": False, "status": "available"}
++    loan = app.get("/api/loans/46", user="ada").json
++    assert loan["lost_at"] == "2026-02-28T10:00:00" and loan["returned_at"] is None and loan["overdue"] is False
++    assert app.post("/api/loans/46/return", {}, user="ada").status == 409  # stays closed
++    book = app.get("/api/books/4", user="chen").json
++    assert book["status"] == "available" and book["available_copies"] == 1
++    assert app.post("/api/books/4/borrow", {}, user="chen").status == 200
++    assert app.get("/api/loans/61", user="chen").json["copy"] == 4
++    assert app.get("/api/copies/4", user="chen").json["status"] == "on_loan"
++    assert app.get("/api/_outbox", user="chen").json["items"][0]["channel"] == "loan_created"
++
++
++def test_found_refusals(app):
++    assert app.post("/api/copies/4/found", {}, user="jo").status == 403
++    assert app.post("/api/copies/3/found", {}, user="chen").status == 403  # 403 beats 409
++    assert app.post("/api/copies/999/found", {}, user="ada").status == 404
++    assert app.post("/api/copies/3/found", {}, user="ada").status == 409  # not lost
++    assert app.post("/api/copies/1/found", {}, user="ada").status == 409  # on loan, not lost
++    assert app.post("/api/copies/4/found", {"lost": False}, user="ada").status == 400
++    assert app.get("/api/copies/4", user="ada").json["lost"] is True
++
++
++# --- books and copies -----------------------------------------------------------------
++
++def test_book_status_ignores_lost_copies(app):
++    assert app.post("/api/loans/55/declare_lost", {}, user="ada").status == 200  # copy 1; copy 41 free
++    book = app.get("/api/books/1", user="chen").json
++    assert book["status"] == "available" and book["available_copies"] == 1
++    assert app.post("/api/books/1/borrow", {}, user="chen").status == 200
++    assert app.get("/api/loans/61", user="chen").json["copy"] == 41  # lost copy 1 is never lent
++    assert app.get("/api/books/1", user="chen").json["status"] == "on_loan"
++    assert app.post("/api/loans/61/declare_lost", {}, user="ada").status == 200
++    assert app.get("/api/books/1", user="chen").json["status"] == "unavailable"
++    assert app.post("/api/books/1/borrow", {}, user="dara").status == 409
++
++
++def test_book_with_a_lost_and_a_lent_copy_is_on_loan(app):
++    copy = app.post("/api/copies", {"book": 4, "barcode": "C0004-2"}, user="ada").json
++    assert app.get("/api/books/4", user="chen").json["status"] == "available"
++    assert app.post("/api/books/4/borrow", {}, user="chen").status == 200
++    assert app.get("/api/loans/61", user="chen").json["copy"] == copy["id"]
++    book = app.get("/api/books/4", user="chen").json
++    assert book["status"] == "on_loan" and book["available_copies"] == 0
++
++
++def test_lost_copies_with_loans_cannot_be_deleted(app):
++    assert app.delete("/api/copies/4", user="ada").status == 409
++    assert app.delete("/api/books/4", user="ada").status == 409
++
++
++# --- UI -------------------------------------------------------------------------------
++
++def test_loan_pages_offer_declare_lost(app):
++    page = parse_ui(app.get("/ui/loans/52", user="ada").text)
++    assert page.actions == ["return", "declare_lost"] and page.fields["lost_at"] == ""
++    assert parse_ui(app.get("/ui/loans/52", user="chen").text).actions == ["return"]
++    lost = parse_ui(app.get("/ui/loans/46", user="ada").text)
++    assert lost.actions == [] and lost.fields["lost_at"] == "2026-02-28T10:00:00"
++    assert parse_ui(app.get("/ui/loans/46", user="jo").text).actions == []
++    assert parse_ui(app.get("/ui/loans/1", user="ada").text).actions == []  # returned
++
++
++def test_copy_pages_offer_found(app):
++    page = parse_ui(app.get("/ui/copies/4", user="ada").text)
++    assert page.fields["lost"] == "true" and page.fields["status"] == "lost" and page.actions == ["found"]
++    assert parse_ui(app.get("/ui/copies/4", user="chen").text).actions == []
++    assert parse_ui(app.get("/ui/copies/3", user="ada").text).actions == []
++
++
++def test_ui_forms_declare_lost_and_found(app):
++    r = app.request("POST", "/ui/loans/52/declare_lost", None, user="ada")
++    assert r.status == 303 and r.headers["Location"].endswith("/ui/loans/52")
++    assert app.get("/api/copies/22", user="ada").json["lost"] is True
++    r = app.request("POST", "/ui/copies/22/found", None, user="ada")
++    assert r.status == 303 and r.headers["Location"].endswith("/ui/copies/22")
++    assert app.get("/api/copies/22", user="ada").json["lost"] is False
++    assert app.request("POST", "/ui/copies/22/found", None, user="ada").status == 409
++    assert app.request("POST", "/ui/loans/53/declare_lost", None, user="hana").status == 403
+--- a/tests/test_library_ui.py
++++ b/tests/test_library_ui.py
+@@ -23,8 +23,8 @@
+     assert page.fields == {"title": "The Lantern Song 2", "author": "T. Okoye", "isbn": "978-0-1014-002-2",
+                            "year": "2005", "status": "available", "available_copies": "1"}
+     assert page.actions == ["borrow"]
+-    assert parse_ui(app.get("/ui/books/4", user="chen").text).actions == []  # on loan
+-    assert parse_ui(app.get("/ui/books/2", user="jo").text).actions == []  # 3 open loans
++    assert parse_ui(app.get("/ui/books/4", user="chen").text).actions == []  # no available copy
++    assert parse_ui(app.get("/ui/books/2", user="hana").text).actions == []  # 3 open loans
+     assert parse_ui(app.get("/ui/books/2", user="lena").text).actions == []  # inactive
+     assert parse_ui(app.get("/ui/books/4", user="chen").text).fields["year"] == ""
+ 

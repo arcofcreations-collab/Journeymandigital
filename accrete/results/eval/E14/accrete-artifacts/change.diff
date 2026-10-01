@@ -1,0 +1,111 @@
+--- a/changes/0003-lost-copies.yaml
++++ b/changes/0003-lost-copies.yaml
+@@ -0,0 +1,108 @@
++request: "Lost copies (library, applied after E08): loans gain read-only lost_at; copies gain read-only lost; copy status 'lost'; POST /api/loans/{id}/declare_lost (librarians, open loans only, sets lost_at, marks copy lost, emits copy_lost); lost loans are closed (not counted towards 3 open loans, never overdue, return 409); book status/available_copies ignore lost copies; POST /api/copies/{id}/found (librarians, lost copies only); data: loans 46 and 50 lost at 2026-02-28T10:00:00, copies 4 and 16 lost."
++interpretation: >-
++  loans.lost_at: system datetime (default null), backfilled 2026-02-28T10:00:00 for loans 46 and 50.
++  copies.lost: system bool default False (sending it -> 400), backfilled True for copies 4 and 16.
++  An open loan is returned_at None and lost_at None; copies.status is 'lost' if lost, else 'on_loan' if it has an
++  open loan, else 'available'. books.status is 'unavailable' when the book has no non-lost copy.
++  The borrow open-loan limit, overdue and the return guard only consider open loans. declare_lost (loans, librarian
++  allow, open-loan guard) sets lost_at=now, sets copy.lost=True, emits copy_lost {loan, copy, book, member}.
++  found (copies, librarian allow, guard record.lost) sets lost=False. No outbox messages for the migration.
++ops:
++  - add_field: {entity: loans, name: lost_at, type: datetime, system: true,
++                backfill: "datetime('2026-02-28T10:00:00') if record.id in [46, 50] else None"}
++  - add_field: {entity: copies, name: lost, type: bool, default: "False", system: true,
++                backfill: "record.id in [4, 16]"}
++  - change_field: {entity: copies, name: status,
++                computed: "'lost' if record.lost else ('on_loan' if any(l.copy == record and l.returned_at is None and l.lost_at is None for l in loans) else 'available')"}
++  - change_field: {entity: books, name: status,
++                computed: "'unavailable' if count(copies, book=record, lost=False) == 0 else ('available' if record.available_copies > 0 else 'on_loan')"}
++  - change_field: {entity: loans, name: overdue,
++                computed: "record.returned_at is None and record.lost_at is None and today > record.due_at"}
++  - change_action:
++      entity: books
++      name: borrow
++      guard: "record.status == 'available' and (params.member or user).active and count(loans, member=(params.member or user), returned_at=None, lost_at=None) < 3"
++  - change_action:
++      entity: loans
++      name: return
++      guard: "record.returned_at is None and record.lost_at is None"
++  - add_action:
++      entity: loans
++      name: declare_lost
++      allow: "user.role == 'librarian'"
++      guard: "record.returned_at is None and record.lost_at is None"
++      guard_message: "'loan is not open'"
++      effects:
++        - set: {lost_at: now}
++        - update: record.copy
++          set: {lost: "True"}
++        - emit: copy_lost
++          payload: {loan: record, copy: record.copy, book: record.book, member: record.member}
++  - add_action:
++      entity: copies
++      name: found
++      allow: "user.role == 'librarian'"
++      guard: "record.lost"
++      guard_message: "'copy is not lost'"
++      effects:
++        - set: {lost: "False"}
++expect:
++  - {as: ada, do: "GET /api/loans/46", json: {lost_at: "2026-02-28T10:00:00", returned_at: null, overdue: false}}
++  - {as: ada, do: "GET /api/loans/50", json: {lost_at: "2026-02-28T10:00:00", returned_at: null, overdue: false}}
++  - {as: ada, do: "GET /api/loans/57", json: {lost_at: null}}
++  - {as: ada, do: "GET /api/loans?lost_at=2026-02-28T10:00:00", count: 2}
++  - {as: chen, do: "GET /api/copies/4", json: {lost: true, status: lost}}
++  - {as: chen, do: "GET /api/copies/16", json: {lost: true, status: lost}}
++  - {as: chen, do: "GET /api/copies?lost=true", count: 2}
++  - {as: chen, do: "GET /api/copies/2", json: {lost: false, status: available}}
++  - {as: chen, do: "GET /api/books/4", json: {status: unavailable, available_copies: 0}}
++  - {as: chen, do: "GET /api/books/16", json: {status: unavailable, available_copies: 0}}
++  - {as: ada, do: "POST /api/copies", body: {book: 2, barcode: X1, lost: true}, status: 400}
++  - {as: ada, do: "POST /api/copies", body: {book: 2, barcode: X1, lost: false}, status: 400}
++  - {as: ada, do: "PATCH /api/copies/2", body: {lost: true}, status: 400}
++  - {as: chen, do: "PATCH /api/copies/2", body: {lost: true}, status: 403}
++  - {as: ada, do: "PATCH /api/loans/57", body: {lost_at: "2026-03-01T00:00:00"}, status: 403}
++  - {as: ada, do: "POST /api/copies", body: {book: 2, barcode: X1}, status: 201, json: {lost: false, status: available}}
++  - {as: ada, do: "POST /api/loans/46/return", body: {}, status: 409}
++  - {as: ada, do: "POST /api/loans/46/declare_lost", body: {}, status: 409}
++  - {as: ada, do: "POST /api/loans/2/declare_lost", body: {}, status: 409}
++  - {as: jo, do: "POST /api/loans/57/declare_lost", body: {}, status: 403}
++  - {as: jo, do: "POST /api/loans/46/declare_lost", body: {}, status: 403}
++  - {as: chen, do: "POST /api/copies/4/found", body: {}, status: 403}
++  - {as: ada, do: "POST /api/copies/2/found", body: {}, status: 409}
++  - {as: ada, do: "DELETE /api/copies/4", status: 409}
++  - name: "jo has a single open loan and can borrow two more"
++    steps:
++      - {as: jo, do: "POST /api/books/2/borrow", body: {}, status: 200}
++      - {as: jo, do: "POST /api/books/3/borrow", body: {}, status: 200}
++      - {as: jo, do: "POST /api/books/5/borrow", body: {}, status: 409}
++  - name: "declare lost closes the loan, marks the copy and emits"
++    steps:
++      - {as: ada, do: "POST /api/loans/57/declare_lost", body: {}, now: "2026-03-10T09:00:00", status: 200,
++         json: {id: 57, lost_at: "2026-03-10T09:00:00", returned_at: null, overdue: false, copy: 28}}
++      - {as: ada, do: "GET /api/copies/28", json: {lost: true, status: lost}}
++      - {as: ada, do: "GET /api/books/28", json: {status: unavailable, available_copies: 0}}
++      - {as: ada, do: "GET /api/_outbox?channel=copy_lost", count: 1, json: {items: [{channel: copy_lost, payload: {loan: 57, copy: 28, book: 28, member: 10}}]}}
++      - {as: ada, do: "GET /api/_outbox", count: 1}
++      - {as: ada, do: "POST /api/loans/57/declare_lost", body: {}, status: 409}
++      - {as: ada, do: "POST /api/loans/57/return", body: {}, status: 409}
++      - {as: ada, do: "GET /api/_outbox", count: 1}
++      - {as: ada, do: "POST /api/books/28/borrow", body: {member: 4}, status: 409}
++      - {as: ada, do: "POST /api/copies/28/found", body: {}, status: 200, json: {id: 28, lost: false, status: available}}
++      - {as: ada, do: "GET /api/loans/57", json: {lost_at: "2026-03-10T09:00:00", returned_at: null, overdue: false}}
++      - {as: ada, do: "GET /api/books/28", json: {status: available, available_copies: 1}}
++      - {as: ada, do: "POST /api/copies/28/found", body: {}, status: 409}
++      - {as: ada, do: "POST /api/books/28/borrow", body: {member: 4}, status: 200}
++      - {as: ada, do: "GET /api/loans?copy=28&member=4", count: 1}
++  - name: "lost copy is skipped, second copy lent"
++    steps:
++      - {as: ada, do: "POST /api/copies", body: {book: 4, barcode: C0004-2}, status: 201, json: {id: 43}}
++      - {as: ada, do: "GET /api/books/4", json: {status: available, available_copies: 1}}
++      - {as: ada, do: "POST /api/books/4/borrow", body: {member: 4}, status: 200, json: {status: on_loan, available_copies: 0}}
++      - {as: ada, do: "GET /api/loans/61", json: {copy: 43}}
++      - {as: ada, do: "POST /api/copies/4/found", body: {}, status: 200, json: {status: available}}
++      - {as: ada, do: "GET /api/books/4", json: {status: available, available_copies: 1}}
++  - name: "found copy with old lost loan still cannot be deleted"
++    steps:
++      - {as: ada, do: "POST /api/copies/16/found", body: {}, status: 200}
++      - {as: ada, do: "DELETE /api/copies/16", status: 409}

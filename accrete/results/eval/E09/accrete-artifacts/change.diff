@@ -1,0 +1,79 @@
+--- a/changes/0002-guardians.yaml
++++ b/changes/0002-guardians.yaml
+@@ -0,0 +1,76 @@
++request: >-
++  Household guardians (library). members gain `guardian` (ref to another member or null, default null,
++  filterable, librarian-only to set). Validation 400: existing member other than itself, the guardian
++  has no guardian, and a member who is already a guardian cannot get a guardian. A guardian may read
++  dependants' member records and loans, borrow for a dependant (all borrow rules apply), and return
++  dependants' loans; no PATCH/DELETE of dependants. Rights ignore `active` and follow current values.
++  Deleting a guardian of anyone -> 409. Data: eli(5)->dara(4), jo(10)->dara(4), gus(7)->fatima(6),
++  lena(12)->kemal(11); everyone else null.
++interpretation: >-
++  Add members.guardian (ref members, write_if librarian; default null; deletion of a referenced
++  member is 409 via the default reference protection). Three constraints give the 400 validations.
++  members.read, loans.read, books.borrow allow and loans.return allow additionally accept the
++  caller when they are the current guardian of the member concerned. Update/delete rules of
++  members are unchanged (librarian or self; librarian only). Backfill the four guardian links.
++ops:
++  - add_field: {entity: members, name: guardian, type: ref, ref: members, write_if: "user.role == 'librarian'"}
++  - add_constraint: {entity: members, name: guardian_not_self, field: guardian, existing: enforce,
++                     expr: "record.guardian is None or record.guardian != record",
++                     message: "a member cannot be their own guardian"}
++  - add_constraint: {entity: members, name: guardian_has_no_guardian, field: guardian, existing: enforce,
++                     expr: "record.guardian is None or record.guardian.guardian is None",
++                     message: "the guardian must not have a guardian of their own"}
++  - add_constraint: {entity: members, name: guardian_not_a_guardian, field: guardian, existing: enforce,
++                     expr: "record.guardian is None or count(members, guardian=record) == 0",
++                     message: "a member who is someone's guardian cannot be given a guardian"}
++  - set_rule: {entity: members, rule: read, expr: "user.role == 'librarian' or record == user or record.guardian == user"}
++  - set_rule: {entity: loans, rule: read, expr: "user.role == 'librarian' or record.member == user or record.member.guardian == user"}
++  - change_action: {entity: books, name: borrow,
++                    allow: "user.role == 'librarian' or params.member is None or params.member == user or params.member.guardian == user"}
++  - change_action: {entity: loans, name: return,
++                    allow: "user.role == 'librarian' or record.member == user or record.member.guardian == user"}
++  - update_records: {entity: members, where: "record.id in [5, 10]", set: {guardian: "first(members, id=4)"}}
++  - update_records: {entity: members, where: "record.id == 7", set: {guardian: "first(members, id=6)"}}
++  - update_records: {entity: members, where: "record.id == 12", set: {guardian: "first(members, id=11)"}}
++expect:
++  - {as: ada, do: "GET /api/members/5", status: 200, json: {guardian: 4}}
++  - {as: ada, do: "GET /api/members/1", status: 200, json: {guardian: null}}
++  - {as: ada, do: "GET /api/members?guardian=4", count: 2}
++  - {as: ada, do: "GET /api/members?guardian=null", count: 8}
++  - {as: dara, do: "GET /api/members", count: 3}
++  - {as: eli, do: "GET /api/members", count: 1}
++  - {as: eli, do: "GET /api/members/4", status: 403}
++  - {as: dara, do: "GET /api/members/10", status: 200}
++  - {as: dara, do: "GET /api/members/7", status: 403}
++  - {as: chen, do: "GET /api/members", count: 1}
++  - {as: kemal, do: "GET /api/members/12", status: 200}
++  - {as: dara, do: "PATCH /api/members/5", body: {name: "X"}, status: 403}
++  - {as: dara, do: "DELETE /api/members/5", status: 403}
++  - {as: dara, do: "PATCH /api/members/4", body: {guardian: null}, status: 403}
++  - {as: dara, do: "PATCH /api/members/4", body: {name: "Dara N"}, status: 200}
++  - {as: ada, do: "DELETE /api/members/4", status: 409}
++  - {as: ada, do: "PATCH /api/members/3", body: {guardian: 3}, status: 400}
++  - {as: ada, do: "PATCH /api/members/3", body: {guardian: 99}, status: 400}
++  - {as: ada, do: "PATCH /api/members/3", body: {guardian: 5}, status: 400}
++  - {as: ada, do: "PATCH /api/members/4", body: {guardian: 3}, status: 400}
++  - {as: ada, do: "PATCH /api/members/3", body: {guardian: 4}, status: 200, json: {guardian: 4}}
++  - {as: ada, do: "POST /api/members", body: {username: "zed", name: "Zed", role: "member", guardian: 4}, status: 201, json: {guardian: 4}}
++  - {as: ada, do: "POST /api/members", body: {username: "zed", name: "Zed", role: "member", guardian: 5}, status: 400}
++  - {as: dara, do: "POST /api/books/2/borrow", body: {member: 5}, status: 200}
++  - {as: dara, do: "POST /api/books/2/borrow", body: {member: 10}, status: 409}
++  - {as: dara, do: "POST /api/books/2/borrow", body: {member: 7}, status: 403}
++  - {as: eli, do: "POST /api/books/2/borrow", body: {member: 4}, status: 403}
++  - {as: kemal, do: "POST /api/books/2/borrow", body: {member: 12}, status: 409}
++  - {as: dara, do: "POST /api/loans/60/return", status: 200}
++  - {as: dara, do: "POST /api/loans/47/return", status: 403}
++  - name: "guardian borrows for dependant"
++    steps:
++      - {as: dara, do: "POST /api/books/2/borrow", body: {member: 5}, status: 200, json: {status: on_loan}}
++      - {as: dara, do: "GET /api/loans?member=5&book=2&returned_at=null", count: 1}
++      - {as: ada, do: "GET /api/_outbox?channel=loan_created", status: 200}
++  - name: "removing guardian removes access"
++    steps:
++      - {as: ada, do: "PATCH /api/members/5", body: {guardian: null}, status: 200}
++      - {as: dara, do: "GET /api/members/5", status: 403}
++      - {as: dara, do: "POST /api/loans/60/return", status: 403}
++      - {as: dara, do: "GET /api/members", count: 2}

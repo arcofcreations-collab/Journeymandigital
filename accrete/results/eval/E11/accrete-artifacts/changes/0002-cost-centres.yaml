@@ -1,0 +1,140 @@
+request: "Cost centres with budgets (expenses). Every claim is charged to a cost centre, and managers may not approve beyond a cost centre's budget."
+interpretation: >
+  New entity cost_centres (code, name, department unique among non-null, budget >= 0, computed
+  committed/remaining); readable by all, writable by finance only. PATCHing budget below committed
+  is a 409 (update_guard); deleting a cost centre with claims is a 409 (delete_guard). Claims get a
+  required cost_centre reference defaulting to the cost centre of the creator's department, editable
+  by the employee while draft. approve's guard additionally requires committed + amount <= budget
+  (rounded to cents). The payment payload gains cost_centre. Seed 4 cost centres; existing claims
+  are backfilled from their employee's department.
+ops:
+  - add_entity:
+      name: cost_centres
+      display: code
+      fields:
+        code: text required unique
+        name: text required
+        department: text unique
+        budget: number required
+        committed: {type: number, computed: "round(sum(c.amount for c in claims if c.cost_centre == record and c.status in ('approved', 'paid')), 2)"}
+        remaining: {type: number, computed: "round(record.budget - round(sum(c.amount for c in claims if c.cost_centre == record and c.status in ('approved', 'paid')), 2), 2)"}
+      rules:
+        read: "True"
+        create: "user.role == 'finance'"
+        update: "user.role == 'finance'"
+        delete: "user.role == 'finance'"
+        delete_guard: "count(claims, cost_centre=record) == 0"
+      triggers:
+        budget_not_below_committed:
+          on: update
+          effects:
+            - {fail: "'budget cannot be lower than the committed amount'", status: 409, when: "record.budget >= 0 and round(record.budget, 2) < record.committed"}
+      constraints:
+        budget_non_negative: {expr: "record.budget >= 0", message: "must be at least 0", field: budget}
+  - add_records:
+      entity: cost_centres
+      records:
+        - {id: 1, code: ENG, name: Engineering, department: Engineering, budget: 31000.00}
+        - {id: 2, code: SAL, name: Sales, department: Sales, budget: 12000.00}
+        - {id: 3, code: FIN, name: Finance, department: Finance, budget: 2000.00}
+        - {id: 4, code: TRV, name: Travel pool, department: null, budget: 5000.00}
+  - add_field:
+      entity: claims
+      name: cost_centre
+      type: ref
+      ref: cost_centres
+      required: true
+      default: "first(cost_centres, department=user.department)"
+      backfill: "first(cost_centres, department=record.employee.department)"
+  - change_action:
+      entity: claims
+      name: approve
+      guard: "record.status == 'submitted' and round(record.cost_centre.committed + record.amount, 2) <= round(record.cost_centre.budget, 2)"
+  - change_action:
+      entity: claims
+      name: pay
+      effects:
+        - set: {status: "'paid'"}
+        - emit: payment
+          payload: {claim: record, employee: record.employee, amount: record.amount, cost_centre: record.cost_centre}
+expect:
+  - {as: rosa, do: "GET /api/cost_centres", status: 200, count: 4}
+  - {as: rosa, do: "GET /api/cost_centres/2", status: 200, json: {id: 2, code: SAL, name: Sales, department: Sales, budget: 12000.0, committed: 10750.94, remaining: 1249.06}}
+  - {as: rosa, do: "GET /api/cost_centres/1", status: 200, json: {committed: 28886.18, remaining: 2113.82}}
+  - {as: rosa, do: "GET /api/cost_centres/4", status: 200, json: {department: null, committed: 0, remaining: 5000.0}}
+  - {as: rosa, do: "POST /api/cost_centres", body: {code: X, name: Y, budget: 1}, status: 403}
+  - {as: rosa, do: "POST /api/cost_centres", body: {code: X}, status: 403}
+  - {as: rosa, do: "PATCH /api/cost_centres/2", body: {budget: -1}, status: 403}
+  - {as: rosa, do: "DELETE /api/cost_centres/3", status: 403}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: MKT, name: Marketing, budget: 100}, status: 201, json: {id: 5, department: null, committed: 0, remaining: 100}}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: MKT, name: Marketing, department: Marketing, budget: 100.5}, status: 201, json: {department: Marketing}}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: ENG, name: Marketing, budget: 100}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: M2, name: Marketing, department: Sales, budget: 100}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: M2, name: Marketing, budget: -1}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: M2, name: Marketing, budget: "abc"}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: M2, name: Marketing, budget: true}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: M2, name: Marketing}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: M2, budget: 1}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {name: M2, budget: 1}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: M2, name: M, budget: 1, committed: 5}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: M2, name: M, budget: 1, foo: 5}, status: 400}
+  - {as: fiona, do: "POST /api/cost_centres", body: {code: M2, name: M, budget: 0}, status: 201}
+  - {as: fiona, do: "PATCH /api/cost_centres/2", body: {budget: 10000}, status: 409}
+  - {as: fiona, do: "PATCH /api/cost_centres/2", body: {budget: 10750.94}, status: 200, json: {remaining: 0}}
+  - {as: fiona, do: "PATCH /api/cost_centres/2", body: {budget: 10750.93}, status: 409}
+  - {as: fiona, do: "PATCH /api/cost_centres/4", body: {budget: -1}, status: 400}
+  - {as: fiona, do: "PATCH /api/cost_centres/4", body: {budget: "abc"}, status: 400}
+  - {as: fiona, do: "PATCH /api/cost_centres/4", body: {budget: null}, status: 400}
+  - {as: fiona, do: "PATCH /api/cost_centres/4", body: {remaining: 3}, status: 400}
+  - {as: fiona, do: "PATCH /api/cost_centres/4", body: {department: Sales}, status: 400}
+  - {as: fiona, do: "PATCH /api/cost_centres/4", body: {code: SAL}, status: 400}
+  - {as: fiona, do: "PATCH /api/cost_centres/4", body: {code: TRV2, name: Travel, department: Ops, budget: 0}, status: 200, json: {code: TRV2, department: Ops, budget: 0}}
+  - {as: fiona, do: "PATCH /api/cost_centres/1", body: {department: null}, status: 200, json: {department: null}}
+  - {as: fiona, do: "DELETE /api/cost_centres/2", status: 409}
+  - {as: fiona, do: "DELETE /api/cost_centres/3", status: 204}
+  - {as: rosa, do: "POST /api/claims", body: {amount: 10, category: travel, description: x}, status: 201, json: {cost_centre: 2, employee: 7}}
+  - {as: fiona, do: "POST /api/claims", body: {amount: 10, category: travel, description: x}, status: 201, json: {cost_centre: 3}}
+  - {as: rosa, do: "POST /api/claims", body: {amount: 10, category: travel, description: x, cost_centre: 4}, status: 201, json: {cost_centre: 4}}
+  - {as: rosa, do: "POST /api/claims", body: {amount: 10, category: travel, description: x, cost_centre: null}, status: 400}
+  - {as: rosa, do: "POST /api/claims", body: {amount: 10, category: travel, description: x, cost_centre: 99}, status: 400}
+  - {as: rosa, do: "GET /api/claims/72", status: 200, json: {cost_centre: 2}}
+  - {as: wen, do: "GET /api/claims/1", status: 200, json: {cost_centre: 1}}
+  - {as: wen, do: "PATCH /api/claims/1", body: {cost_centre: 4}, status: 200, json: {cost_centre: 4}}
+  - {as: wen, do: "PATCH /api/claims/1", body: {cost_centre: 99}, status: 400}
+  - {as: wen, do: "PATCH /api/claims/1", body: {cost_centre: null}, status: 400}
+  - {as: fiona, do: "PATCH /api/claims/1", body: {cost_centre: 4}, status: 403}
+  - {as: victor, do: "PATCH /api/claims/2", body: {cost_centre: 4}, status: 409}
+  - {as: nadia, do: "POST /api/claims/72/approve", status: 409}
+  - {as: omar, do: "POST /api/claims/72/approve", status: 403}
+  - {as: nadia, do: "POST /api/claims/72/reject", body: {reason: nope}, status: 200}
+  - name: "budget fills up"
+    steps:
+      - {as: nadia, do: "POST /api/claims/58/approve", status: 200, json: {status: approved}}
+      - {as: rosa, do: "GET /api/cost_centres/2", json: {committed: 11869.37, remaining: 130.63}}
+      - {as: nadia, do: "POST /api/claims/62/approve", status: 409}
+      - {as: nadia, do: "GET /api/claims/62", json: {status: submitted}}
+      - {as: fiona, do: "PATCH /api/cost_centres/2", body: {budget: 12162.57}, status: 200}
+      - {as: nadia, do: "POST /api/claims/62/approve", status: 200}
+      - {as: fiona, do: "PATCH /api/cost_centres/2", body: {budget: 12162.56}, status: 409}
+      - {as: fiona, do: "POST /api/claims/62/pay", status: 200}
+      - {as: rosa, do: "GET /api/cost_centres/2", json: {committed: 12162.57, remaining: 0}}
+      - {as: rosa, do: "GET /api/_outbox?channel=payment", count: 1, json: {items: [{channel: payment, payload: {claim: 62, employee: 13, amount: 293.2, cost_centre: 2}}]}}
+  - name: "move draft claim to another centre then approve"
+    steps:
+      - {as: rosa, do: "POST /api/claims", body: {amount: 2000, category: travel, description: x}, status: 201, json: {id: 81, cost_centre: 2}}
+      - {as: rosa, do: "POST /api/claims/81/submit", status: 200}
+      - {as: nadia, do: "POST /api/claims/81/approve", status: 409}
+      - {as: rosa, do: "POST /api/claims", body: {amount: 2000, category: travel, description: x, cost_centre: 4}, status: 201, json: {id: 82}}
+      - {as: rosa, do: "POST /api/claims/82/submit", status: 200}
+      - {as: nadia, do: "POST /api/claims/82/approve", status: 200}
+      - {as: rosa, do: "GET /api/cost_centres/4", json: {committed: 2000, remaining: 3000}}
+      - {as: fiona, do: "DELETE /api/cost_centres/4", status: 409}
+      - {as: fiona, do: "POST /api/claims/4/pay", status: 200}
+      - {as: rosa, do: "GET /api/_outbox", json: {items: [{payload: {claim: 4, employee: 10, amount: 558.67, cost_centre: 2}}]}}
+  - name: "rejected budget patch changes nothing"
+    steps:
+      - {as: fiona, do: "PATCH /api/cost_centres/2", body: {budget: 10000, name: Changed}, status: 409}
+      - {as: fiona, do: "GET /api/cost_centres/2", json: {budget: 12000.0, name: Sales}}
+      - {as: nadia, do: "POST /api/claims/62/approve", status: 200}
+  - {as: rosa, do: "GET /api/cost_centres?department=Sales", count: 1}
+  - {as: rosa, do: "GET /api/claims?cost_centre=2", status: 200}
