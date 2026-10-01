@@ -1,0 +1,5 @@
+{# Detail-page field: the element carrying data-field contains only the value's text. #}
+{% macro field(name, value, label=None, href=None) -%}
+<dt>{{ label or name|replace('_', ' ')|capitalize }}</dt>
+<dd>{% if href and value is not none %}<a data-field="{{ name }}" href="{{ href }}">{{ value|display }}</a>{% else %}<span data-field="{{ name }}">{{ value|display }}</span>{% endif %}</dd>
+{%- endmacro %}

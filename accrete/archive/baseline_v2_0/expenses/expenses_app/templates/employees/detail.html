@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field %}
+{% block title %}{{ employee.name }}{% endblock %}
+{% block content %}
+<h1>Employee #{{ employee.id }}</h1>
+<dl>
+  {{ field("username", employee.username) }}
+  {{ field("name", employee.name) }}
+  {{ field("role", employee.role) }}
+  {{ field("manager", employee.manager, href=employee.manager and url_for('ui.show_employee', employee_id=employee.manager)) }}
+  {{ field("department", employee.department) }}
+</dl>
+{% endblock %}

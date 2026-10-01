@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field %}
+{% block title %}{{ member.name }}{% endblock %}
+{% block content %}
+<h1>Member #{{ member.id }}</h1>
+<dl>
+  {{ field("username", member.username) }}
+  {{ field("name", member.name) }}
+  {{ field("role", member.role) }}
+  {{ field("active", member.active) }}
+</dl>
+{% endblock %}

@@ -5,8 +5,9 @@
                                   their checks in order, UI routes, rule constants, users by role,
                                   two sample records per collection, outbox channels, tests
     check [-k EXPR] [--full]      the whole verification: test suite, data.db fully migrated and
-          [--no-scan] [TESTS...]  equal to a seed rebuild, integrity, plus a contract/UI scan
-                                  (UI lists/detail/forms agree with the API for every user)
+          [--no-scan] [TESTS...]  equal to a seed rebuild, integrity, AUTOINCREMENT counters, plus a
+                                  contract/UI scan (UI agrees with the API for every user) and the
+                                  comparison with the pinned state (tests/pinned_state.json)
     call METHOD PATH --as USER [--body JSON] [--form k=v ...] [--now TS] [--raw]
                                   one request against a throwaway copy (data.db is never touched;
                                   pending migrations are applied to the copy); prints the response
@@ -14,9 +15,12 @@
                                   the request changed
     call --steps "USER METHOD PATH [JSON]" ...
                                   several requests in sequence on the same throwaway copy
+    pin [--diff]                  accept the current behaviour + stored data as tests/pinned_state.json
+                                  (check fails while they differ from it; --diff only shows the diff)
     new-migration NAME            create migrations/NNNN_NAME.sql (next number) from a template
     migrate                       apply pending migrations to the committed data.db
-    snapshot                      record files + data.db before a change (overview does it once)
+    snapshot                      record files + data.db before a change (taken automatically: see
+                                  ensure_snapshot)
     dbdiff                        row-level diff of data.db against the snapshot
     notes                         write CHANGE_NOTES.md: changed files, migrations, data changes,
                                   last check result
@@ -62,6 +66,8 @@ DEV_DIR = os.path.join(APP_DIR, ".dev")
 SNAPSHOT_FILES = os.path.join(DEV_DIR, "snapshot.json")
 SNAPSHOT_DB = os.path.join(DEV_DIR, "snapshot.db")
 LAST_CHECK = os.path.join(DEV_DIR, "last_check.txt")
+NOTES_SEEN = os.path.join(DEV_DIR, "notes_seen")  # touched whenever dev.py runs while CHANGE_NOTES.md exists
+CHANGE_NOTES = os.path.join(APP_DIR, "CHANGE_NOTES.md")
 IGNORED_DIRS = {"__pycache__", ".pytest_cache", ".dev"}
 ERROR_CLASSES = {"NotFound": "404", "Forbidden": "403", "Conflict": "409", "ValidationError": "400"}
 
@@ -529,7 +535,7 @@ def module_constants(name):
 # =========================================================================================
 
 def cmd_overview(args):
-    take_snapshot(quiet=True, only_if_missing=True)
+    ensure_snapshot()
     package = import_package()
     db = importlib.import_module(PACKAGE + ".db")
 
@@ -700,6 +706,7 @@ def best_reader(copy, collections, users):
 
 
 def cmd_call(args):
+    ensure_snapshot()
     copy = Copy()
     try:
         steps = []
@@ -731,12 +738,417 @@ def cmd_call(args):
         copy.close()
 
 
+# =========================================================================================
+# pinned state: the externally observable behaviour and stored data, accepted with `pin`
+# =========================================================================================
+
+PINNED = os.path.join(APP_DIR, "tests", "pinned_state.json")
+PIN_SAMPLE = 8  # records per collection that every user also PATCHes ({}) and DELETEs
+
+
+def _h(value):
+    return hashlib.sha1(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:10]
+
+
+def ranges(ids):
+    """[1, 2, 3, 7] -> '1-3,7'"""
+    out, ids = [], sorted(ids)
+    i = 0
+    while i < len(ids):
+        j = i
+        while j + 1 < len(ids) and isinstance(ids[j], int) and ids[j + 1] == ids[j] + 1:
+            j += 1
+        out.append(str(ids[i]) if i == j else f"{ids[i]}-{ids[j]}")
+        i = j + 1
+    return ",".join(out)
+
+
+def spread(items, n):
+    if len(items) <= n:
+        return list(items)
+    step = len(items) / n
+    return [items[int(i * step)] for i in range(n)]
+
+
+def stored_state(path):
+    """Schema, AUTOINCREMENT counters and one hash per row (schema_version without applied_at)."""
+    tables, schema, seq = dump_db(path, skip_applied_at=True)
+    rows = {t: {str(k): _h(list(v)) for k, v in trows.items()} for t, (cols, trows) in tables.items()}
+    return {"schema": schema, "sequences": seq, "rows": rows}
+
+
+def sweep(copy):
+    """Ask the API everything a request with an empty body can ask, as every user.
+
+    Lists and ``POST /api/<c> {}`` per user; for every record of every collection and every
+    user: GET, every action ``POST {}`` and (on PIN_SAMPLE records per collection) ``PATCH {}``
+    and DELETE. Each write runs on the pristine database (restored afterwards); a 2xx write
+    records a hash of its response and of the outbox. Returns (state, stats)."""
+    app = copy.app
+    app.logger.disabled = True
+    users = copy.users()
+    colls = api_collections(app)
+    actions = {}
+    for coll, action in api_actions(app):
+        actions.setdefault(coll, []).append(action)
+    pristine = copy.save_db()
+    has_outbox = has_route(app, "/api/_outbox", "GET")
+    stats = {"requests": 0, "errors": [], "actions": {}}
+
+    def req(method, path, user, body=None):
+        stats["requests"] += 1
+        r = copy.request(method, path, user, body=body)
+        if r.status_code >= 500 and len(stats["errors"]) < 10:
+            stats["errors"].append(f"{method} {path} as {user} -> {r.status_code} (unhandled exception; "
+                                   f"reproduce with `python dev.py call {method} {path} --as {user}`)")
+        return r
+
+    def write(method, path, user, body=None):
+        r = req(method, path, user, body)
+        result = str(r.status_code)
+        if r.status_code < 300:
+            result += "#" + _h(r.get_json(silent=True))
+            if has_outbox:
+                result += "/" + _h(req("GET", "/api/_outbox", user).get_json(silent=True))
+        with open(copy.db, "rb") as fh:
+            changed = fh.read(100)[24:28] != pristine[24:28]  # SQLite's file change counter
+        if changed or r.status_code < 300:
+            copy.restore_db(pristine)
+        return r.status_code, result
+
+    lists, ids = {}, {}
+    for user in users:
+        for coll in colls:
+            r = req("GET", f"/api/{coll}", user)
+            items = r.get_json()["items"] if r.status_code == 200 else []
+            lists[(user, coll)] = (r.status_code, items)
+            ids.setdefault(coll, set()).update(i["id"] for i in items)
+    reader = max(users, key=lambda u: sum(len(lists[(u, c)][1]) for c in colls)) if users else None
+    records = {coll: {str(i["id"]): i for i in lists[(reader, coll)][1]} for coll in colls} if users else {}
+    requests = {}
+    for coll in colls:
+        all_ids = sorted(ids[coll])
+        sample = set(spread(all_ids, PIN_SAMPLE))
+        for user in users:
+            status, items = lists[(user, coll)]
+            text = f"list {status} [{ranges([i['id'] for i in items])}]"
+            other = [i for i in items if records[coll].get(str(i["id"])) != i]
+            if other:
+                text += "#" + _h(other)
+            text += " | create " + write("POST", f"/api/{coll}", user, {})[1]
+            requests[f"{user} {coll}"] = text
+            for rid in all_ids:
+                r = req("GET", f"/api/{coll}/{rid}", user)
+                part = f"GET {r.status_code}"
+                if r.status_code == 200 and records[coll].get(str(rid)) != r.get_json(silent=True):
+                    part += "#" + _h(r.get_json(silent=True))
+                parts = [part]
+                if rid in sample:
+                    parts.append("PATCH " + write("PATCH", f"/api/{coll}/{rid}", user, {})[1])
+                    parts.append("DELETE " + write("DELETE", f"/api/{coll}/{rid}", user)[1])
+                for action in actions.get(coll, []):
+                    code, result = write("POST", f"/api/{coll}/{rid}/{action}", user, {})
+                    stats["actions"][(user, coll, rid, action)] = code
+                    parts.append(f"{action} {result}")
+                requests[f"{user} {coll}/{rid}"] = " | ".join(parts)
+    state = {"now": NOW, "reader": reader, "requests": requests, "records": records}
+    state.update(stored_state(copy.db))
+    return state, stats
+
+
+def load_pinned(path=PINNED):
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _parse_requests(value):
+    out = {}
+    for part in (value or "").split(" | "):
+        if part:
+            op, _, result = part.partition(" ")
+            out[op] = result
+    return out
+
+
+def _label_result(old, new):
+    """'200#a' vs '200#b' -> '200 (response changed)'; otherwise both results without hashes."""
+    o_status, n_status = old.split("#")[0], new.split("#")[0]
+    if old != new and o_status == n_status:
+        return f"{o_status} (response/outbox changed)"
+    return f"{o_status} -> {n_status}"
+
+
+def diff_state(old, new, limit=40):
+    """Readable differences between two pinned states (behaviour first, then stored data)."""
+    lines = []
+    groups = {}
+    o_req, n_req = old.get("requests", {}), new.get("requests", {})
+    for key in sorted(set(o_req) | set(n_req), key=lambda k: (k.split(" ", 1)[1], k)):
+        user, _, target = key.partition(" ")
+        coll, _, rid = target.partition("/")
+        o, n = _parse_requests(o_req.get(key)), _parse_requests(n_req.get(key))
+        for op in list(dict.fromkeys(list(o) + list(n))):
+            ov, nv = o.get(op), n.get(op)
+            if ov == nv:
+                continue
+            path = {"list": f"GET /api/{coll}", "create": f"POST /api/{coll}", "GET": f"GET /api/{coll}/<id>",
+                    "PATCH": f"PATCH /api/{coll}/<id> {{}}", "DELETE": f"DELETE /api/{coll}/<id>"}.get(
+                        op, f"POST /api/{coll}/<id>/{op} {{}}")
+            if ov is None or nv is None:
+                label = f"{path}: {'new' if ov is None else 'gone'}"
+            elif op == "list":
+                label = f"{path}: {short(ov.split('#')[0], 50)} -> {short(nv.split('#')[0], 50)}" \
+                    if ov.split("#")[0] != nv.split("#")[0] else f"{path}: response changed"
+            else:
+                label = f"{path}: {_label_result(ov, nv)}"
+            groups.setdefault(label, []).append(f"{user} {target}" if op != "list" else user)
+    for label, cases in groups.items():
+        lines.append(f"{label}  x{len(cases)} ({'; '.join(cases[:4])}{'; ...' if len(cases) > 4 else ''})")
+    # API records as the reader sees them
+    o_rec, n_rec = old.get("records", {}), new.get("records", {})
+    for coll in sorted(set(o_rec) | set(n_rec)):
+        a, b = o_rec.get(coll, {}), n_rec.get(coll, {})
+        a_fields = {f for r in a.values() for f in r}
+        b_fields = {f for r in b.values() for f in r}
+        parts = []
+        if b_fields - a_fields:
+            parts.append(f"fields added {sorted(b_fields - a_fields)}")
+        if a_fields - b_fields:
+            parts.append(f"fields removed {sorted(a_fields - b_fields)}")
+        new_ids = [k for k in b if k not in a]
+        gone = [k for k in a if k not in b]
+        if new_ids:
+            parts.append(f"+{len(new_ids)} records ({compact_ids(new_ids, 8)})")
+        if gone:
+            parts.append(f"-{len(gone)} records ({compact_ids(gone, 8)})")
+        changed = {}
+        for k in a:
+            if k in b:
+                for f in a_fields & b_fields:
+                    if a[k].get(f) != b[k].get(f):
+                        changed.setdefault(f, []).append((k, a[k].get(f), b[k].get(f)))
+        for f, cases in sorted(changed.items()):
+            k, x, y = cases[0]
+            parts.append(f"{f} changed in {len(cases)} ({compact_ids([c[0] for c in cases], 8)}; e.g. {k}: {x!r} -> {y!r})")
+        if parts:
+            lines.append(f"records /api/{coll} (as {new.get('reader')}): " + "; ".join(parts))
+    # stored data
+    o_s, n_s = old.get("schema", {}), new.get("schema", {})
+    for name in sorted(set(o_s) | set(n_s)):
+        x, y = o_s.get(name), n_s.get(name)
+        if x == y:
+            continue
+        if x is None:
+            lines.append(f"schema + {short(y, 200)}")
+        elif y is None:
+            lines.append(f"schema - {short(x, 200)}")
+        elif x.upper().startswith("CREATE TABLE") and y.upper().startswith("CREATE TABLE"):
+            gone = [p for p in sql_parts(x) if p not in sql_parts(y)]
+            added = [p for p in sql_parts(y) if p not in sql_parts(x)]
+            lines.append(f"schema ~ {name}: " + "; ".join([f"- {short(p, 120)}" for p in gone] + [f"+ {short(p, 120)}" for p in added]))
+        else:
+            lines.append(f"schema ~ {name}: - {short(x, 160)} + {short(y, 160)}")
+    o_q, n_q = old.get("sequences", {}), new.get("sequences", {})
+    for t in sorted(set(o_q) | set(n_q)):
+        if o_q.get(t) != n_q.get(t):
+            nxt = f" (next new id {n_q[t] + 1})" if isinstance(n_q.get(t), int) else ""
+            lines.append(f"sqlite_sequence {t}: {o_q.get(t)} -> {n_q.get(t)}{nxt}")
+    o_r, n_r = old.get("rows", {}), new.get("rows", {})
+    for t in sorted(set(o_r) | set(n_r)):
+        a, b = o_r.get(t, {}), n_r.get(t, {})
+        new_ids = [k for k in b if k not in a]
+        gone = [k for k in a if k not in b]
+        changed = [k for k in a if k in b and a[k] != b[k]]
+        parts = [f"{s}{len(v)} ({compact_ids(v, 8)})" for s, v in (("+", new_ids), ("-", gone), ("~", changed)) if v]
+        if parts:
+            lines.append(f"data.db {t}: rows " + " ".join(parts))
+    if len(lines) > limit:
+        lines = lines[:limit] + [f"... {len(lines) - limit} more (python dev.py pin --diff shows all)"]
+    return lines
+
+
+def write_pinned(state):
+    os.makedirs(os.path.dirname(PINNED), exist_ok=True)
+    doc = {"about": "Accepted behaviour and stored data; written by `python dev.py pin`, compared by "
+                    "`python dev.py check`. Do not edit by hand.", "pinned": time.strftime("%Y-%m-%d %H:%M:%S"), **state}
+    with open(PINNED, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=0, sort_keys=True)
+        fh.write("\n")
+
+
+def cmd_pin(args):
+    copy = Copy()
+    try:
+        state, stats = sweep(copy)
+    finally:
+        copy.close()
+    old = load_pinned()
+    lines = diff_state(old, state, limit=10 ** 6 if args.diff else 60) if old else ["(no previous pinned state)"]
+    if args.diff:
+        print(f"current state vs {os.path.relpath(PINNED, APP_DIR)} ({stats['requests']} requests):"
+              + (" no differences" if not lines else ""))
+        for line in lines:
+            print("  " + line)
+        return 0
+    if stats["errors"]:
+        print("NOT PINNED: server errors (fix them first):")
+        for e in stats["errors"]:
+            print("  " + e)
+        return 1
+    if old and not lines:
+        print(f"no differences from {os.path.relpath(PINNED, APP_DIR)} (pinned {old.get('pinned')}); left unchanged")
+        return 0
+    write_pinned(state)
+    print(f"pinned {os.path.relpath(PINNED, APP_DIR)} ({stats['requests']} requests, every user). "
+          + ("Accepted differences:" if lines else "No differences from the previous pin."))
+    for line in lines:
+        print("  " + line)
+    return 0
+
+
+# --- stored-data rules (run by check) -----------------------------------------------------
+
+_LIT = r"'((?:[^']|'')*)'"
+_CMP = re.compile(r"\b(\w+)\s*(?:==|=|<>|!=)\s*" + _LIT + r"|" + _LIT + r"\s*(?:==|=|<>|!=)\s*(?:\w+\.)?(\w+)\b"
+                  r"|\b(\w+)\s+(?:NOT\s+)?IN\s*\(\s*('(?:[^']|'')*'(?:\s*,\s*'(?:[^']|'')*')*)\s*\)", re.I)
+
+
+def enum_domains(table_sql):
+    """{column: allowed text literals} from ``CHECK (col IN ('a', 'b'))`` clauses of a CREATE TABLE."""
+    out = {}
+    for m in re.finditer(r"CHECK\s*\(\s*\"?(\w+)\"?\s+IN\s*\(([^()]*)\)\s*\)", table_sql or "", re.I):
+        values = re.findall(_LIT, m.group(2))
+        if values:
+            out.setdefault(m.group(1), set()).update(values)
+    return out
+
+
+def literal_comparisons(sql):
+    """[(column, literal)] for ``col = 'x'``, ``col <> 'x'``, ``'x' = col``, ``col [NOT] IN ('x', ...)``."""
+    out = []
+    for m in _CMP.finditer(re.sub(r"--[^\n]*", "", sql or "")):
+        if m.group(1):
+            out.append((m.group(1), m.group(2)))
+        elif m.group(4):
+            out.append((m.group(4), m.group(3)))
+        else:
+            out.extend((m.group(5), v) for v in re.findall(_LIT, m.group(6)))
+    return out
+
+
+def sequence_problems(conn):
+    """AUTOINCREMENT counters: integer, for an existing table, never below the table's highest id."""
+    problems = []
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'sqlite_sequence'").fetchone():
+        return problems
+    sqls = dict(conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'table'").fetchall())
+    seqs = dict(conn.execute("SELECT name, seq FROM sqlite_sequence").fetchall())
+    for name, seq in seqs.items():
+        if name not in sqls:
+            problems.append(f"sqlite_sequence has a row for {name!r}, which is not a table (typo in a migration?)")
+            continue
+        top = conn.execute(f"SELECT MAX(rowid) FROM '{name}'").fetchone()[0]
+        if not isinstance(seq, int):
+            problems.append(f"sqlite_sequence {name}: seq is {seq!r}; it must be an integer >= the highest id ({top})")
+        elif top is not None and seq < top:
+            problems.append(f"sqlite_sequence {name}: seq {seq} is below the highest id {top}")
+    for name, sql in sqls.items():
+        if "AUTOINCREMENT" in (sql or "").upper() and name not in seqs and \
+                conn.execute(f"SELECT 1 FROM '{name}' LIMIT 1").fetchone():
+            problems.append(f"sqlite_sequence has no row for {name} (AUTOINCREMENT counter lost; ids could be reused)")
+    return problems
+
+
+def predicate_problems(conn):
+    """Partial-index and trigger predicates comparing a column with a value its CHECK never allows."""
+    problems = []
+    tables = dict(conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'table'").fetchall())
+    for kind, name, table, sql in conn.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('index', 'trigger') AND sql IS NOT NULL"):
+        domains = enum_domains(tables.get(table))
+        body = sql
+        if kind == "index":
+            m = re.search(r"\bWHERE\b(.*)$", sql, re.I | re.S)
+            if not m:
+                continue
+            body = m.group(1)
+        for col, lit in literal_comparisons(body):
+            if col in domains and lit not in domains[col]:
+                problems.append(f"{kind} {name}: compares {table}.{col} with {lit!r}, which its CHECK never allows "
+                                f"({sorted(domains[col])}) - the predicate is dead or always true")
+    return problems
+
+
+def replay_rules(seed, db, files, tmp):
+    """Rebuild step by step (seed, then one migration at a time) to check per-migration rules.
+
+    Returns (problems, warnings): an AUTOINCREMENT counter that goes down (ids could be reused);
+    a migration comparing a CHECK-enumerated column with a value no version of the schema allowed."""
+    problems, warnings = [], []
+    if not all(hasattr(seed, n) for n in ("load_seed", "SEED_SCHEMA_VERSION", "SEED_PATH")):
+        return problems, warnings
+    path = os.path.join(tmp, "stepwise.db")
+    db.migrate(path, up_to=seed.SEED_SCHEMA_VERSION)
+    with open(seed.SEED_PATH, encoding="utf-8") as fh:
+        data = json.load(fh)
+    conn = db.connect(path)
+    try:
+        conn.execute("BEGIN")
+        seed.load_seed(conn, data)
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+    domains, plain = {}, set()  # column name -> allowed literals (any version); columns without one
+
+    def observe():
+        c = sqlite3.connect(path)
+        try:
+            for table, sql in c.execute("SELECT name, sql FROM sqlite_master WHERE type = 'table'"):
+                d = enum_domains(sql)
+                for col in (r[1] for r in c.execute(f"PRAGMA table_info('{table}')")):
+                    if col in d:
+                        domains.setdefault(col, set()).update(d[col])
+                    else:
+                        plain.add(col)
+            return dict(c.execute("SELECT name, seq FROM sqlite_sequence").fetchall()) if \
+                c.execute("SELECT 1 FROM sqlite_master WHERE name = 'sqlite_sequence'").fetchone() else {}
+        finally:
+            c.close()
+
+    before = observe()
+    later = [(v, p) for v, _, p in files if v > seed.SEED_SCHEMA_VERSION]
+    for version, mig in later:
+        db.migrate(path, up_to=version)
+        after = observe()
+        for table, seq in before.items():
+            if isinstance(seq, int) and isinstance(after.get(table), int) and after[table] < seq:
+                problems.append(f"{os.path.basename(mig)} lowers the AUTOINCREMENT counter of {table} from {seq} to "
+                                f"{after[table]} (deleted ids could be reused): add "
+                                f"`UPDATE sqlite_sequence SET seq = {seq} WHERE name = '{table}';` after the rebuild")
+        before = after
+    for version, mig in later:
+        with open(mig, encoding="utf-8") as fh:
+            sql = fh.read()
+        for col, lit in literal_comparisons(sql):
+            if col in domains and col not in plain and lit not in domains[col]:
+                warnings.append(f"{os.path.basename(mig)}: compares {col} with {lit!r}, a value no CHECK on a "
+                                f"{col} column has allowed ({sorted(domains[col])}) - typo?")
+    return problems, sorted(set(warnings), key=warnings.index)
+
+
 # --- check -------------------------------------------------------------------------------
 
 def run_tests(extra, tests, full):
     """Run the suite in a subprocess; return (ok, summary line, failure lines)."""
+    return start_tests(extra, tests, full)()
+
+
+def start_tests(extra, tests, full):
+    """Start the suite in a subprocess; return a function that waits and gives (ok, summary, lines)."""
     if not os.path.exists(os.path.join(HARNESS_DIR, "accept_client.py")):
-        return False, f"harness not found at {HARNESS_DIR} (tests import accept_client from there)", []
+        return lambda: (False, f"harness not found at {HARNESS_DIR} (tests import accept_client from there)", [])
     xml_path = os.path.join(tempfile.mkdtemp(prefix="devpy-junit-"), "junit.xml")
     env = dict(os.environ)
     env.pop("ACCEPT_TARGET", None)
@@ -745,7 +1157,13 @@ def run_tests(extra, tests, full):
     cmd = [sys.executable, "-m", "pytest", *targets, "-q", "-p", "no:cacheprovider", "--tb=short",
            f"--junitxml={xml_path}", "-o", "junit_family=xunit1", *extra]
     started = time.time()
-    proc = subprocess.run(cmd, cwd=APP_DIR, env=env, capture_output=True, text=True)
+    popen = subprocess.Popen(cmd, cwd=APP_DIR, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return lambda: _finish_tests(popen, started, xml_path, full)
+
+
+def _finish_tests(popen, started, xml_path, full):
+    stdout, stderr = popen.communicate()
+    proc = subprocess.CompletedProcess(popen.args, popen.returncode, stdout, stderr)
     elapsed = time.time() - started
     if not os.path.exists(xml_path):
         tail = (proc.stdout + proc.stderr).strip().splitlines()[-25:]
@@ -787,14 +1205,15 @@ def run_tests(extra, tests, full):
 
 
 def check_database():
-    """data.db: fully migrated, equal to a seed rebuild, integrity and references OK."""
-    problems = []
+    """data.db: fully migrated, equal to a seed rebuild, integrity, references, counters and
+    predicates OK. Returns (problems, warnings)."""
+    problems, warnings = [], []
     import_package()
     db = importlib.import_module(PACKAGE + ".db")
     try:
         files = db.available_migrations(MIGRATIONS_DIR)
     except RuntimeError as exc:
-        return [str(exc)]
+        return [str(exc)], warnings
     for _, _, path in files:
         with open(path, encoding="utf-8") as fh:
             sql = fh.read()
@@ -819,9 +1238,11 @@ def check_database():
     broken = conn.execute("PRAGMA foreign_key_check").fetchall()
     if broken:
         problems.append(f"data.db has dangling references (table, rowid, parent, fk): {broken[:5]}")
+    problems.extend(sequence_problems(conn))
+    problems.extend(predicate_problems(conn))
     conn.close()
     if pending or applied - known:
-        return problems
+        return problems, warnings
     # rebuild from seed in a temp dir and compare
     tmp = tempfile.mkdtemp(prefix="devpy-seed-")
     try:
@@ -834,7 +1255,12 @@ def check_database():
                 seed.build(rebuilt)
             except Exception as exc:  # noqa: BLE001 - report any failure of the rebuild
                 problems.append(f"seed rebuild failed: {type(exc).__name__}: {exc}")
-                return problems
+                return problems, warnings
+            try:
+                step_problems, warnings = replay_rules(seed, db, files, tmp)
+                problems.extend(step_problems)
+            except Exception as exc:  # noqa: BLE001 - the rebuild above already reports real failures
+                warnings.append(f"step-by-step replay skipped: {type(exc).__name__}: {exc}")
         diff = diff_dumps(dump_db(DATA_DB, skip_applied_at=True), dump_db(rebuilt, skip_applied_at=True), detail=2)
         if diff:
             problems.append("data.db differs from a fresh rebuild (seed_data.json + all migrations); "
@@ -842,14 +1268,16 @@ def check_database():
             problems.extend("   " + l for l in diff[:20])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return problems
+    return problems, warnings
 
 
-def scan_contract(max_records=40):
-    """Compare UI and API for every user. Returns (errors, warnings, stats); errors are 5xx answers."""
+def scan_contract(copy, known_actions=None, max_records=40):
+    """Compare UI and API for every user. Returns (errors, warnings, stats); errors are 5xx answers.
+
+    ``known_actions`` maps (user, collection, id, action) to the status of ``POST {}`` (from sweep)."""
     warnings, errors, stats = [], [], {"requests": 0}
-    copy = Copy()
-    try:
+    known_actions = known_actions or {}
+    if True:
         app = copy.app
         app.logger.disabled = True  # 5xx are reported below; `dev.py call` shows the traceback
         users = copy.users()
@@ -943,6 +1371,10 @@ def scan_contract(max_records=40):
                     shown_actions = UiPage(page.get_data(as_text=True)).actions
                     for action in coll_actions:
                         shown = action in shown_actions
+                        known = known_actions.get((user, coll, item["id"], action))
+                        if known is not None and shown == (known not in (403, 409)):
+                            checked += 1
+                            continue
                         r = req("POST", f"/api/{coll}/{item['id']}/{action}", user, body={})
                         checked += 1
                         if r.status_code < 300:
@@ -992,8 +1424,6 @@ def scan_contract(max_records=40):
                         warnings.append(f"/ui/{coll}/new inputs {unknown} are not fields of {coll}")
             if bad:
                 warnings.append(f"/ui/{coll}/new vs POST /api/{coll}: " + "; ".join(bad[:4]))
-    finally:
-        copy.close()
     # de-duplicate, keep order
     seen, unique = set(), []
     for w in warnings:
@@ -1004,35 +1434,61 @@ def scan_contract(max_records=40):
 
 
 def cmd_check(args):
-    take_snapshot(quiet=True, only_if_missing=True)
+    ensure_snapshot()
     started = time.time()
     out = []
-    ok_tests, summary, fail_lines = run_tests(args.pytest_args, args.tests, args.full)
-    out.append(("PASS " if ok_tests else "FAIL ") + summary)
-    out.extend("  " + l for l in fail_lines)
-    db_problems = check_database()
+    finish_tests = start_tests(args.pytest_args, args.tests, args.full)  # runs while the checks below do
+    db_problems, db_warnings = check_database()
     if db_problems:
         out.append("FAIL data.db:")
         out.extend("  " + p for p in db_problems)
     else:
-        out.append("PASS data.db: fully migrated, equals seed rebuild (seed_data.json + migrations), integrity/foreign keys ok")
-    warnings, errors = [], []
+        out.append("PASS data.db: fully migrated, equals seed rebuild (seed_data.json + migrations), integrity/foreign keys, "
+                   "AUTOINCREMENT counters and index predicates ok")
+    warnings, errors, pin_lines = list(db_warnings), [], []
+    pinned_missing = False
     if not args.no_scan:
-        errors, warnings, stats = scan_contract()
+        copy = Copy()
+        try:
+            state, sweep_stats = sweep(copy)
+            errors, scan_warnings, stats = scan_contract(copy, sweep_stats["actions"])
+        finally:
+            copy.close()
+        errors = list(dict.fromkeys(sweep_stats["errors"] + errors))
+    ok_tests, summary, fail_lines = finish_tests()
+    out.insert(0, ("PASS " if ok_tests else "FAIL ") + summary)
+    out[1:1] = ["  " + l for l in fail_lines]
+    if not args.no_scan:
+        warnings += scan_warnings
         if errors:
-            out.append("FAIL server errors during the contract/UI scan:")
+            out.append("FAIL server errors during the sweep/contract scan:")
             out.extend("  " + e for e in errors)
-        if warnings:
-            out.append(f"WARN contract/UI scan: {len(warnings)} finding(s) ({stats['requests']} requests, every user):")
-            out.extend("  - " + w for w in warnings[:40])
-            if len(warnings) > 40:
-                out.append(f"  ... {len(warnings) - 40} more")
-        elif not errors:
+        old = load_pinned()
+        if old is None:
+            pinned_missing = True
+            out.append(f"FAIL no pinned state ({os.path.relpath(PINNED, APP_DIR)}): review the app, then `python dev.py pin`")
+        else:
+            pin_lines = diff_state(old, state)
+            if pin_lines:
+                out.append(f"FAIL differs from the pinned state ({os.path.relpath(PINNED, APP_DIR)}, pinned {old.get('pinned')}; "
+                           f"{sweep_stats['requests']} requests, every user):")
+                out.extend("  - " + l for l in pin_lines)
+                out.append("  Every line above must be something the request asks for (or a consequence of it). If so, "
+                           "accept with `python dev.py pin` and re-run check; otherwise fix the code/migration.")
+            else:
+                out.append(f"PASS behaviour and stored data equal the pinned state ({sweep_stats['requests']} requests: "
+                           "every user x every record GET / action POST {}, lists, create; schema, counters, rows)")
+        if not scan_warnings and not errors:
             out.append(f"PASS contract/UI scan ({stats['requests']} requests, every user): UI lists = API lists, "
                        "detail pages show every API field, every field filters, action/create forms match API "
                        "permissions, no 5xx (incl. DELETE of every record)")
-    ok = ok_tests and not db_problems and not errors
-    verdict = ("CHECK PASSED" if ok else "CHECK FAILED") + (f" with {len(warnings)} scan warning(s) to review" if warnings else "")
+    if warnings:
+        out.append(f"WARN {len(warnings)} finding(s) to review (scan heuristics and migration lint):")
+        out.extend("  - " + w for w in warnings[:40])
+        if len(warnings) > 40:
+            out.append(f"  ... {len(warnings) - 40} more")
+    ok = ok_tests and not db_problems and not errors and not pin_lines and not pinned_missing
+    verdict = ("CHECK PASSED" if ok else "CHECK FAILED") + (f" with {len(warnings)} warning(s) to review" if warnings else "")
     if args.pytest_args or args.tests or args.no_scan:
         verdict += "  (partial run: finish with a plain `python dev.py check`)"
     out.append(f"{verdict}  [{time.time() - started:.1f}s]")
@@ -1074,6 +1530,7 @@ MIGRATION_TEMPLATE = """-- {number}_{name}: <one line: what this migration does 
 
 
 def cmd_new_migration(args):
+    ensure_snapshot()
     name = args.name.strip().lower()
     if not re.fullmatch(r"[a-z0-9_]+", name):
         sys.exit("NAME must match [a-z0-9_]+ (e.g. add_book_shelf)")
@@ -1088,6 +1545,7 @@ def cmd_new_migration(args):
 
 
 def cmd_migrate(args):
+    ensure_snapshot()  # before migrating, so the snapshot holds the pre-change data
     import_package()
     db = importlib.import_module(PACKAGE + ".db")
     applied = db.migrate(DATA_DB)
@@ -1121,15 +1579,52 @@ def app_files():
     return out
 
 
-def take_snapshot(quiet=False, only_if_missing=False):
+def take_snapshot(quiet=False, only_if_missing=False, reason=None):
     if only_if_missing and os.path.exists(SNAPSHOT_FILES):
         return
     os.makedirs(DEV_DIR, exist_ok=True)
     with open(SNAPSHOT_FILES, "w", encoding="utf-8") as fh:
-        json.dump({"taken": time.strftime("%Y-%m-%d %H:%M:%S"), "files": app_files()}, fh)
+        json.dump({"taken": time.strftime("%Y-%m-%d %H:%M:%S"), "dir": APP_DIR, "files": app_files()}, fh)
     shutil.copyfile(DATA_DB, SNAPSHOT_DB)
-    if not quiet or only_if_missing:
-        print(f"snapshot saved ({os.path.relpath(DEV_DIR, APP_DIR)}/): `python dev.py notes` / `dbdiff` compare against it")
+    if not quiet or only_if_missing or reason:
+        print(f"snapshot saved ({os.path.relpath(DEV_DIR, APP_DIR)}/)" + (f" - {reason}" if reason else "")
+              + ": `python dev.py notes` / `dbdiff` compare against it")
+
+
+def stale_snapshot_reason():
+    """Why the snapshot cannot be the start of the current change (None if it can).
+
+    A snapshot belongs to one change. It is stale when it was taken in another directory (the
+    app was copied to a new workspace for the next change) or when CHANGE_NOTES.md existed after
+    it was taken and has since been removed (the previous change was handed over)."""
+    if not os.path.exists(SNAPSHOT_FILES):
+        return "no snapshot yet"
+    try:
+        with open(SNAPSHOT_FILES, encoding="utf-8") as fh:
+            snap_dir = json.load(fh).get("dir")
+    except (OSError, ValueError):
+        return "unreadable snapshot"
+    if snap_dir != APP_DIR:
+        return "the old snapshot was taken in another directory (previous change)"
+    if os.path.exists(NOTES_SEEN) and not os.path.exists(CHANGE_NOTES) and \
+            os.path.getmtime(NOTES_SEEN) >= os.path.getmtime(SNAPSHOT_FILES):
+        return "the previous change's CHANGE_NOTES.md was removed: new change"
+    return None
+
+
+def ensure_snapshot():
+    """Take the snapshot at the start of a change; keep it for the rest of that change."""
+    reason = stale_snapshot_reason()
+    if reason:
+        take_snapshot(quiet=True, reason=reason)
+        if os.path.exists(NOTES_SEEN):
+            os.remove(NOTES_SEEN)
+
+
+def note_change_notes():
+    if os.path.exists(CHANGE_NOTES) and os.path.isdir(DEV_DIR):
+        with open(NOTES_SEEN, "w", encoding="utf-8") as fh:
+            fh.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
 
 
 def cmd_snapshot(args):
@@ -1152,6 +1647,10 @@ def cmd_dbdiff(args):
 
 
 def cmd_notes(args):
+    reason = stale_snapshot_reason()
+    if reason and os.path.exists(SNAPSHOT_FILES):
+        print(f"warning: {reason}; the snapshot may include earlier work. If this change started from the "
+              "current files, there is nothing to compare: run `python dev.py snapshot` *before* the next change.")
     snap = load_snapshot()
     before, now = snap["files"], app_files()
     changed = []
@@ -1176,6 +1675,11 @@ def cmd_notes(args):
             first = re.sub(r"^\d{4}_[a-z0-9_]+:\s*", "", first)
             migrations.append(f"- `{os.path.basename(rel)}`: {first}")
     data_lines = diff_dumps(dump_db(SNAPSHOT_DB, True), dump_db(DATA_DB, True), detail=0, ignore=("schema_version",))
+    pin_rel = os.path.relpath(PINNED, APP_DIR)
+    pin_lines = ["(no pinned state)"]
+    if pin_rel in now and "text" in now[pin_rel]:
+        old_pin = json.loads(before[pin_rel]["text"]) if pin_rel in before and "text" in before[pin_rel] else {}
+        pin_lines = diff_state(old_pin, json.loads(now[pin_rel]["text"]), limit=60) or ["no differences"]
     check_text = "(not run yet: `python dev.py check`)"
     if os.path.exists(LAST_CHECK):
         newest_change = max((os.path.getmtime(os.path.join(APP_DIR, r)) for r in now), default=0)
@@ -1194,6 +1698,8 @@ def cmd_notes(args):
         *(migrations or ["- (none)"]), "",
         "**Data changes in data.db** (vs snapshot of " + snap["taken"] + ")",
         "```", *(data_lines or ["no changes"]), "```", "",
+        "**Accepted behaviour changes** (pinned state at the snapshot -> now; every user, bodies `{}`)",
+        "```", *pin_lines, "```", "",
         "**Verification.**",
         "```", check_text, "```", "",
     ]
@@ -1228,6 +1734,8 @@ def main(argv=None):
     p = sub.add_parser("new-migration", help="create the next numbered migration file")
     p.add_argument("name")
     sub.add_parser("migrate", help="apply pending migrations to data.db")
+    p = sub.add_parser("pin", help="accept current behaviour + stored data (tests/pinned_state.json)")
+    p.add_argument("--diff", action="store_true", help="only show the differences from the pinned state")
     sub.add_parser("snapshot", help="record files and data.db before a change")
     p = sub.add_parser("dbdiff", help="row-level diff of data.db against the snapshot")
     p.add_argument("--rows", type=int, default=5, help="example rows per table (default 5)")
@@ -1237,8 +1745,11 @@ def main(argv=None):
         args.pytest_args = ["-k", args.k] if args.k else []
     handler = {"overview": cmd_overview, "check": cmd_check, "call": cmd_call,
                "new-migration": cmd_new_migration, "migrate": cmd_migrate, "snapshot": cmd_snapshot,
-               "dbdiff": cmd_dbdiff, "notes": cmd_notes}[args.command]
-    return handler(args) or 0
+               "dbdiff": cmd_dbdiff, "notes": cmd_notes, "pin": cmd_pin}[args.command]
+    try:
+        return handler(args) or 0
+    finally:
+        note_change_notes()
 
 
 if __name__ == "__main__":

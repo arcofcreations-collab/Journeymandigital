@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Work orders{% endblock %}
+{% block content %}
+<h1>Work orders</h1>
+<p><a href="{{ url_for('ui.new_work_order') }}">New work order</a></p>
+<table>
+  <thead><tr><th>Order</th><th>Asset</th><th>Title</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Due</th><th>Overdue</th></tr></thead>
+  <tbody>
+  {% for order in work_orders %}
+    <tr data-id="{{ order.id }}">
+      <td><a href="{{ url_for('ui.show_work_order', work_order_id=order.id) }}">#{{ order.id }}</a></td>
+      <td>{{ order.asset }}</td>
+      <td>{{ order.title }}</td>
+      <td>{{ order.priority }}</td>
+      <td>{{ order.status }}</td>
+      <td>{{ order.assignee|display }}</td>
+      <td>{{ order.due_date }}</td>
+      <td>{{ order.overdue|display }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

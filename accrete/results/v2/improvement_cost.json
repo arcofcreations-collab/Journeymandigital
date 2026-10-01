@@ -18,5 +18,12 @@
   "built_by": "experimenter (this session), git commits fe1610b..d1c07ab",
   "agent_duration_ms": null,
   "note": "built interactively by the experimenter; its time is not separable from the experiment work and is not included in any implementer cost"
+ },
+ "baseline_v2_1_improver": {
+  "agent_duration_ms": 1067346,
+  "tool_uses": 49,
+  "tokens": 203452,
+  "what": "dev.py pin (behaviour snapshot + grouped diff review), stale-notes fix, seed.py applied_at, data.db integrity rules",
+  "built_by": "isolated improver agent (docs/EXPOSURE.md)"
  }
 }

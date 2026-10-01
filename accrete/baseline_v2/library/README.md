@@ -9,15 +9,18 @@ This README is meant to be the only thing you read before changing the app. Typi
 
 ```
 python dev.py overview        # 1. live map: schema, routes + their checks in order, users, samples
-                              #    (also snapshots files + data.db for step 5)
+                              #    (also snapshots files + data.db for step 6, once per change)
 # 2. edit, following a recipe below
 python dev.py call POST /api/books/3/borrow --as chen        # 3. try requests on a throwaway copy
-python dev.py check           # 4. tests + data.db rebuild check + contract/UI scan, concise output
-python dev.py notes           # 5. CHANGE_NOTES.md draft: changed files, migrations, data diff, check result
+python dev.py check           # 4. tests + data.db checks + contract/UI scan + diff from the pinned state
+python dev.py pin             # 5. after reviewing that diff: accept it (tests/pinned_state.json), check again
+python dev.py notes           # 6. CHANGE_NOTES.md draft: files, migrations, data and behaviour diff, check result
 ```
 
 `dev.py` never modifies `data.db` except `python dev.py migrate`. `.dev/` (snapshot, last check)
-and `CHANGE_NOTES.md` are tooling output.
+and `CHANGE_NOTES.md` are tooling output; `tests/pinned_state.json` is written only by `pin`. The
+snapshot is retaken automatically when a new change starts (app copied to a new directory, or the
+previous change's CHANGE_NOTES.md removed); `python dev.py snapshot` forces it.
 
 ## 1. Architecture map
 
@@ -190,7 +193,8 @@ it with a migration too.
 * Ordering rules ("ids in order of first appearance"): `INSERT ... SELECT ... ORDER BY` with
   `ROW_NUMBER() OVER (ORDER BY ...)` or `MIN(id) GROUP BY`.
 * `python dev.py migrate` then `python dev.py dbdiff` shows per table: added/removed columns with value
-  counts, +/-/~ rows. Made a mistake? Fix the SQL and `python seed.py` (data.db is reproducible).
+  counts, +/-/~ rows. Made a mistake? Fix the SQL and `python seed.py` (data.db is reproducible;
+  recorded apply times of migrations data.db already had are kept).
 * Existing tests that compare with `seed_data.json` (`test_seed_data_is_loaded_with_same_ids`) need
   updating when the migration adds or changes fields.
 
@@ -221,17 +225,29 @@ specified order. Test with `GET /api/_outbox` (outbox starts empty in the seed).
 
 ## 5. Verifying a change
 
-* `python dev.py check` — the whole verification, about 4 seconds:
+* `python dev.py check` — the whole verification, about 4-6 seconds:
   1. the test suite (`tests/`), failures reported as test name + location + the assertion lines
      (`--full` for tracebacks, `-k EXPR` to select);
   2. data.db: no pending migration, equal to a fresh rebuild (seed + migrations; schema, rows,
-     AUTOINCREMENT counters), integrity and foreign keys OK, migration files well-formed;
+     AUTOINCREMENT counters), integrity and foreign keys OK, migration files well-formed; every
+     counter an integer >= the highest id and never lowered by a migration (restore it after a
+     rebuild); no partial-index/trigger predicate compares a column with a value its CHECK forbids
+     (WARN for such a comparison anywhere in a migration);
   3. contract/UI scan for **every user**: UI list rows = API list ids; detail pages have a
      `data-field` per API field with the displayed value; every field works as `?field=` filter;
      each action form is shown exactly when the API call (body `{}`) is not 403/409; `/ui/<c>/new`
      is 200 exactly when `POST /api/<c>` is not 403; no 5xx anywhere, including DELETE of every record.
      Scan findings are WARN (heuristics: an action whose permission depends on its parameters can
      legitimately differ — say why in your notes); test failures, data.db problems and 5xx are FAIL.
+  4. the **pinned state** `tests/pinned_state.json`: every user x every record: GET, every action
+     `POST {}`, and on a sample `PATCH {}`/DELETE; lists and `POST /api/<c> {}` per user (status, plus
+     a response/outbox hash for 2xx); records as the best reader sees them; schema, AUTOINCREMENT
+     counters and a hash per stored row. Any difference is a FAIL listed per route and status
+     (`POST /api/<c>/<id>/<action> {}: 403 -> 409 x12 (user c/id; ...)`, `records ...: field x added`,
+     `sqlite_sequence t: 80 -> 81`). Read it as the change's observable effect: every line must be
+     something the request asks for (or follows from it), and nothing the request says must remain
+     intact may appear. Then `python dev.py pin` (`pin --diff` shows the full list without accepting)
+     and check again. `notes` copies the accepted diff into CHANGE_NOTES.md.
 * `python dev.py call METHOD PATH --as USER [--body JSON] [--now TS]` — one request on a throwaway
   copy with pending migrations applied; prints the JSON, or for `/ui` pages the rows/fields/forms the
   contract sees, then the database rows the request changed (`+`/`-`/`~` per table, outbox included).
@@ -243,8 +259,14 @@ specified order. Test with `GET /api/_outbox` (outbox starts empty in the seed).
   `.creates`). Migration results are checked through the API (data.db is already migrated) or by
   opening `os.path.join(app.workdir, "data.db")`. Evaluator mode:
   `cd ../../harness && ACCEPT_TARGET=../apps/library python -m pytest ../apps/library/tests -q`.
+* What to test by hand: the pinned state already fixes every status for empty bodies and every
+  record/user, so tests are needed for what it cannot see: actions and creates/PATCHes **with**
+  parameters (each 400/409 that depends on them, success values), multi-step flows, outbox payloads,
+  UI forms. Write them for the new behaviour, not for the unchanged matrix. Ids the request names
+  ("new ids above N") deserve one test that creates a record and checks its id.
 * `python dev.py notes` writes `CHANGE_NOTES.md` (changed files with +/- lines, new migrations, the
-  data.db diff since the snapshot, the last check output); fill in the Interpretation paragraph.
+  data.db diff and the accepted pinned-state diff since the snapshot, the last check output); fill
+  in the Interpretation paragraph.
 
 ### Requests that cannot all be satisfied
 Some requests contain requirements that contradict each other or the contract (e.g. "delete the

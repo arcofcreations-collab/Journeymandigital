@@ -1,6 +1,6 @@
 """Rebuild ``data.db`` from scratch: baseline schema + ``seed_data.json`` + every later migration.
 
-    python seed.py                 # from this directory: replaces data.db
+    python seed.py                 # from this directory: replaces data.db (keeps recorded apply times)
     python dev.py check            # verifies that this rebuild equals the committed data.db
 
 ``seed_data.json`` is the starting data *at schema version ``SEED_SCHEMA_VERSION``* (the
@@ -11,6 +11,7 @@ So a rebuild and the migrated data.db always hold the same data. Seed records ke
 """
 import json
 import os
+import sqlite3
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -57,8 +58,31 @@ def build(database_path):
     return seed
 
 
+def applied_times(database_path):
+    """{(version, name): applied_at} recorded in an existing database ({} if there is none)."""
+    if not os.path.exists(database_path):
+        return {}
+    conn = sqlite3.connect(database_path)
+    try:
+        return {(v, n): a for v, n, a in conn.execute("SELECT version, name, applied_at FROM schema_version")}
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+
+
 def main():
+    # A rebuild keeps the recorded apply times of migrations data.db already had (same version
+    # and name); only migrations new to data.db get the current time.
+    previous = applied_times(DATABASE_PATH)
     seed = build(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        conn.executemany("UPDATE schema_version SET applied_at = ? WHERE version = ? AND name = ?",
+                         [(a, v, n) for (v, n), a in previous.items()])
+        conn.commit()
+    finally:
+        conn.close()
     print(f"seeded {DATABASE_PATH}: " + ", ".join(f"{len(v)} {k}" for k, v in seed.items()))
 
 

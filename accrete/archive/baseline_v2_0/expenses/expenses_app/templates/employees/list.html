@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Employees{% endblock %}
+{% block content %}
+<h1>Employees</h1>
+{% if ctx.role == "finance" %}<p><a href="{{ url_for('ui.new_employee') }}">New employee</a></p>{% endif %}
+<table>
+  <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Manager</th><th>Department</th></tr></thead>
+  <tbody>
+  {% for employee in employees %}
+    <tr data-id="{{ employee.id }}">
+      <td><a href="{{ url_for('ui.show_employee', employee_id=employee.id) }}">{{ employee.username }}</a></td>
+      <td>{{ employee.name }}</td>
+      <td>{{ employee.role }}</td>
+      <td>{{ employee.manager|display }}</td>
+      <td>{{ employee.department }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

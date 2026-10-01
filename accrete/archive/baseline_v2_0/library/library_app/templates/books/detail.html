@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field %}
+{% block title %}{{ book.title }}{% endblock %}
+{% block content %}
+<h1>Book #{{ book.id }}</h1>
+<dl>
+  {{ field("title", book.title) }}
+  {{ field("author", book.author) }}
+  {{ field("isbn", book.isbn, label="ISBN") }}
+  {{ field("year", book.year) }}
+  {{ field("status", book.status) }}
+</dl>
+
+{% if "borrow" in actions %}
+<form data-action="borrow" method="post" action="{{ url_for('ui.borrow_book', book_id=book.id) }}">
+  {% if borrowers %}
+  <label>Lend to
+    <select name="member">
+      <option value="">myself</option>
+      {% for member in borrowers %}<option value="{{ member.id }}">{{ member.name }} ({{ member.username }})</option>{% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <button type="submit">Borrow</button>
+</form>
+{% endif %}
+{% endblock %}

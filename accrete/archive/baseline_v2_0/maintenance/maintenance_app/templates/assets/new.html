@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}New asset{% endblock %}
+{% block content %}
+<h1>New asset</h1>
+<form data-create="assets" method="post" action="{{ url_for('ui.create_asset') }}">
+  <label>Tag <input name="tag" required></label>
+  <label>Name <input name="name" required></label>
+  <label>Site <input name="site" required></label>
+  <label>Criticality
+    <select name="criticality">
+      {% for criticality in criticalities %}<option value="{{ criticality }}">{{ criticality }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Retired
+    <select name="retired">
+      <option value="false" selected>no</option>
+      <option value="true">yes</option>
+    </select>
+  </label>
+  <button type="submit">Create</button>
+</form>
+{% endblock %}
