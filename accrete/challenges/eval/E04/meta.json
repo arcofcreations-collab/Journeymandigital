@@ -1,0 +1,35 @@
+{
+  "id": "E04",
+  "app": "maintenance",
+  "categories": [
+    "new_concept",
+    "data_migration",
+    "rule_change",
+    "interaction",
+    "sequence"
+  ],
+  "depends_on": "E03",
+  "expect_rejection": false,
+  "brief": "Time logging replaces the labor figure entered at completion (maintenance, applied after E03).\n\nTechnicians log their working time while an order is in progress; the labor total is computed from those entries.\n\n1. New collection `time_entries`: `work_order` (reference to work_orders), `technician` (reference to staff), `minutes` (integer), `logged_at` (datetime), `note` (text or null). A time entry is readable exactly by the users who can read its work order (lists contain only those, direct access otherwise 403). POST, PATCH and DELETE on time_entries -> 403 for everyone. UI lists/detail pages follow the read rule.\n2. New action `POST /api/work_orders/{id}/log_time` with body `{\"minutes\": <integer>, \"note\": <text or null>}` (`note` optional, default null): only the current `assignee` (403 otherwise), only while `in_progress` (409 otherwise). `minutes` must be a JSON integer from 1 to 600 inclusive (not a boolean, decimal or string); `note`, if present, must be a string or null; any other key in the body -> 400. Creates one time entry with `technician` = the caller and `logged_at` = now. Returns the work order. No outbox message.\n3. `labor_minutes` on work orders becomes a derived field: the sum of `minutes` over the order's time entries, or `null` when the order has none. It still cannot be sent in a create or PATCH body (400).\n4. `complete` now takes exactly `{\"resolution\": <non-empty text>}`; sending `labor_minutes` or any other key -> 400. An order without any time entry cannot be completed: 409. Order of checks: 403 (not the assignee), 409 (status is not `in_progress`, or the order has no time entry), 400 (body). The `work_completed` payload keeps exactly its keys `work_order, asset, technician, labor_minutes, parts_cost`, with `labor_minutes` = the derived total at completion.\n5. UI: on `/ui/work_orders/{id}` a `log_time` form is shown to the assignee of an `in_progress` order; the `complete` form is shown only when complete is allowed right now (assignee, `in_progress`, at least one time entry).\n6. Cancelling an order keeps its time entries (and therefore its labor_minutes).\n\nData requirements: every existing work order that has a non-null `labor_minutes` gets exactly one time entry with `technician` = the order's `assignee`, `minutes` = its labor_minutes, `logged_at` = its `completed_at` and `note` = `\"migrated\"`. These entries get ids 1, 2, 3, ... in ascending work order id. After the migration every existing order's derived `labor_minutes` equals its former stored value (null where it was null); entries of the inactive technician are migrated like any other. New time entries get ids above the migrated ones.\n\nBehaviour to preserve: E01 (parts and use_parts, which also require in_progress), E02 (claim, dispatch, workload cap), E03 (priority codes and their rules), and every other rule of maintenance.md.",
+  "superseded_base_tests": [
+    "test_work_order_read_permissions",
+    "test_work_order_fields_match_seed",
+    "test_due_date_and_overdue_derived",
+    "test_overdue_uses_now_date_boundary",
+    "test_work_order_filters",
+    "test_requester_creates_work_order_defaults",
+    "test_create_due_dates_per_priority",
+    "test_create_site_rule",
+    "test_inactive_staff_can_create_orders",
+    "test_requester_patches_open_order",
+    "test_supervisor_patch_priority_recomputes_due_date",
+    "test_supervisor_assigns_open_order",
+    "test_assignee_completes_order_and_emits",
+    "test_complete_validation",
+    "test_full_lifecycle",
+    "test_other_operations_emit_nothing",
+    "test_outbox_readable_by_any_user",
+    "test_ui_work_order_detail_fields",
+    "test_ui_actions_per_role_and_state"
+  ]
+}

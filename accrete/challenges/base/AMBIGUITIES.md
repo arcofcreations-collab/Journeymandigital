@@ -62,3 +62,41 @@
 27. **"That employee's manager" read and approve rights** are taken to mean the *direct* manager (the
     `manager` field), as the text says. A skip-level manager (marco for priya/sam/victor) gets 403.
     This is tested; it is listed here only so the interpretation is visible.
+
+## Maintenance (new application: spec/apps/maintenance.md)
+
+The requirements document was written to settle most points the library/expenses specs left open.
+Decisions written into the spec (and therefore tested):
+
+28. **Inactive staff** are valid `X-User` identities with all the rights of their role; `active` only
+    matters as an `assign` target (tested: vera and umar create orders, umar starts his assigned order 37,
+    assigning umar is a 400).
+29. **Bodies are strict**: any field outside the settable set (system fields, derived fields, `id`,
+    unknown names) is a 400, unless a 403 rule applies first (requester sending `priority` -> 403;
+    requester/technician naming another site's asset -> 403, winning over every 400).
+30. **Filters** work on derived fields too (`?overdue=true`, `?open_orders=2`); `null` matches null
+    values; a filter on a field the collection does not have is a 400.
+31. **Text** "non-empty" means at least one non-whitespace character (whitespace-only names, titles and
+    reasons are 400).
+32. **Retired asset on create** is a 400 (not 409): the spec says so explicitly.
+33. **Cancel**: a requester who is not a supervisor may cancel only `open` orders (409 otherwise); a
+    supervisor who is also the requester follows the supervisor rule (tested with sofia and order 79).
+34. **Re-assignment** (also to the same technician) is allowed while `assigned` and emits a new
+    `assignment` message each time.
+35. **due_date follows the current priority**, so a supervisor PATCH of `priority` moves it.
+36. **"No other operation emits outbox messages"** is stated, so tests check that create, PATCH,
+    start, cancel and staff/asset writes emit nothing.
+37. **Labor minutes** must be a JSON integer >= 1; `1.5`, `"30"` and `true` are 400.
+
+Still deliberately not tested for maintenance:
+
+38. Outbox `created_at` value and the initial outbox contents (tests compare before/after).
+39. UI display of `null`, booleans and references; only text, integers and dates are compared.
+40. Whether `id` is shown as a `data-field`; whether create forms show inputs for defaulted fields
+    (`active`, `retired`); only required inputs are checked as a subset (work-order form: the four
+    inputs plus absence of system fields).
+41. Visibility after an asset's `site` or a technician's `site`/`role` is changed while orders are
+    open: the spec says current values apply, but no test changes them.
+42. Every seed staff member is referenced by a work order, so deleting any seed staff is 409; tests
+    delete only staff they created.
+43. Empty PATCH bodies (`{}`) and PATCHes of a field to its current value.

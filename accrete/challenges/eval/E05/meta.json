@@ -1,0 +1,35 @@
+{
+  "id": "E05",
+  "app": "maintenance",
+  "categories": [
+    "reversal",
+    "data_migration",
+    "sequence",
+    "interaction",
+    "conflict_or_ambiguity"
+  ],
+  "depends_on": "E04",
+  "expect_rejection": false,
+  "brief": "Withdraw technician self-dispatch but keep the workload cap (maintenance, applied after E04).\n\nOperations decided that self-dispatch (introduced in E02) caused technicians to cherry-pick work. It is withdrawn; the workload cap introduced together with it stays.\n\n1. The `claim` action is removed: `POST /api/work_orders/{id}/claim` now behaves like any unknown action (404, after the usual 401 check), and no `claim` form appears in the UI. The E03 rule that limited claims to p3/p4 disappears with it.\n2. The `dispatch` field is removed from work orders: it no longer appears in API records or UI pages; sending it in a create or PATCH body is 400 (unknown field) and filtering on it is 400 (unknown field), like any field the collection does not have.\n3. The workload cap stays exactly as specified in E02 for `assign`: a valid technician who is already the assignee of 3 or more `assigned`/`in_progress` orders (not counting the order being assigned) cannot receive it (409); re-assignment to the current assignee is always allowed; an invalid technician is 400.\n\nData requirements (policy for orders that were self-claimed): every work order whose `dispatch` was `\"self\"` and whose status is still `assigned` (not started) returns to the pool: `status` = `open` and `assignee` = null; all its other fields (title, priority, requested_by, created_at, ...) stay as they are. Self-dispatched orders in any other status (in_progress, completed, cancelled) keep their assignee and status. All other orders are unchanged apart from losing the `dispatch` field. This migration emits no outbox messages and creates no time entries or part usages. Because these orders are `open` again, their requesters regain the requester rights for open orders (edit title/description, cancel) and the technicians' workloads drop accordingly.\n\nBehaviour to preserve: E01 (parts, use_parts, low_stock, parts_cost), E03 (priority codes, p4 rule, due dates), E04 (time entries, log_time, derived labor_minutes, complete rules) and every other rule of maintenance.md.",
+  "superseded_base_tests": [
+    "test_work_order_read_permissions",
+    "test_work_order_fields_match_seed",
+    "test_due_date_and_overdue_derived",
+    "test_overdue_uses_now_date_boundary",
+    "test_work_order_filters",
+    "test_requester_creates_work_order_defaults",
+    "test_create_due_dates_per_priority",
+    "test_create_site_rule",
+    "test_inactive_staff_can_create_orders",
+    "test_requester_patches_open_order",
+    "test_supervisor_patch_priority_recomputes_due_date",
+    "test_supervisor_assigns_open_order",
+    "test_assignee_completes_order_and_emits",
+    "test_complete_validation",
+    "test_full_lifecycle",
+    "test_other_operations_emit_nothing",
+    "test_outbox_readable_by_any_user",
+    "test_ui_work_order_detail_fields",
+    "test_ui_actions_per_role_and_state"
+  ]
+}

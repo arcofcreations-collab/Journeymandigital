@@ -1,0 +1,14 @@
+{
+  "id": "E12",
+  "app": "expenses",
+  "categories": [
+    "failure_atomicity",
+    "new_concept",
+    "permissions",
+    "cross_cutting"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Atomic employee offboarding (expenses).\n\nWhen someone leaves, finance offboards them in one step: their reports move to a successor manager and their unfinished drafts disappear - all or nothing.\n\n1. `employees` gain the read-only field `active` (boolean). New employees start with `true`; sending `active` in a create or PATCH body -> 400. It can be used as a list filter.\n2. New action `POST /api/employees/{id}/offboard` with body `{\"successor\": <employee id>}`:\n   - Permission: finance users only (403 otherwise).\n   - State (409): the employee is already inactive; or the employee has any claim with status `submitted` or `approved` (money in flight must be settled first).\n   - Validation (400): `successor` is required and must be the id of an existing, active employee whose `role` is `manager`, who is not the offboarded employee, and whose own `manager` is not the offboarded employee.\n   - Order of checks: 404 (unknown employee), 403, 409, 400.\n   - Effect, atomically: the employee's `active` becomes `false`; every employee whose `manager` is the offboarded employee gets `manager` = successor; every claim of the offboarded employee with status `draft` is deleted; one outbox message is emitted on channel `employee_offboarded` with payload `{\"employee\": id, \"successor\": id, \"reassigned\": [ids of the re-managed employees, ascending], \"deleted_claims\": [ids of the deleted drafts, ascending]}`. Returns the employee record. If any check fails, nothing at all changes and nothing is emitted.\n3. Inactive employees remain valid `X-User` identities and keep their read rights (finance still reads everything, employees read their own remaining claims, read access as manager follows the current `manager` values), but every write is refused with 403: creating, patching or deleting anything, and every action (submit, approve, reject, pay, offboard). `/ui/claims/new` and other create forms are 403 for them.\n4. An inactive employee cannot become anyone's `manager`: creating or patching an employee with an inactive `manager` -> 400.\n5. UI: on `/ui/employees/{id}` an `offboard` form is shown exactly when offboarding that employee is allowed right now for the caller (permission and state; the successor parameter is not considered).\n\nData requirements: every existing employee gets `active` = `true`. No other record changes.\n\nBehaviour to preserve: everything else in expenses.md, including that approvals are done by the employee's current direct manager and the exact `payment` payload `{\"claim\", \"employee\", \"amount\"}`.",
+  "superseded_base_tests": []
+}

@@ -1,0 +1,33 @@
+{
+  "id": "E03",
+  "app": "maintenance",
+  "categories": [
+    "rule_change",
+    "data_migration",
+    "cross_cutting",
+    "interaction",
+    "sequence"
+  ],
+  "depends_on": "E02",
+  "expect_rejection": false,
+  "brief": "Priority scale p1-p4 (maintenance, applied after E02).\n\nThe three priorities are replaced by a four-level scale that also takes the asset's criticality into account.\n\n1. `priority` on work orders now takes exactly `\"p1\"` (most urgent), `\"p2\"`, `\"p3\"` or `\"p4\"`. The old values `\"urgent\"`, `\"normal\"` and `\"low\"` (and anything else, including other spellings such as `\"P1\"`) are rejected with 400 on create and PATCH. A list filter with an old value is still a valid filter that simply matches nothing.\n2. `due_date` (derived) is the date part of `created_at` plus 1 day (p1), 3 days (p2), 7 days (p3) or 30 days (p4). As before it follows the current priority, for every order regardless of status; `overdue` is derived from it as before.\n3. New validation rule: a work order whose asset has `criticality` `\"high\"` may not be given priority `\"p4\"`: a create or PATCH that sets `p4` on such an order is 400, even when the order already has `p4`. The existing precedence stays (e.g. the requester/technician site rule 403 still wins over this 400; on a finished order the PATCH 409 still wins).\n4. Interaction with self-dispatch (E02): technicians may only `claim` orders whose current priority is `p3` or `p4`. Claiming a `p1` or `p2` order is 403 (a permission rule, so it wins over the state and workload 409s). The UI `claim` form follows this rule. Supervisors still `assign` orders of any priority (workload cap unchanged).\n\nData requirements: every existing work order, in any status, is migrated: `urgent` -> `p1`; `normal` -> `p2` if its asset's `criticality` is `high`, otherwise `p3`; `low` -> `p4`. Policy for the conflict with rule 3: existing `low` orders on high-criticality assets also become `p4` and keep it (the rule only refuses *setting* p4); their other fields stay editable as before. No other field of any record changes (due dates change only because they are derived).\n\nBehaviour to preserve: E01 (parts, use_parts, parts_cost, low_stock, work_completed payload) and E02 (claim, dispatch, workload cap) apart from the claim restriction above; every other rule of maintenance.md.",
+  "superseded_base_tests": [
+    "test_work_order_read_permissions",
+    "test_work_order_fields_match_seed",
+    "test_due_date_and_overdue_derived",
+    "test_overdue_uses_now_date_boundary",
+    "test_work_order_filters",
+    "test_requester_creates_work_order_defaults",
+    "test_create_due_dates_per_priority",
+    "test_create_site_rule",
+    "test_inactive_staff_can_create_orders",
+    "test_requester_patches_open_order",
+    "test_supervisor_patch_priority_recomputes_due_date",
+    "test_supervisor_assigns_open_order",
+    "test_assignee_completes_order_and_emits",
+    "test_full_lifecycle",
+    "test_other_operations_emit_nothing",
+    "test_outbox_readable_by_any_user",
+    "test_ui_work_order_detail_fields"
+  ]
+}

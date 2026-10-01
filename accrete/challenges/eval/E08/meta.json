@@ -1,0 +1,23 @@
+{
+  "id": "E08",
+  "app": "library",
+  "categories": [
+    "new_concept",
+    "new_relationship",
+    "data_migration",
+    "cross_cutting"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Physical copies of books (library).\n\nThe library owns several physical copies of some titles. Loans must record which copy was lent, and a title is available as long as one of its copies is.\n\n1. New collection `copies`: `book` (reference to books, required, cannot be changed after creation), `barcode` (text, required, unique), `status` (derived: `\"on_loan\"` if the copy has a loan with no `returned_at`, otherwise `\"available\"`). Every authenticated user can read all copies. Only librarians can create, PATCH or DELETE copies (403 otherwise, winning over 400). Settable on create: `book` and `barcode`; on PATCH: `barcode` only. Any other field (including `status`, `book` on PATCH, unknown names) -> 400; an unknown book -> 400; a missing/empty or duplicate barcode -> 400. Deleting a copy that has any loan (returned or not) -> 409.\n2. `loans` gain a read-only field `copy` (reference to copies): the copy that was lent. Like all loan fields it is set only by `borrow` (loans still cannot be created, patched or deleted directly).\n3. `books.status` is now derived from the book's copies: `\"available\"` if at least one of its copies is available, `\"on_loan\"` if it has copies and all of them are on loan, `\"unavailable\"` if it has no copies at all. New derived field `books.available_copies`: the number of its copies whose status is `available`. Creating a book creates no copy (a new book is `\"unavailable\"` until a librarian adds a copy).\n4. `POST /api/books/{id}/borrow` lends the available copy of that book with the lowest id. It is 409 when the book has no available copy (no copies, or all on loan); all other borrow rules (inactive member 409, 3 open loans 409, member borrowing for someone else 403, precedence) stay. The created loan has `copy` = the chosen copy. The `loan_created` outbox payload becomes `{\"loan\": id, \"book\": id, \"member\": id, \"copy\": id}`. Returning a loan makes its copy available again.\n5. Deleting a book: still 409 if the book has any loan; otherwise the book and all its copies are deleted.\n6. UI: `/ui/copies` list and detail pages for everyone; `/ui/copies/new` for librarians only (inputs `book`, `barcode`); the `borrow` form on a book is shown when the book has at least one available copy.\n\nData requirements: every existing book gets exactly one copy whose id equals the book id and whose barcode is `\"C\"` followed by the book id zero-padded to 4 digits (book 7 -> `\"C0007\"`). In addition create copy 41 for book 1 with barcode `\"C0001-2\"` and copy 42 for book 22 with barcode `\"C0022-2\"` (the library bought second copies of these two titles; they are not on loan). Every existing loan gets `copy` = the id of its book's original copy (equal to its book id). New copies get ids above 42. Members, books and loans are otherwise unchanged; because of the second copies, books 1 and 22 are now available.\n\nBehaviour to preserve: everything else in library.md (permissions, return rules, members, books CRUD and validation, UI conventions).",
+  "superseded_base_tests": [
+    "test_book_status_for_whole_catalogue",
+    "test_member_borrows_for_self",
+    "test_borrow_book_on_loan_is_409",
+    "test_librarian_lends_to_member",
+    "test_failed_borrows_emit_no_outbox_message",
+    "test_returned_book_can_be_borrowed_again",
+    "test_librarian_creates_book",
+    "test_ui_book_detail_fields_and_borrow_action"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "E09",
+  "app": "library",
+  "categories": [
+    "permissions",
+    "new_relationship",
+    "data_migration",
+    "conflict_or_ambiguity"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Household guardians (library).\n\nParents want to manage their children's library accounts.\n\n1. `members` gain the field `guardian`: a reference to another member, or `null` (default `null`). It can be used as a list filter like other references (`?guardian=4`), and `?guardian=null` matches members without a guardian. Only librarians can set it (on create and PATCH); a member editing their own record may still change only `name` (sending `guardian` -> 403 as for every other field). Validation (400): `guardian` must be null or the id of an existing member other than the member itself; the guardian must not have a guardian of their own; and a member who is already someone's guardian cannot be given a guardian (no chains).\n2. A member X is a *dependant* of member G when X.guardian = G. A guardian additionally gets, for each of their dependants, exactly these rights:\n   - read the dependant's member record (it appears in G's member list and detail pages);\n   - read the dependant's loans (they appear in G's loan list, filters included);\n   - borrow a book for the dependant with `POST /api/books/{id}/borrow` and `{\"member\": <dependant id>}`; all borrow rules (book availability, the dependant's 3 open loans, the dependant being inactive -> 409, outbox `loan_created` with the dependant as member) apply as if a librarian lent to the dependant;\n   - return the dependant's loans with `POST /api/loans/{id}/return`.\n   A guardian cannot PATCH or DELETE a dependant's record (403), and a dependant gets no rights over their guardian. Borrowing for any other member is still 403 for non-librarians (403 before 409).\n3. Policy for ambiguous cases: guardian rights do not depend on the guardian's or the dependant's `active` flag (only the borrowing rules themselves look at the borrower's `active`). Rights follow the current `guardian` values immediately (removing a guardian removes the access).\n4. Deleting a member who is the guardian of anyone -> 409 (a librarian must first clear the dependants' `guardian`).\n5. UI: lists, detail pages and `return` forms follow these read/action rules; `/ui/members/new` (librarians) includes a `guardian` input; member detail pages show the `guardian` field.\n\nData requirements: set `guardian` for these existing members: eli (id 5) -> dara (4); jo (10) -> dara (4); gus (7) -> fatima (6); lena (12) -> kemal (11). All other members get `guardian` = null. Nothing else changes.\n\nBehaviour to preserve: everything else in library.md, in particular that members without dependants still see only their own member record and loans, the 3-loan limit, and librarians' rights.",
+  "superseded_base_tests": []
+}

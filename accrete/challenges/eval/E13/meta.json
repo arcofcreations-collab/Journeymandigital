@@ -1,0 +1,13 @@
+{
+  "id": "E13",
+  "app": "expenses",
+  "categories": [
+    "rule_change",
+    "new_concept",
+    "conflict_or_ambiguity"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Withdraw submitted claims and revise rejected ones (expenses).\n\nEmployees want to correct claims instead of starting over.\n\n1. New action `POST /api/claims/{id}/withdraw` with body `{}`: only the claim's employee (403 otherwise). Allowed only when the claim is `submitted` and the current time (X-Now) is at most 7 days (168 hours) after its `submitted_at` - exactly 7 days is still allowed, one second later is not; otherwise 409. Effect: `status` = `draft`, `submitted_at` = null. The claim can then be edited, deleted or submitted again as any draft (a new submit sets a new `submitted_at`).\n2. New action `POST /api/claims/{id}/revise` with body `{}`: only the claim's employee (403 otherwise). Allowed only when the claim is `rejected` and its `revision` is less than 2; otherwise 409. Effect: `status` = `draft`; `previous_rejection_reason` = the current `rejection_reason`; `rejection_reason`, `decided_at`, `decided_by` and `submitted_at` become null; `revision` increases by 1. So a claim can be revised at most twice; after a third rejection it stays rejected.\n3. New read-only fields on claims: `revision` (integer, starts at 0) and `previous_rejection_reason` (text or null, starts null). Sending either in a create or PATCH body -> 400 (like the other protected fields). Rejecting a revised claim sets `rejection_reason` as usual and leaves `revision` and `previous_rejection_reason` untouched.\n4. Policy for open questions: withdraw/revise emit no outbox message; read permissions do not change (the manager can still read the withdrawn or revised claim); the 7-day window is measured from the claim's current `submitted_at`; approving, rejecting and paying a re-submitted claim work exactly as for any other submitted claim (payment payload unchanged).\n5. UI: on `/ui/claims/{id}` a `withdraw` form and a `revise` form are shown exactly when the caller may run that action right now (permission, state, time window, revision limit); detail pages show the two new fields.\n\nData requirements: every existing claim gets `revision` = 0 and `previous_rejection_reason` = null; nothing else changes.\n\nBehaviour to preserve: all other rules of expenses.md (submit/approve/reject/pay, PATCH and DELETE only for own drafts, protected fields, read permissions).",
+  "superseded_base_tests": []
+}

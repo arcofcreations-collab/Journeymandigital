@@ -1,0 +1,20 @@
+{
+  "id": "E02",
+  "app": "maintenance",
+  "categories": [
+    "new_concept",
+    "permissions",
+    "rule_change",
+    "data_migration",
+    "conflict_or_ambiguity",
+    "sequence"
+  ],
+  "depends_on": "E01",
+  "expect_rejection": false,
+  "brief": "Technician self-dispatch and a workload cap (maintenance, applied after E01).\n\nTechnicians may now pick up open work orders themselves, and nobody may be overloaded.\n\n1. New action `POST /api/work_orders/{id}/claim` with body `{}`: a technician takes an open work order for themselves.\n   - Permission: only staff whose `role` is `technician`, whose `active` is `true` and whose `site` equals the site of the order's asset; anyone else gets 403.\n   - State: only from `open`, otherwise 409. Workload: if the caller is already the assignee of 3 or more work orders whose status is `assigned` or `in_progress`, 409.\n   - Effect: `assignee` = the caller, `status` = `assigned`, `dispatch` = `\"self\"`. Emits an outbox message on channel `assignment` with the same payload as `assign`: `{\"work_order\": id, \"asset\": asset id, \"technician\": staff id}`. Returns the work order.\n2. Workload cap for `assign`: if the chosen technician (one that passes the existing technician validation) is already the assignee of 3 or more `assigned`/`in_progress` work orders, not counting the order being assigned, the response is 409 and nothing changes or is emitted. Consequently re-assigning an order to its current assignee is always allowed. Order of checks for assign: 403 (not a supervisor), 409 (order not open/assigned), 400 (invalid technician: the cap is only evaluated for a valid technician), 409 (cap) - i.e. an invalid technician is a 400 and a valid technician at the cap is a 409.\n3. New read-only field `dispatch` on work orders: `\"supervisor\"`, `\"self\"` or `null`. `assign` sets it to `\"supervisor\"` (also on re-assignment), `claim` sets it to `\"self\"`; new orders start with `null`. Sending it in a create or PATCH body -> 400. It can be used as a list filter like any other field (`?dispatch=null` matches null).\n4. UI: on `/ui/work_orders/{id}` a `claim` form is shown exactly when a claim by the caller would succeed right now (permission, state and the caller's current workload).\n\nData requirements: for every existing work order that has an assignee, `dispatch` = `\"self\"` when the assignee is also its `requested_by`, otherwise `\"supervisor\"`; orders without an assignee get `null` (this applies to all statuses, including cancelled ones). Policy for existing overload: workloads already above the cap (one technician currently has 4 active orders) are kept exactly as they are - no order is unassigned or changed; such a technician simply cannot receive further orders (by assign or claim) until their workload drops below 3. No other record changes.\n\nBehaviour to preserve: everything from maintenance.md and E01 (parts, use_parts, parts_cost, low_stock, work_completed payload), including that requesters can cancel or edit their order only while it is `open`, and that a claimed order then follows the normal start/complete/cancel rules.",
+  "superseded_base_tests": [
+    "test_assignee_completes_order_and_emits",
+    "test_full_lifecycle",
+    "test_outbox_readable_by_any_user"
+  ]
+}

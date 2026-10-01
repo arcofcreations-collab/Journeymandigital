@@ -1,0 +1,43 @@
+{
+  "id": "E06",
+  "app": "maintenance",
+  "categories": [
+    "permissions",
+    "rule_change",
+    "data_migration",
+    "cross_cutting",
+    "sequence"
+  ],
+  "depends_on": "E05",
+  "expect_rejection": false,
+  "brief": "Site-scoped supervisors and a new `manager` role (maintenance, applied after E05).\n\nEach supervisor should only run their own site; one person keeps the company-wide view.\n\n1. `staff.role` accepts a fourth value, `\"manager\"` (any other value is still 400). A manager has, on every site, all the rights that a supervisor had before this change (maintenance.md and E01-E05: reading all work orders, part usages and time entries, assign, cancel from open/assigned/in_progress, PATCH of title/description/priority, creating work orders for any site, managing assets and parts).\n2. Supervisors become site-scoped. The relevant site of a work order is the site of its asset; of an asset or a part, its own `site`.\n   - Work orders: a supervisor can read the work orders of their own site (and, as for everyone, orders they requested or are assigned to). The supervisor rights for `assign`, `cancel` (from open/assigned/in_progress) and PATCH (title, description, priority while unfinished) apply only to orders of their own site. On other orders they only have the rights any staff member has as `requested_by` (otherwise 403). Part usages and time entries follow the work-order read rule as before.\n   - Creating work orders: supervisors are now restricted to assets of their own site exactly like requesters and technicians (an existing asset of another site -> 403, winning over any 400). Managers may create for any site.\n   - Assets and parts: a supervisor may create one only with `site` equal to their own site, and may PATCH or DELETE only those whose current `site` is their own; a PATCH may not change `site` to another site. Each violation is 403 and wins over 400 (a create body without `site` is simply a 400). Managers have no site restriction.\n   - Staff: only managers can create, PATCH or DELETE staff; supervisors now get 403 like everyone else (403 before 400).\n   - Reading staff, assets and parts is unchanged (every authenticated user reads all of them).\n3. UI: `/ui/staff/new` only for managers; `/ui/assets/new` and `/ui/parts/new` for managers and supervisors (403 for other roles); work-order lists, detail pages and action forms follow the new rights.\n\nData requirements: staff `sofia` (id 1) becomes `manager` and keeps her site `North`; `tomas` (South) and `yara` (East) remain supervisors; no other record changes.\n\nBehaviour to preserve: E01 (parts and use_parts), E03 (priority codes, p4 rule), E04 (time entries, complete rules), E05 (no claim, no dispatch, workload cap for assign), requester and technician rights, and every other rule of maintenance.md.",
+  "superseded_base_tests": [
+    "test_supervisor_creates_staff_with_default_active",
+    "test_staff_validation",
+    "test_supervisor_creates_and_updates_asset",
+    "test_new_staff_is_identity_and_assignable",
+    "test_work_order_lists_per_role",
+    "test_work_order_read_permissions",
+    "test_work_order_fields_match_seed",
+    "test_due_date_and_overdue_derived",
+    "test_overdue_uses_now_date_boundary",
+    "test_work_order_filters",
+    "test_requester_creates_work_order_defaults",
+    "test_create_due_dates_per_priority",
+    "test_create_site_rule",
+    "test_inactive_staff_can_create_orders",
+    "test_requester_patches_open_order",
+    "test_supervisor_patch_priority_recomputes_due_date",
+    "test_supervisor_assigns_open_order",
+    "test_assignee_completes_order_and_emits",
+    "test_complete_validation",
+    "test_supervisor_cancels_in_progress_keeps_assignee",
+    "test_full_lifecycle",
+    "test_other_operations_emit_nothing",
+    "test_outbox_readable_by_any_user",
+    "test_ui_lists_follow_read_permissions",
+    "test_ui_work_order_detail_fields",
+    "test_ui_actions_per_role_and_state",
+    "test_ui_create_forms"
+  ]
+}

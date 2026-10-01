@@ -1,0 +1,28 @@
+{
+  "id": "E14",
+  "app": "library",
+  "categories": [
+    "sequence",
+    "interaction",
+    "rule_change",
+    "data_migration",
+    "failure_atomicity"
+  ],
+  "depends_on": "E08",
+  "expect_rejection": false,
+  "brief": "Lost copies (library, applied after E08).\n\nCopies sometimes never come back. Librarians need to close such loans and take the copy out of circulation, and put it back if it turns up.\n\n1. `loans` gain the read-only field `lost_at` (datetime or null, default null). `copies` gain the read-only field `lost` (boolean, default false); sending `lost` in a copy create or PATCH body -> 400, and loans stay non-writable (403). A copy's derived `status` is now `\"lost\"` when `lost` is true, otherwise `\"on_loan\"`/`\"available\"` as in E08.\n2. New action `POST /api/loans/{id}/declare_lost` with body `{}`: librarians only (403 otherwise). Only for an open loan, i.e. `returned_at` null and `lost_at` null; otherwise 409. Effect, atomically: the loan's `lost_at` = now (its `returned_at` stays null), the loan's copy gets `lost` = true, and one outbox message is emitted on channel `copy_lost` with payload `{\"loan\": id, \"copy\": id, \"book\": id, \"member\": id}`. Returns the loan. A refused call changes nothing and emits nothing.\n3. A loan with `lost_at` set is closed: it no longer counts towards the member's 3 open loans, its `overdue` is always false, and `return` on it is 409.\n4. Book status ignores lost copies: `\"available\"` if the book has at least one available copy, `\"on_loan\"` if it has at least one copy that is not lost and all of those are on loan, `\"unavailable\"` if it has no copy that is not lost. `available_copies` counts available copies. `borrow` lends the lowest-id available copy (lost copies are never lent).\n5. New action `POST /api/copies/{id}/found` with body `{}`: librarians only (403). Only for a copy with `lost` = true, otherwise 409. Effect: `lost` = false (the copy becomes available again). The loan keeps its `lost_at` and stays closed. Returns the copy.\n6. Deleting a copy that has loans is still 409 (lost copies included).\n7. UI: on `/ui/loans/{id}` a `declare_lost` form is shown to librarians for open loans, and the `return` form is not shown for lost loans; on `/ui/copies/{id}` a `found` form is shown to librarians for lost copies; detail pages show the new fields.\n\nData requirements: loans 46 (book 4, copy 4) and 50 (book 16, copy 16), both of member jo, were reported lost: set their `lost_at` to `\"2026-02-28T10:00:00\"` and set `lost` = true on copies 4 and 16. All other loans get `lost_at` = null and all other copies `lost` = false. No outbox messages are emitted for this migration. As a consequence books 4 and 16 become unavailable and jo has a single open loan.\n\nBehaviour to preserve: everything from E08 (copies, lowest-id selection, `loan_created` payload with `copy`) and library.md (permissions, limits, returns).",
+  "superseded_base_tests": [
+    "test_book_fields_and_derived_status",
+    "test_book_status_for_whole_catalogue",
+    "test_overdue_derived_field",
+    "test_member_borrows_for_self",
+    "test_borrow_book_on_loan_is_409",
+    "test_borrow_member_with_three_open_loans_is_409",
+    "test_librarian_lends_to_member",
+    "test_failed_borrows_emit_no_outbox_message",
+    "test_librarian_returns_overdue_loan",
+    "test_returned_book_can_be_borrowed_again",
+    "test_librarian_creates_book",
+    "test_ui_book_detail_fields_and_borrow_action"
+  ]
+}

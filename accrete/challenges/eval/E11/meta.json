@@ -1,0 +1,17 @@
+{
+  "id": "E11",
+  "app": "expenses",
+  "categories": [
+    "new_relationship",
+    "data_migration",
+    "rule_change",
+    "cross_cutting"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Cost centres with budgets (expenses).\n\nEvery claim is charged to a cost centre, and managers may not approve beyond a cost centre's budget.\n\n1. New collection `cost_centres`: `code` (text, required, unique), `name` (text, required), `department` (text or null, optional, default null; unique among non-null values), `budget` (JSON number >= 0, required), `committed` (derived: the sum of `amount` over the claims charged to this cost centre whose status is `approved` or `paid`, rounded to 2 decimals), `remaining` (derived: `budget - committed`, rounded to 2 decimals). Every authenticated user can read all cost centres. Only finance users can create, PATCH or DELETE them (403 otherwise, winning over 400). Settable fields: `code`, `name`, `department`, `budget`; anything else -> 400; invalid values or duplicates -> 400. PATCHing `budget` to less than the current `committed` -> 409. Deleting a cost centre that has any claim -> 409.\n2. Claims gain the field `cost_centre` (reference to cost_centres). On create it is optional: when omitted, it is set to the cost centre whose `department` equals the creating employee's `department`; when present it must be the id of an existing cost centre (an unknown id or `null` -> 400). The claim's employee may change it with PATCH while the claim is `draft` (same rules as the other editable fields: 403 for others, 409 when not draft, 400 for an invalid value).\n3. Budget rule for `approve`: approving a claim whose `amount` would make its cost centre's `committed` exceed the cost centre's `budget` (compared to the cent) -> 409, and nothing changes. The existing order of checks stays: 403 (not the employee's manager), then 409 (wrong status or budget). `reject` and `pay` are not affected by budgets; paying does not change `committed`.\n4. The `payment` outbox payload becomes `{\"claim\": id, \"employee\": id, \"amount\": amount, \"cost_centre\": cost centre id}`.\n5. UI: `/ui/cost_centres` list and detail for everyone; `/ui/cost_centres/new` for finance only (inputs `code`, `name`, `department`, `budget`); the claim create form gains a `cost_centre` input; the `approve` form is shown only when approval would succeed right now (including the budget rule).\n\nData requirements: create exactly these cost centres (id, code, name, department, budget): 1, ENG, Engineering, Engineering, 31000.00 | 2, SAL, Sales, Sales, 12000.00 | 3, FIN, Finance, Finance, 2000.00 | 4, TRV, Travel pool, null, 5000.00. Every existing claim gets `cost_centre` = the cost centre whose `department` equals its employee's current `department` (so Sales claims -> 2, all other existing claims -> 1). No other field changes; existing approved claims stay approved even where that already uses most of a budget.\n\nBehaviour to preserve: all other rules of expenses.md (permissions, state machine, validation, protected fields).",
+  "superseded_base_tests": [
+    "test_finance_pays_approved_claim_and_emits_payment",
+    "test_full_claim_lifecycle"
+  ]
+}
