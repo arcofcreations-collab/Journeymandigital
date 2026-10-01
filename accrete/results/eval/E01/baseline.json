@@ -1,0 +1,27 @@
+{
+ "id": "E01",
+ "system": "baseline",
+ "app": "maintenance",
+ "categories": [
+  "new_concept",
+  "new_relationship",
+  "failure_atomicity",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "base_failing_before": [],
+ "hidden_passed": 15,
+ "hidden_total": 15,
+ "hidden_failures": [],
+ "base_checked": 48,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": "45e55b9",
+ "t_start": 1790822505.5194385,
+ "t_end": 1790822868.8120158,
+ "self_timed_s": 363.3,
+ "duration_ms": 377023,
+ "tool_uses": 36,
+ "tokens": 141690
+}
