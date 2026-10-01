@@ -1,0 +1,24 @@
+{
+ "id": "D07",
+ "system": "baseline",
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 11,
+ "hidden_total": 11,
+ "hidden_failures": [],
+ "base_checked": 57,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": null,
+ "t_start": 1790818933.83029,
+ "t_end": 1790819064.5733924,
+ "self_timed_s": 130.7,
+ "duration_ms": 136248,
+ "tool_uses": 19,
+ "tokens": 78722
+}

@@ -102,6 +102,10 @@ def prepare(cset, cid, system):
         history = f", as changed by the earlier requests in {ws}/HISTORY.md"
     if system == "accrete":
         shutil.copy(os.path.join(ROOT, "docs", "GUIDE.md"), os.path.join(ws, "GUIDE.md"))
+    rev = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "accrete"], capture_output=True, text=True).stdout.strip()
+    with open(os.path.join(ws, "VERSION"), "w") as fh:
+        fh.write(rev + ("+dirty" if dirty else "") + "\n")
     prompt = PROMPT.format(ws=ws, system=SYSTEM_TEXT[system].format(ws=ws), brief=meta["brief"], history=history)
     with open(os.path.join(ws, "PROMPT.txt"), "w") as fh:
         fh.write(prompt)
@@ -140,6 +144,8 @@ def verify(cset, cid, system):
     out["regressions"] = regressions
     out["clarification_written"] = os.path.exists(os.path.join(app, "CLARIFICATION.md"))
     out["success"] = (out["hidden_total"] > 0 and out["hidden_passed"] == out["hidden_total"] and not regressions)
+    vp = os.path.join(ws, "VERSION")
+    out["accrete_version"] = open(vp).read().strip() if os.path.exists(vp) else None
     for name in ("t_start", "t_end"):
         p = os.path.join(ws, name)
         out[name] = float(open(p).read().strip()) if os.path.exists(p) else None

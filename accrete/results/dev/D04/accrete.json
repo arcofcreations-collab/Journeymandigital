@@ -1,0 +1,27 @@
+{
+ "id": "D04",
+ "system": "accrete",
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "sequence",
+  "interaction",
+  "data_migration",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 11,
+ "hidden_total": 11,
+ "hidden_failures": [],
+ "base_checked": 58,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": null,
+ "t_start": 1790818933.8026533,
+ "t_end": 1790819068.4209132,
+ "self_timed_s": 134.6,
+ "duration_ms": 146846,
+ "tool_uses": 16,
+ "tokens": 86706
+}

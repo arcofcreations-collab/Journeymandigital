@@ -1,0 +1,24 @@
+{
+ "id": "D07",
+ "system": "accrete",
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 11,
+ "hidden_total": 11,
+ "hidden_failures": [],
+ "base_checked": 57,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": null,
+ "t_start": 1790818934.4185808,
+ "t_end": 1790818985.8459692,
+ "self_timed_s": 51.4,
+ "duration_ms": 57607,
+ "tool_uses": 11,
+ "tokens": 61885
+}

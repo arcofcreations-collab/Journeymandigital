@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/dev/D06/accrete/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D06/test_D06.py",
+ "passed": 11,
+ "total": 11,
+ "seconds": 0.55,
+ "results": [
+  {
+   "test": "challenges.dev.D06.test_D06::test_checkout_creates_loans_and_messages_in_order",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_checkout_three_books_for_member_without_loans",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_checkout_over_limit_leaves_no_trace",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_checkout_with_unavailable_book_anywhere_leaves_no_trace",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_checkout_for_inactive_member_is_409",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_checkout_validation_leaves_no_trace",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_conflict_wins_over_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_members_cannot_checkout",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_checked_out_loans_behave_like_normal_loans",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_single_borrow_unchanged",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D06.test_D06::test_ui_checkout_form_for_librarians_only",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

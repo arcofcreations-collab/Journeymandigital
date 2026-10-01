@@ -1,0 +1,26 @@
+{
+ "id": "D01",
+ "system": "baseline",
+ "app": "library",
+ "categories": [
+  "data_migration",
+  "new_relationship",
+  "new_concept",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 12,
+ "hidden_total": 12,
+ "hidden_failures": [],
+ "base_checked": 54,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": null,
+ "t_start": 1790818680.246573,
+ "t_end": 1790818985.0183775,
+ "self_timed_s": 304.8,
+ "duration_ms": 320727,
+ "tool_uses": 32,
+ "tokens": 114106
+}
