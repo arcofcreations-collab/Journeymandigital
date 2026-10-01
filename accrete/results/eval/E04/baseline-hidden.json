@@ -1,0 +1,60 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/eval/E04/baseline/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E04/test_E04.py",
+ "passed": 10,
+ "total": 10,
+ "seconds": 0.98,
+ "results": [
+  {
+   "test": "challenges.eval.E04.test_E04::test_time_entries_backfilled_from_labor_minutes",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E04.test_E04::test_time_entries_follow_work_order_read_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E04.test_E04::test_log_time_then_complete",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E04.test_E04::test_complete_requires_a_time_entry",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E04.test_E04::test_log_time_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E04.test_E04::test_log_time_permissions_and_state",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E04.test_E04::test_time_entries_and_labor_are_read_only",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E04.test_E04::test_cancel_keeps_time_entries",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E04.test_E04::test_ui_log_time_and_complete_forms",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E04.test_E04::test_full_flow_with_claim_parts_and_time",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
