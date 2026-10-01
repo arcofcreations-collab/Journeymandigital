@@ -1,0 +1,25 @@
+{
+ "id": "E13",
+ "system": "accrete",
+ "app": "expenses",
+ "categories": [
+  "rule_change",
+  "new_concept",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 8,
+ "hidden_total": 8,
+ "hidden_failures": [],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": "db1c0f1",
+ "t_start": 1790822014.539308,
+ "t_end": 1790822084.6985707,
+ "self_timed_s": 70.2,
+ "duration_ms": 83375,
+ "tool_uses": 17,
+ "tokens": 73548
+}
