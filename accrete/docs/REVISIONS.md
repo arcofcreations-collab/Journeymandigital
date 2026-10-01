@@ -39,3 +39,9 @@ challenges that inform a redesign are reclassified as development evidence.
 | R11 | Rename rewrote expressions with `ast.unparse`, so a rename followed by its revert left equivalent but textually different expressions | new accrete regression test (exact revert) | renames splice only the renamed identifiers into the original text |
 | R12 | Changing a trigger did not count the actions that fire it as consequences: replay rejected the (real) difference as "unexplained" | new regression test (trigger on loans.create changes books.borrow) | trigger changes add every action/trigger whose effects can cause that event as consequences |
 | C1 | **Engine upgrades are outside the change pipeline.** Introducing the typed `list` broke the D06 app, whose author had declared an untyped `list` param that the old engine passed through; nothing in accrete detected it | re-running every dev app's hidden tests on the new engine (D06: 5/11) | untyped lists keep the old meaning. The general gap remains: accrete gates *application* changes, not changes to accrete itself. Re-running applications' acceptance checks after engine upgrades (done here with `harness/compat_check.sh`) is the stop-gap; storing responses in the request corpus would let replay check engine upgrades too (not built) |
+
+## Harness revisions
+
+| # | Problem | Revision |
+|---|---|---|
+| H1 | In the development runs the public test client (`harness/accept_client.py`) was outside the workspaces. The baseline apps' own pytest suites import it from `../../harness`, so baseline agents spent time writing stand-ins. That is a disadvantage for the baseline (accrete agents do not need it). | From the evaluation set on, `prepare` places the public client at `<run>/harness/accept_client.py`, where the apps' tests find it, and the prompt (identical for both systems) allows reading it. Dev-set baseline times are therefore somewhat pessimistic for the baseline; the evaluation set is the fair comparison. |

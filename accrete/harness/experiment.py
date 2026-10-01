@@ -32,7 +32,9 @@ SYSTEM_TEXT = {
 PROMPT = """You are a software engineer applying one change request to an existing application.
 
 Rules:
-- Work ONLY inside {ws}. Do not read, list or search anything outside it.
+- Work ONLY inside {ws}. Do not read, list or search anything outside it, with one exception:
+  {client} is the public test client the evaluators use (the same for every team). You may read and
+  import it (tests that look for `../../harness` from the app directory find it there); do not modify it.
 - Your very first action: run `date -u +%s.%N > {ws}/t_start`. Your very last action: run `date -u +%s.%N > {ws}/t_end`.
 
 {system}
@@ -106,7 +108,10 @@ def prepare(cset, cid, system):
     dirty = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "accrete"], capture_output=True, text=True).stdout.strip()
     with open(os.path.join(ws, "VERSION"), "w") as fh:
         fh.write(rev + ("+dirty" if dirty else "") + "\n")
-    prompt = PROMPT.format(ws=ws, system=SYSTEM_TEXT[system].format(ws=ws), brief=meta["brief"], history=history)
+    client_dir = os.path.join(os.path.dirname(ws), "harness")
+    os.makedirs(client_dir, exist_ok=True)
+    shutil.copy(os.path.join(ROOT, "harness", "accept_client.py"), os.path.join(client_dir, "accept_client.py"))
+    prompt = PROMPT.format(client=os.path.join(client_dir, "accept_client.py"), ws=ws, system=SYSTEM_TEXT[system].format(ws=ws), brief=meta["brief"], history=history)
     with open(os.path.join(ws, "PROMPT.txt"), "w") as fh:
         fh.write(prompt)
     print(prompt)
