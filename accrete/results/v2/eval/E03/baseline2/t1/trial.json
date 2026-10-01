@@ -1,0 +1,18 @@
+{
+ "id": "E03",
+ "set": "eval",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "maintenance",
+ "categories": [
+  "rule_change",
+  "data_migration",
+  "cross_cutting",
+  "interaction",
+  "sequence"
+ ],
+ "expect_rejection": false,
+ "version": "1e48251",
+ "attempts": [],
+ "extra": []
+}

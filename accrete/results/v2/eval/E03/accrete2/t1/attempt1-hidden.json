@@ -1,0 +1,50 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/eval/E03/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E03/test_E03.py",
+ "passed": 8,
+ "total": 8,
+ "seconds": 0.73,
+ "results": [
+  {
+   "test": "challenges.eval.E03.test_E03::test_priorities_migrated",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E03.test_E03::test_due_dates_and_overdue_follow_new_offsets",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E03.test_E03::test_low_orders_on_high_assets_keep_p4",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E03.test_E03::test_create_with_new_priority_codes",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E03.test_E03::test_patch_priority_codes",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E03.test_E03::test_claim_limited_to_p3_and_p4",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E03.test_E03::test_ui_shows_codes_and_claim_rule",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E03.test_E03::test_earlier_changes_preserved",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

@@ -1,0 +1,18 @@
+{
+ "id": "E04",
+ "set": "eval",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "maintenance",
+ "categories": [
+  "new_concept",
+  "data_migration",
+  "rule_change",
+  "interaction",
+  "sequence"
+ ],
+ "expect_rejection": false,
+ "version": "1e48251",
+ "attempts": [],
+ "extra": []
+}

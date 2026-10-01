@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/eval/E02/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E02/test_E02.py",
+ "passed": 11,
+ "total": 11,
+ "seconds": 1.14,
+ "results": [
+  {
+   "test": "challenges.eval.E02.test_E02::test_dispatch_migrated_from_existing_assignments",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_technician_claims_open_order",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_claim_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_claim_only_from_open",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_claim_respects_workload_cap",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_assign_respects_workload_cap",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_cap_check_order",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_workload_frees_up",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_dispatch_is_read_only_and_tracks_last_dispatch",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_claimed_order_follows_existing_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E02.test_E02::test_ui_claim_form",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
