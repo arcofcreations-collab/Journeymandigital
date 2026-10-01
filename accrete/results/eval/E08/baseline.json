@@ -1,0 +1,26 @@
+{
+ "id": "E08",
+ "system": "baseline",
+ "app": "library",
+ "categories": [
+  "new_concept",
+  "new_relationship",
+  "data_migration",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 10,
+ "hidden_total": 10,
+ "hidden_failures": [],
+ "base_checked": 51,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": "db1c0f1",
+ "t_start": 1790822014.541161,
+ "t_end": 1790822351.6693008,
+ "self_timed_s": 337.1,
+ "duration_ms": 353570,
+ "tool_uses": 36,
+ "tokens": 124996
+}

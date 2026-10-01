@@ -1,0 +1,55 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/eval/E11/baseline/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E11/test_E11.py",
+ "passed": 9,
+ "total": 9,
+ "seconds": 0.58,
+ "results": [
+  {
+   "test": "challenges.eval.E11.test_E11::test_cost_centres_seeded",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E11.test_E11::test_claims_migrated_to_department_centre",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E11.test_E11::test_approval_respects_budget_sales",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E11.test_E11::test_approval_respects_budget_engineering",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E11.test_E11::test_payment_payload_and_committed",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E11.test_E11::test_claim_cost_centre_on_create_and_patch",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E11.test_E11::test_cost_centre_writes",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E11.test_E11::test_budget_change_unblocks_approval",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E11.test_E11::test_ui_cost_centres",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
