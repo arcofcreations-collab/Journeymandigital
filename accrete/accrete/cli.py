@@ -8,6 +8,7 @@
   accrete call DIR METHOD PATH [--as USER] [--body JSON] [--now ISO]   run one request
   accrete check DIR                     re-validate the model and all data
   accrete serve DIR [--port 8000]       run the application (API + UI)
+  accrete demo                          live demonstration (real changes and checks)
 """
 from __future__ import annotations
 
@@ -202,6 +203,11 @@ def cmd_serve(a):
     make_server("127.0.0.1", a.port, app).serve_forever()
 
 
+def cmd_demo(a):
+    from . import demo
+    return demo.run(keep=a.keep, pause=a.pause)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="accrete", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -237,9 +243,12 @@ def main(argv=None):
     s = sub.add_parser("serve")
     s.add_argument("dir")
     s.add_argument("--port", type=int, default=8000)
+    s = sub.add_parser("demo", help="live demonstration on a fresh copy of the library app")
+    s.add_argument("--keep", help="directory for the demo instance (default: a temp dir)")
+    s.add_argument("--pause", action="store_true")
     a = p.parse_args(argv)
     return {"init": cmd_init, "apply": cmd_apply, "revert": cmd_revert, "show": cmd_show, "log": cmd_log,
-            "call": cmd_call, "check": cmd_check, "serve": cmd_serve}[a.cmd](a) or 0
+            "call": cmd_call, "check": cmd_check, "serve": cmd_serve, "demo": cmd_demo}[a.cmd](a) or 0
 
 
 if __name__ == "__main__":

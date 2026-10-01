@@ -333,7 +333,7 @@ def op_change_field(cx, a):
             raise OpError(f"change_field: unknown key {k!r}")
     if f["type"] == "ref" and f.get("ref") not in m["entities"]:
         _resolve_ref(m, f)
-    before = {str(rid): d.get(f["id"]) for rid, d in R.records(cx.world, ent["id"]).items()}
+    before, absent = _stored_values(cx.world, ent, f["id"])
     converted = 0
     if a.get("convert") or a.get("map"):
         rc = cx.rctx()
@@ -355,7 +355,20 @@ def op_change_field(cx, a):
         for rid, d in R.records(cx.world, ent["id"]).items():
             d[f["id"]] = R.to_storage(f, rc_old.eval(old_def["computed"], record=R.Rec(rc_old, rc_old.model["entities"][ent["id"]], rid)))
     cx.notes.append(f"changed {ent['name']}.{f['name']}: {', '.join(sorted(changes)) or 'values'}; {converted} stored value(s) converted")
-    return [{"restore_field_def": {"entity": ent["name"], "field_id": f["id"], "definition": old_def, "values": before}}]
+    return [{"restore_field_def": {"entity": ent["name"], "field_id": f["id"], "definition": old_def, "values": before,
+                                   "absent": absent}}]
+
+
+def _stored_values(world, ent, fid):
+    """Stored values of one field, distinguishing 'stored as null' from 'not stored at all'
+    (computed fields are never stored), so an inverse can restore storage exactly."""
+    values, absent = {}, []
+    for rid, d in R.records(world, ent["id"]).items():
+        if fid in d:
+            values[str(rid)] = d[fid]
+        else:
+            absent.append(str(rid))
+    return values, absent
 
 
 def _model_with_field(m, ent, fdef):
@@ -370,15 +383,19 @@ def op_restore_field_def(cx, a):
     cur = ent["fields"].get(a["field_id"])
     if cur is None:
         raise OpError(f"cannot restore field definition: field no longer exists in {ent['name']}")
-    before = {str(rid): d.get(cur["id"]) for rid, d in R.records(cx.world, ent["id"]).items()}
+    before, absent = _stored_values(cx.world, ent, cur["id"])
     now_def = copy.deepcopy(cur)
     ent["fields"][a["field_id"]] = copy.deepcopy(a["definition"])
-    ent["fields"][a["field_id"]]["name"] = now_def["name"] if now_def["name"] != a["definition"]["name"] else a["definition"]["name"]
+    ent["fields"][a["field_id"]]["name"] = now_def["name"]  # the name is owned by rename_field
+    gone = set(a.get("absent", ()))
     for rid, d in R.records(cx.world, ent["id"]).items():
         if str(rid) in a["values"]:
             d[cur["id"]] = a["values"][str(rid)]
+        elif str(rid) in gone or a["definition"].get("computed"):
+            d.pop(cur["id"], None)
     cx.notes.append(f"restored the definition and values of {ent['name']}.{now_def['name']}")
-    return [{"restore_field_def": {"entity": ent["name"], "field_id": a["field_id"], "definition": now_def, "values": before}}]
+    return [{"restore_field_def": {"entity": ent["name"], "field_id": a["field_id"], "definition": now_def, "values": before,
+                                   "absent": absent}}]
 
 
 # ------------------------------------------------------------------ data operators
