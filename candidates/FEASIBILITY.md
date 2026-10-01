@@ -67,3 +67,49 @@ representation, is doing the work.
 
 Main-session work (harness construction, analysis) is additional, roughly 0.2-0.3M tokens of context processed.
 The 1.5-2.5M organiser benchmark is **not** run unless X4 and X5 meet their bars.
+
+## Results (one trial each; spent development material; subagent tokens used: about 0.52M of the 0.65M cap)
+
+### X5: Delta Review on the organiser
+- The independent check was corrected once, before any agent ran (NOTES.md).
+
+| Case | Delta Review (reviewer, blind) | Existing tests | Independent check |
+|---|---|---|---|
+| V1 legitimate change (14 intended differences) | accepted (correct) | pass | pass |
+| V2 legitimate change + subtle bug ("today" moved to the next day in the evening; 2 of 16 differences) | **rejected, both cases named** | **missed** | caught |
+| V3 legitimate change + fault outside the generated space (RCS coverage warning dropped) | accepted, **missed by construction** | **missed** | **missed** (the check did not test it) |
+
+Review effort: 27 s and about 48k tokens for 3 cases.
+
+Implementation of the legitimate change, one implementer per arm:
+
+| Arm | Time | Calls | Tokens | Independent check |
+|---|---|---|---|---|
+| Delta Review | 50 s | 10 | about 60k | 7/7 |
+| Writing tests | 64 s | 11 | about 63k | 7/7 |
+
+That is only **1.27x**. The tests arm wrote 17 tests with boundary cases; the Delta Review arm also probed boundaries by
+hand, outside the space. Both arms independently flagged the same real side effect: saved corrections keyed on the old
+work date detach.
+
+**Conclusion:** Delta Review is a sound *supporting* verification component. It caught the subtle bug that the existing
+tests missed, and it is blind outside its space. On its own it gives no large speed-up.
+
+### X4: step floor, same "fewest steps" protocol and whole application pushed into the prompt, for both systems
+
+| | Accrete calls / time | Baseline calls / time | Ratio | Earlier, normal protocol |
+|---|---|---|---|---|
+| E09 | 7 / 69.5 s, correct 9/9 | 11 / 218.4 s, correct 9/9 | **3.14x** | 2.13x |
+| E13 | 6 / 63.6 s, correct 8/8 | 12 / 141.7 s, correct 8/8 | **2.23x** | 1.39x |
+
+- The baseline **also** cut its calls about in half, so the step protocol is not unique to the compact representation.
+  The call ratio was 1.6-2.0x, **below the 2.5x bar**.
+- Time ratios rose to 2.2-3.1x, because time now tracks **characters written**. Accrete wrote about 12.5k characters per
+  change, of which most were `expect:` blocks. The baseline wrote about 27-45k characters of code plus tests. Roughly
+  4-5 ms per character, plus per-call overhead.
+
+**Plausibility verdict:** the step protocol plus push context gives about 2-3x, which is **short of 5x**. The remaining
+lever the data points to is *output volume*: Accrete's expectations are about 70-80% of what it writes, and X1 showed
+that reviewing a delta catches more confirmed-harmful faults than those expectations do. Untested hypothesis K5b:
+compact representation + push + Delta Review in place of expectations could reach about 4-6x. That requires the
+baseline also being allowed to review its pin diff in place of writing tests (fairness), and it may still fall short.
