@@ -1,0 +1,50 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/fresh/F08/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/fresh/F08/test_F08.py",
+ "passed": 8,
+ "total": 8,
+ "seconds": 0.86,
+ "results": [
+  {
+   "test": "challenges.fresh.F08.test_F08::test_requester_cancels_assigned_order_and_technician_is_told",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F08.test_F08::test_requester_still_cannot_cancel_in_progress",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F08.test_F08::test_cancel_permissions_unchanged_for_others",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F08.test_F08::test_open_order_cancel_emits_nothing",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F08.test_F08::test_supervisor_cancels_assigned_and_in_progress_orders",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F08.test_F08::test_requester_who_is_also_assignee",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F08.test_F08::test_ui_cancel_form_for_requester",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F08.test_F08::test_other_operations_still_emit_nothing",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

@@ -1,0 +1,55 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/fresh/F01/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/fresh/F01/test_F01.py",
+ "passed": 9,
+ "total": 9,
+ "seconds": 1.01,
+ "results": [
+  {
+   "test": "challenges.fresh.F01.test_F01::test_existing_claims_migrated_from_submission_date",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F01.test_F01::test_filter_by_incurred_on",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F01.test_F01::test_create_with_and_without_incurred_on",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F01.test_F01::test_incurred_on_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F01.test_F01::test_patch_incurred_on_follows_patch_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F01.test_F01::test_submit_requires_incurred_on",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F01.test_F01::test_ui_submit_form_and_fields",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F01.test_F01::test_full_lifecycle_with_incurred_on",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F01.test_F01::test_existing_workflow_unchanged",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
