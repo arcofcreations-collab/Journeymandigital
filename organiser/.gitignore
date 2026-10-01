@@ -1,0 +1,6 @@
+*.db
+*.db-*
+*.xml
+!tests/**
+__pycache__/
+.msgorg/
