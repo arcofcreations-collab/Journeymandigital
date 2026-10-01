@@ -72,7 +72,7 @@ replay they are the verification of a change; `accrete call` answers ad hoc ques
   its valid items, so "409 wins over 400" holds.
 - **Fields**:
   - `type`: text | int | number | bool | date | datetime | enum (`values`) | ref (`ref`: entity)
-    | list (`of`: any of those element types; `ref`/`values` for its elements; `distinct: true`
+    | list (`of`: any of those element types, default untyped; `ref`/`values` for its elements; `distinct: true`
     rejects duplicates with 400; `required` means non-empty). A list of refs is a JSON array of
     ids in the API and a list of records in expressions; `?field=id` filters by membership.
   - Flags:
@@ -106,7 +106,9 @@ replay they are the verification of a change; `accrete call` answers ad hoc ques
   - `{if: expr, then: [...], else: [...]}`;
   - `{for: var, in: <records or list expr>, do: [...]}` runs the effects once per item, in order.
 - Action `params` take the same specs as fields, including lists: `params: {books: list ref books required distinct}`.
-- Deleting a record still referenced by another record gives 409 automatically.
+- Deleting a record still referenced by another record gives 409 automatically. A reference
+  field may say otherwise with `on_delete: cascade` (delete the referencing records too, running
+  their delete triggers) or `on_delete: nullify` (clear the reference, or drop the id from a list).
 - `GET /api/_outbox?channel=x` filters messages like any list.
 - Error precedence: 401, 404, 403, 409, 400. Unknown or missing `X-User`: 401.
 
@@ -114,6 +116,8 @@ replay they are the verification of a change; `accrete call` answers ad hoc ques
 
 Variables:
 - `record`, `user`, `now` (datetime), `today` (date);
+- `input` (the request body as sent, a dict) in `create`/`update` rules and guards, `write_if`,
+  and create/update triggers: e.g. `'amount' in input` tells whether a field was sent;
 - `params` (in actions), `old` (in update triggers), `it` (in update effects), effect `as` variables;
 - every collection by name (e.g. `loans` is the list of all loans, ignoring permissions).
 

@@ -116,6 +116,8 @@ def parse_input(f, v, ctx):
     if v is None:
         return None, None
     t = f["type"]
+    if t == "any":  # untyped list elements: any JSON value
+        return v, None
     if t == "list":
         if not isinstance(v, list):
             return None, "must be a list"
@@ -451,7 +453,7 @@ def run_effects(ctx, ent, rec, effects, env_extra):
             if isinstance(targets, Rec):
                 targets = [targets]
             for t in list(targets or []):
-                ctx.write(t._ent, t.id, None)
+                delete_record(ctx, t._ent, t.id)
         if "emit" in eff:
             payload = {k: to_json(ctx.eval(ex, record=rec, **env_extra)) for k, ex in eff.get("payload", {}).items()}
             ctx.world["outbox"].append({"id": ctx.world["outbox_next"], "channel": eff["emit"], "payload": payload,
@@ -479,14 +481,14 @@ def apply_defaults(ctx, ent, data, provided, errors=None):
             data.setdefault(f["id"], None)
 
 
-def fire_triggers(ctx, ent, rid, event, old):
+def fire_triggers(ctx, ent, rid, event, old, input=None):
     for t in ent["triggers"].values():
         if t["on"] != event:
             continue
         rec = Rec(ctx, ent, rid)
-        if t.get("when") and not ctx.test(t["when"], False, record=rec, old=old):
+        if t.get("when") and not ctx.test(t["when"], False, record=rec, old=old, input=input or {}):
             continue
-        run_effects(ctx, ent, rec, t["effects"], {"old": old})
+        run_effects(ctx, ent, rec, t["effects"], {"old": old, "input": input or {}})
 
 
 def check_touched(ctx, touched, status=409):
@@ -615,7 +617,7 @@ def op_create(ctx, coll, body):
     if errs:
         halt(400, "invalid input", errs)
     ctx.write(ent, rid, cand_data)
-    fire_triggers(ctx, ent, rid, "create", None)
+    fire_triggers(ctx, ent, rid, "create", None, input=body)
     return 201, serialize(ctx, ent, rid)
 
 
@@ -643,7 +645,7 @@ def op_update(ctx, coll, rid, body):
     if errs:
         halt(400, "invalid input", errs)
     ctx.write(ent, rid, new)
-    fire_triggers(ctx, ent, rid, "update", old)
+    fire_triggers(ctx, ent, rid, "update", old, input=body)
     return 200, serialize(ctx, ent, rid)
 
 
@@ -656,15 +658,40 @@ def op_delete(ctx, coll, rid):
         halt(403, f"you may not delete {ent['name']} {rid}")
     if not _safe_test(ctx, ent["rules"].get("delete_guard"), True, record=rec):
         halt(409, ent.get("guard_messages", {}).get("delete_guard") or f"{ent['name']} {rid} cannot be deleted now")
-    for other in ctx.model["entities"].values():
-        for f in other["fields"].values():
-            if f["type"] == "ref" and f.get("ref") == ent["id"] and not f.get("computed"):
-                if any(d.get(f["id"]) == rid for d in records(ctx.world, other["id"]).values()):
-                    halt(409, f"{ent['name']} {rid} is still referenced by {other['name']}")
+    delete_record(ctx, ent, rid)
+    return 204, None
+
+
+def delete_record(ctx, ent, rid, _seen=None):
+    """Delete one record, applying each referencing field's `on_delete` policy:
+    restrict (default: 409 while referenced), cascade (delete the referencing records too) or
+    nullify (clear the reference / drop it from a list). Runs delete triggers. Atomic with the request."""
+    seen = _seen if _seen is not None else set()
+    if (ent["id"], rid) in seen or rid not in records(ctx.world, ent["id"]):
+        return
+    seen.add((ent["id"], rid))
     old = Rec(ctx, ent, rid, override=copy.deepcopy(records(ctx.world, ent["id"])[rid]))
     fire_triggers(ctx, ent, rid, "delete", old)
-    ctx.write(ent, rid, None)
-    return 204, None
+    for other in ctx.model["entities"].values():
+        for f in other["fields"].values():
+            if M.refers_to(f) != ent["id"] or f.get("computed"):
+                continue
+            policy = f.get("on_delete") or "restrict"
+            for orid, d in list(records(ctx.world, other["id"]).items()):
+                v = d.get(f["id"])
+                hit = rid in v if isinstance(v, list) else v == rid
+                if not hit or (other["id"], orid) in seen:
+                    continue
+                if policy == "cascade":
+                    delete_record(ctx, other, orid, seen)
+                elif policy == "nullify":
+                    nd = copy.deepcopy(d)
+                    nd[f["id"]] = [x for x in v if x != rid] if isinstance(v, list) else None
+                    ctx.write(other, orid, nd)
+                else:
+                    halt(409, f"{ent['name']} {rid} is still referenced by {other['name']} {orid}")
+    if rid in records(ctx.world, ent["id"]):
+        ctx.write(ent, rid, None)
 
 
 def _action(ent, name):
@@ -768,7 +795,7 @@ def _dispatch(ctx, method, path, query, body):
             halt(404, "not found")
         parts = parts[1:]
         if parts == ["_outbox"] and method == "GET":
-            return op_outbox(ctx)
+            return op_outbox(ctx, query)
         if len(parts) == 1 and method == "GET":
             return op_list(ctx, parts[0], query)
         if len(parts) == 1 and method == "POST":

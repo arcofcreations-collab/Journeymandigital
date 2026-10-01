@@ -27,3 +27,15 @@ challenges that inform a redesign are reclassified as development evidence.
 | R5 | YAML reads the key `on:` as boolean `true`, so `add_trigger` with `on: create` failed with a misleading error | found while exercising R2 | change files normalise boolean keys to `on`/`off` |
 | R6 | `/api/_outbox?channel=` did not filter (agents' outbox checks were weaker than they believed) | D04 accrete agent report | outbox supports the same exact-match filtering as collections |
 | G1 | Guide: documents R1–R6, and states that expectations + replay are the verification | — | documentation only |
+
+## After the second development round (D01/D11 rerun, D12–D14; accrete version `9aa7905`)
+
+| # | Problem found | Evidence | Revision |
+|---|---|---|---|
+| R7 | `promote_field` dropped the field's `required` flag | D01 attempt-2 agent had to restore it by hand | macros expand when applied (they see the model at that point); `promote_field` keeps `required` |
+| R8 | R6's outbox filter was never wired to the dispatcher | D11 attempt-2 agent report | fixed; covered by a regression test |
+| R9 | No referential policy other than "409 while referenced"; deleting a parent with its children was impossible | D12 agent stored `claim_lines.claim` as a plain integer to make "deleting a draft claim deletes its lines" possible, losing reference semantics | `on_delete: restrict (default) / cascade / nullify` on references and lists of references; `delete` effects use the same policies; a change to a reference field puts its target's `delete` in the direct footprint |
+| R10 | Whether a field was *sent* (vs. unchanged) was not knowable in triggers; `input` existed in rules but was undocumented | D12 agent reported a 409 rule it could not express | `input` documented; also available in create/update triggers |
+| R11 | Rename rewrote expressions with `ast.unparse`, so a rename followed by its revert left equivalent but textually different expressions | new accrete regression test (exact revert) | renames splice only the renamed identifiers into the original text |
+| R12 | Changing a trigger did not count the actions that fire it as consequences: replay rejected the (real) difference as "unexplained" | new regression test (trigger on loans.create changes books.borrow) | trigger changes add every action/trigger whose effects can cause that event as consequences |
+| C1 | **Engine upgrades are outside the change pipeline.** Introducing the typed `list` broke the D06 app, whose author had declared an untyped `list` param that the old engine passed through; nothing in accrete detected it | re-running every dev app's hidden tests on the new engine (D06: 5/11) | untyped lists keep the old meaning. The general gap remains: accrete gates *application* changes, not changes to accrete itself. Re-running applications' acceptance checks after engine upgrades (done here with `harness/compat_check.sh`) is the stop-gap; storing responses in the request corpus would let replay check engine upgrades too (not built) |

@@ -91,7 +91,7 @@ def ordered_fields(ent):
 
 def element(f):
     """The element type of a list field (or a list parameter), as a field-like dict."""
-    return {"id": f.get("id"), "name": f.get("name"), "type": f.get("of") or "text", "ref": f.get("ref"),
+    return {"id": f.get("id"), "name": f.get("name"), "type": f.get("of") or "any", "ref": f.get("ref"),
             "values": f.get("values")}
 
 
@@ -256,7 +256,7 @@ def check(model) -> list[str]:
                 errors.append(f"{e['name']}.{f['name']}: unknown type {f['type']!r}")
             if is_reference(f) and f.get("ref") not in model["entities"]:
                 errors.append(f"{e['name']}.{f['name']}: refers to a missing entity")
-            if f["type"] == "list" and f.get("of") not in ELEMENT_TYPES:
+            if f["type"] == "list" and f.get("of") not in ELEMENT_TYPES | {"any"}:
                 errors.append(f"{e['name']}.{f['name']}: list of unknown element type {f.get('of')!r}")
             if f["type"] == "list" and f.get("of") == "enum" and not f.get("values"):
                 errors.append(f"{e['name']}.{f['name']}: list of enum without values")

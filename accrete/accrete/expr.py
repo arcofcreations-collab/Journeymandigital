@@ -296,6 +296,7 @@ class _Renamer(ast.NodeTransformer):
         self.tenv, self.scope, self.ent, self.old, self.new, self.kind = tenv, scope, ent, old, new, kind
         self.changed = 0
         self.unsure = 0
+        self.spans = []  # (line, byte start, byte end) of each renamed identifier in the source
 
     def run(self, tree):
         a = Analysis()
@@ -306,6 +307,7 @@ class _Renamer(ast.NodeTransformer):
         # mirrors _infer, rewriting matching nodes in place
         if isinstance(node, ast.Name):
             if self.kind == "entity" and node.id == self.old and node.id not in scope:
+                self.spans.append((node.lineno, node.col_offset, node.col_offset + len(self.old)))
                 node.id = self.new
                 self.changed += 1
                 return ("list", self.new)
@@ -314,6 +316,7 @@ class _Renamer(ast.NodeTransformer):
             base = self._walk(node.value, scope, a)
             if self.kind == "field" and node.attr == self.old:
                 if base and base[0] == "entity" and base[1] == self.ent:
+                    self.spans.append((node.end_lineno, node.end_col_offset - len(self.old), node.end_col_offset))
                     node.attr = self.new
                     self.changed += 1
                 elif base is None:
@@ -343,6 +346,7 @@ class _Renamer(ast.NodeTransformer):
             if fname in ("find", "first", "count") and args and args[0] and args[0][0] == "list":
                 for kw in node.keywords:
                     if self.kind == "field" and args[0][1] == self.ent and kw.arg == self.old:
+                        self.spans.append((kw.lineno, kw.col_offset, kw.col_offset + len(self.old)))
                         kw.arg = self.new
                         self.changed += 1
             for kw in node.keywords:
@@ -363,9 +367,17 @@ def rename(src: str, tenv: TypeEnv, kind: str, entity: str | None, old: str, new
     Returns (new_source, changed_count, unsure_count). ``tenv`` describes the model *before*
     the rename, so types resolve against the old names.
     """
-    tree = parse(src)
+    text = str(src).strip()
+    tree = parse(text)
     r = _Renamer(tenv, dict(tenv.variables), entity, old, new, kind)
     r.run(tree)
     if not r.changed:
         return src, 0, r.unsure
-    return ast.unparse(tree), r.changed, r.unsure
+    # splice the new name into the original text, so formatting survives (and a rename back is exact)
+    lines = [ln.encode("utf-8") for ln in text.split("\n")]
+    for line, start, end in sorted(set(r.spans), reverse=True):
+        b = lines[line - 1]
+        if b[start:end].decode("utf-8") != old:
+            return ast.unparse(tree), r.changed, r.unsure  # positions disagree: fall back to regenerating
+        lines[line - 1] = b[:start] + new.encode("utf-8") + b[end:]
+    return "\n".join(x.decode("utf-8") for x in lines), r.changed, r.unsure

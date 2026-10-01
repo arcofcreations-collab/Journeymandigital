@@ -151,6 +151,10 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
             n, f = ename(eid), fname(eid, fid)
             D.update({f"{n}.field:{f}", f"{n}.create", f"{n}.update"})
             seeds_fields.add((n, f))
+            for mdl in (old_model, new_model):  # a reference's on_delete policy governs deletes of its target
+                fd = mdl["entities"].get(eid, {}).get("fields", {}).get(fid)
+                if fd and M.refers_to(fd) in mdl["entities"]:
+                    D.add(f"{mdl['entities'][M.refers_to(fd)]['name']}.delete")
             for old_name, new_name in fp.renamed_fields.items():
                 if old_name[0] == n and new_name == f:
                     D.add(f"{n}.field:{old_name[1]}")
@@ -184,6 +188,15 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
                 t = mdl["entities"].get(eid, {}).get("triggers", {}).get(tid)
                 if t:
                     D.add(f"{n}.{t['on']}")
+                    # everything else that causes this event now behaves differently too
+                    for e in mdl["entities"].values():
+                        for a in e["actions"].values():
+                            if _causes(a["effects"], n, t["on"], e["name"]):
+                                fp.consequences.add(f"{e['name']}.action:{a['name']}")
+                                fp.reasons.append(f"action {e['name']}.{a['name']} can fire the changed trigger on {n}")
+                        for ot in e["triggers"].values():
+                            if ot["id"] != tid and _causes(ot["effects"], n, t["on"], e["name"]):
+                                fp.consequences.add(f"{e['name']}.{ot['on']}")
             fp.reasons.append(f"trigger on {n} changed")
         elif kind == "display":
             fp.reasons.append(f"how {ename(k[1])} records are shown in the UI changed (no API effect)")
@@ -215,13 +228,28 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
     return fp
 
 
+def _causes(effects, target, event, own):
+    """Can these effects cause `event` (create/update/delete/action:x) on entity `target`?"""
+    for eff in effects or []:
+        if event == "create" and eff.get("create") == target:
+            return True
+        if event == "update" and (("update" in eff) or ("set" in eff and own == target)):
+            return True
+        if event == "delete" and "delete" in eff:
+            return True
+        for key in ("then", "else", "do"):
+            if _causes(eff.get(key), target, event, own):
+                return True
+    return False
+
+
 def _writes(effects, target, own):
     for eff in effects or []:
         if eff.get("create") == target or ("set" in eff and "update" not in eff and own == target):
             return True
         if "update" in eff or "delete" in eff:
             return True  # target type unknown statically: be conservative
-        if _writes(eff.get("then"), target, own) or _writes(eff.get("else"), target, own):
+        if any(_writes(eff.get(k), target, own) for k in ("then", "else", "do")):
             return True
     return False
 

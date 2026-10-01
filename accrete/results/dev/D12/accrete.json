@@ -1,0 +1,26 @@
+{
+ "id": "D12",
+ "system": "accrete",
+ "app": "expenses",
+ "categories": [
+  "new_relationship",
+  "data_migration",
+  "cross_cutting",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 13,
+ "hidden_total": 13,
+ "hidden_failures": [],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": "9aa7905",
+ "t_start": 1790819395.4001827,
+ "t_end": 1790819626.816715,
+ "self_timed_s": 231.4,
+ "duration_ms": 246312,
+ "tool_uses": 23,
+ "tokens": 96138
+}

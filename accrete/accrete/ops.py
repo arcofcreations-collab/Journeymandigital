@@ -45,7 +45,7 @@ def parse_field_spec(model, name, spec):
         d = {"type": toks[0]}
         rest = toks[1:]
         if d["type"] == "list":
-            d["of"] = rest.pop(0) if rest else "text"
+            d["of"] = rest.pop(0) if rest else "any"
             kind = d["of"]
         else:
             kind = d["type"]
@@ -62,10 +62,13 @@ def parse_field_spec(model, name, spec):
          "default": _expr_or_none(spec.pop("default", None)), "computed": _expr_or_none(spec.pop("computed", None)),
          "system": bool(spec.pop("system", False)), "read_if": _expr_or_none(spec.pop("read_if", None)),
          "write_if": _expr_or_none(spec.pop("write_if", None)), "label": spec.pop("label", None)}
+    on_delete = spec.pop("on_delete", None)
+    if on_delete not in (None, "restrict", "cascade", "nullify"):
+        raise OpError(f"field {name}: on_delete must be restrict, cascade or nullify")
     of, distinct = spec.pop("of", None), bool(spec.pop("distinct", False))
     if f["type"] == "list":
-        f["of"], f["distinct"] = of or "text", distinct
-        if f["of"] not in M.ELEMENT_TYPES:
+        f["of"], f["distinct"] = of or "any", distinct
+        if f["of"] not in M.ELEMENT_TYPES | {"any"}:
             raise OpError(f"field {name}: a list cannot hold {f['of']!r}")
     elif of is not None or distinct:
         raise OpError(f"field {name}: `of` and `distinct` apply only to list fields")
@@ -74,6 +77,10 @@ def parse_field_spec(model, name, spec):
         if ref is None:
             raise OpError(f"field {name}: reference fields need `ref: <entity>`")
         f["ref"] = ref  # entity *name* until resolved
+        if on_delete and on_delete != "restrict":
+            f["on_delete"] = on_delete
+    elif on_delete:
+        raise OpError(f"field {name}: on_delete applies only to references")
     if f["computed"]:
         f["required"] = False
     spec.pop("backfill", None)
@@ -342,6 +349,10 @@ def op_change_field(cx, a):
         elif k == "ref":
             f["ref"] = v
             _resolve_ref(m, f)
+        elif k == "on_delete":
+            if v not in (None, "restrict", "cascade", "nullify"):
+                raise OpError("on_delete must be restrict, cascade or nullify")
+            f[k] = None if v == "restrict" else v
         elif k in ("type", "values", "label", "of"):
             f[k] = v
         elif k in ("required", "unique", "system", "distinct"):
@@ -743,6 +754,7 @@ def op_restore_users(cx, a):
 def expand_promote_field(model, a):
     """Turn a plain field into a reference to a new entity holding its distinct values."""
     ent, fname, to = a["entity"], a["field"], a["to"]
+    was_required = M.field(M.entity(model, ent), fname).get("required")
     key = a.get("key", "name")
     tmp = f"{fname}__ref"
     extra = a.get("fields") or {}
@@ -750,7 +762,7 @@ def expand_promote_field(model, a):
         {"add_entity": {"name": to, "fields": dict({key: "text required unique"}, **extra),
                         "rules": a.get("rules") or {}}},
         {"add_records_distinct": {"entity": to, "key": key, "source": ent, "field": fname}},
-        {"add_field": {"entity": ent, "name": tmp, "type": "ref", "ref": to,
+        {"add_field": {"entity": ent, "name": tmp, "type": "ref", "ref": to, "required": bool(was_required),
                        "backfill": f"first({to}, {key}=record.{fname}) if record.{fname} is not None else None"}},
         {"remove_field": {"entity": ent, "name": fname}},
         {"rename_field": {"entity": ent, "from": tmp, "to": fname}},
@@ -804,9 +816,7 @@ def expand(ops):
         if not isinstance(op, dict) or len(op) != 1:
             raise OpError(f"each operator must be a single-key mapping, got {op!r}")
         (name, args), = op.items()
-        if name in MACROS:
-            out += expand(MACROS[name](None, args))
-        elif name in OPERATORS:
+        if name in MACROS or name in OPERATORS:  # macros expand when applied, against the model at that point
             out.append({name: args})
         else:
             raise OpError(f"unknown operator {name!r}; known: {', '.join(sorted(set(OPERATORS) | set(MACROS)))}")
@@ -817,6 +827,11 @@ def apply(cx, op):
     (name, args), = op.items()
     if not isinstance(args, dict):
         raise OpError(f"{name}: arguments must be a mapping")
+    if name in MACROS:
+        inverse = []
+        for sub in expand(MACROS[name](cx.model, args)):
+            inverse = apply(cx, sub) + inverse
+        return inverse
     return OPERATORS[name](cx, args)
 
 
