@@ -1,0 +1,222 @@
+request: "Build the maintenance work-order application described in spec/apps/maintenance.md"
+interpretation: >-
+  Three entities: staff (the users, keyed by username), assets and work_orders, plus the work-order
+  actions assign/start/complete/cancel. Non-empty text is a constraint on each required text field.
+  400 rules that depend on another record or on the request body (retired asset on create, an `asset`
+  key in a PATCH, technician eligibility for assign, labor_minutes >= 1) are `fail` effects with
+  status 400, so they run after the 403 and 409 checks as the contract's precedence requires.
+  Retiring an asset with unfinished orders is an assets update_guard (409). No display fields are
+  set, so the HTML UI shows references as ids, the same values as the API.
+ops:
+  # ---------------------------------------------------------------- staff
+  - add_entity:
+      name: staff
+      fields:
+        username: text required unique
+        name: text required
+        role: enum requester|technician|supervisor required
+        site: text required
+        active: {type: bool, default: "True"}
+      rules:
+        read: "True"
+        create: "user.role == 'supervisor'"
+        update: "user.role == 'supervisor'"
+        delete: "user.role == 'supervisor'"
+      constraints:
+        username_nonempty: {expr: "record.username is None or record.username.strip() != ''", message: "must be non-empty text", field: username}
+        name_nonempty: {expr: "record.name is None or record.name.strip() != ''", message: "must be non-empty text", field: name}
+        site_nonempty: {expr: "record.site is None or record.site.strip() != ''", message: "must be non-empty text", field: site}
+  - set_users: {entity: staff, key: username}
+
+  # ---------------------------------------------------------------- assets
+  - add_entity:
+      name: assets
+      fields:
+        tag: text required unique
+        name: text required
+        site: text required
+        criticality: enum low|medium|high required
+        retired: {type: bool, default: "False"}
+      rules:
+        read: "True"
+        create: "user.role == 'supervisor'"
+        update: "user.role == 'supervisor'"
+        delete: "user.role == 'supervisor'"
+      constraints:
+        tag_nonempty: {expr: "record.tag is None or record.tag.strip() != ''", message: "must be non-empty text", field: tag}
+        name_nonempty: {expr: "record.name is None or record.name.strip() != ''", message: "must be non-empty text", field: name}
+        site_nonempty: {expr: "record.site is None or record.site.strip() != ''", message: "must be non-empty text", field: site}
+
+  # ---------------------------------------------------------------- work orders
+  - add_entity:
+      name: work_orders
+      fields:
+        asset: ref assets required
+        title: text required
+        description: text
+        priority: enum low|normal|urgent required
+        status: {type: enum, values: [open, assigned, in_progress, completed, cancelled], required: true, system: true, default: "'open'"}
+        requested_by: {type: ref, ref: staff, required: true, system: true, default: user}
+        created_at: {type: datetime, required: true, system: true, default: now}
+        assignee: {type: ref, ref: staff, system: true}
+        started_at: {type: datetime, system: true}
+        completed_at: {type: datetime, system: true}
+        resolution: {type: text, system: true}
+        labor_minutes: {type: int, system: true}
+        cancel_reason: {type: text, system: true}
+        due_date:
+          type: date
+          computed: "record.created_at.date() + days(1 if record.priority == 'urgent' else 7 if record.priority == 'normal' else 30)"
+        overdue:
+          type: bool
+          computed: "record.status in ['open', 'assigned', 'in_progress'] and today > record.due_date"
+      rules:
+        read: >-
+          user.role == 'supervisor' or record.requested_by == user or record.assignee == user
+          or (user.role == 'technician' and user.site == record.asset.site)
+        create: "user.role == 'supervisor' or record.asset is None or record.asset.site == user.site"
+        update: "user.role == 'supervisor' or (record.requested_by == user and 'priority' not in input)"
+        update_guard: "record.status in ['open', 'assigned', 'in_progress'] if user.role == 'supervisor' else record.status == 'open'"
+        delete: "False"
+      constraints:
+        title_nonempty: {expr: "record.title is None or record.title.strip() != ''", message: "must be non-empty text", field: title}
+      triggers:
+        reject_retired_asset:
+          on: create
+          effects:
+            - {fail: "'asset is retired'", status: 400, when: "record.asset.retired"}
+        asset_is_fixed:
+          on: update
+          effects:
+            - {fail: "'asset cannot be changed'", status: 400, when: "'asset' in input"}
+
+  # open_orders needs work_orders to exist
+  - add_field:
+      entity: assets
+      name: open_orders
+      type: int
+      computed: "count(work_orders, asset=record, status='open') + count(work_orders, asset=record, status='assigned') + count(work_orders, asset=record, status='in_progress')"
+  - set_rule:
+      entity: assets
+      rule: update_guard
+      expr: "not ('retired' in input and input['retired'] is True and record.open_orders > 0)"
+      message: "an asset with unfinished work orders cannot be retired"
+
+  # ---------------------------------------------------------------- actions
+  - add_action:
+      entity: work_orders
+      name: assign
+      params: {technician: ref staff required}
+      allow: "user.role == 'supervisor'"
+      guard: "record.status in ['open', 'assigned']"
+      guard_message: "'only open or assigned work orders can be assigned'"
+      effects:
+        - fail: "'technician must be an active technician at the asset site'"
+          status: 400
+          when: >-
+            params.technician.role != 'technician' or not params.technician.active
+            or params.technician.site != record.asset.site
+        - set: {assignee: params.technician, status: "'assigned'"}
+        - emit: assignment
+          payload: {work_order: record, asset: record.asset, technician: params.technician}
+  - add_action:
+      entity: work_orders
+      name: start
+      allow: "record.assignee == user"
+      guard: "record.status == 'assigned'"
+      guard_message: "'only assigned work orders can be started'"
+      effects:
+        - set: {status: "'in_progress'", started_at: now}
+  - add_action:
+      entity: work_orders
+      name: complete
+      params: {resolution: text required, labor_minutes: int required}
+      allow: "record.assignee == user"
+      guard: "record.status == 'in_progress'"
+      guard_message: "'only work orders in progress can be completed'"
+      effects:
+        - {fail: "'labor_minutes must be at least 1'", status: 400, when: "params.labor_minutes < 1"}
+        - set: {status: "'completed'", completed_at: now, resolution: params.resolution, labor_minutes: params.labor_minutes}
+        - emit: work_completed
+          payload: {work_order: record, asset: record.asset, technician: record.assignee, labor_minutes: params.labor_minutes}
+  - add_action:
+      entity: work_orders
+      name: cancel
+      params: {reason: text required}
+      allow: "user.role == 'supervisor' or record.requested_by == user"
+      guard: "record.status in ['open', 'assigned', 'in_progress'] if user.role == 'supervisor' else record.status == 'open'"
+      guard_message: "'this work order can no longer be cancelled by you'"
+      effects:
+        - set: {status: "'cancelled'", cancel_reason: params.reason}
+
+  # ---------------------------------------------------------------- seed data
+  - add_records: {entity: staff, from_json: ../../../spec/apps/maintenance_seed.json, key: staff}
+  - add_records: {entity: assets, from_json: ../../../spec/apps/maintenance_seed.json, key: assets}
+  - add_records: {entity: work_orders, from_json: ../../../spec/apps/maintenance_seed.json, key: work_orders}
+
+expect:
+  # identity and reading
+  - {as: nobody, do: "GET /api/staff", status: 401}
+  - {as: ruth, do: "GET /api/staff", count: 16}
+  - {as: ruth, do: "GET /api/assets/1", status: 200, json: {tag: N-AHU-01, open_orders: 1}}
+  - {as: ruth, do: "GET /api/work_orders/30", status: 403}
+  - {as: tess, do: "GET /api/work_orders/30", status: 200}
+  - {as: ruth, do: "GET /api/work_orders/9999", status: 404}
+  - {as: sofia, do: "GET /api/work_orders?status=open&assignee=null", count: 14}
+  - {as: sofia, do: "GET /api/work_orders/62", now: "2026-03-01T12:00:00", json: {due_date: "2026-02-27", overdue: true}}
+  - {as: sofia, do: "GET /api/work_orders/82", now: "2026-03-01T12:00:00", json: {due_date: "2026-03-02", overdue: false}}
+  # staff and assets
+  - {as: ruth, do: "POST /api/staff", body: {username: zed, name: Zed, role: requester, site: North}, status: 403}
+  - {as: sofia, do: "POST /api/staff", body: {username: zed, name: Zed, role: requester, site: North}, status: 201, json: {active: true}}
+  - {as: sofia, do: "POST /api/staff", body: {username: sofia, name: Zed, role: requester, site: North}, status: 400}
+  - {as: sofia, do: "POST /api/staff", body: {username: zed, name: "  ", role: requester, site: North}, status: 400}
+  - {as: sofia, do: "POST /api/staff", body: {username: zed, name: Zed, role: boss, site: North}, status: 400}
+  - {as: sofia, do: "DELETE /api/staff/3", status: 409}
+  - {as: sofia, do: "DELETE /api/assets/1", status: 409}
+  - {as: sofia, do: "PATCH /api/assets/2", body: {retired: true, bogus: 1}, status: 409}
+  - {as: sofia, do: "PATCH /api/assets/2", body: {retired: 1}, status: 400}
+  - {as: sofia, do: "PATCH /api/assets/31", body: {retired: true}, status: 200, json: {retired: true, open_orders: 0}}
+  - {as: sofia, do: "PATCH /api/assets/1", body: {open_orders: 0}, status: 400}
+  # creating work orders
+  - name: "requester creates at own site"
+    steps:
+      - {as: ruth, do: "POST /api/work_orders", body: {asset: 1, title: Noise, priority: urgent}, now: "2026-03-01T12:00:00", status: 201,
+         json: {status: open, requested_by: 3, assignee: null, description: null, created_at: "2026-03-01T12:00:00", due_date: "2026-03-02", overdue: false}}
+      - {as: ruth, do: "GET /api/assets/1", json: {open_orders: 2}}
+  - {as: ruth, do: "POST /api/work_orders", body: {asset: 20, title: "", priority: bad}, status: 403}
+  - {as: sofia, do: "POST /api/work_orders", body: {asset: 20, title: T, priority: low}, status: 201}
+  - {as: ruth, do: "POST /api/work_orders", body: {asset: 999, title: T, priority: low}, status: 400}
+  - {as: ruth, do: "POST /api/work_orders", body: {asset: 7, title: T, priority: low}, status: 400}
+  - {as: ruth, do: "POST /api/work_orders", body: {asset: 1, title: T, priority: low, status: open}, status: 400}
+  # patching work orders
+  - {as: ruth, do: "PATCH /api/work_orders/74", body: {title: New}, status: 200, json: {title: New}}
+  - {as: ruth, do: "PATCH /api/work_orders/74", body: {priority: low}, status: 403}
+  - {as: ruth, do: "PATCH /api/work_orders/77", body: {title: New}, status: 409}
+  - {as: kofi, do: "PATCH /api/work_orders/74", body: {title: New}, status: 403}
+  - {as: sofia, do: "PATCH /api/work_orders/77", body: {priority: low}, status: 200, json: {priority: low}}
+  - {as: sofia, do: "PATCH /api/work_orders/9", body: {priority: low}, status: 409}
+  - {as: sofia, do: "PATCH /api/work_orders/77", body: {asset: 1}, status: 400}
+  - {as: sofia, do: "DELETE /api/work_orders/74", status: 403}
+  # actions
+  - {as: ruth, do: "POST /api/work_orders/74/assign", body: {technician: 8}, status: 403}
+  - {as: sofia, do: "POST /api/work_orders/9/assign", body: {technician: 8}, status: 409}
+  - {as: sofia, do: "POST /api/work_orders/74/assign", body: {technician: 13}, status: 400}
+  - {as: sofia, do: "POST /api/work_orders/74/assign", body: {technician: 10}, status: 400}
+  - {as: sofia, do: "POST /api/work_orders/74/bogus", body: {}, status: 404}
+  - name: "assign, start, complete"
+    steps:
+      - {as: sofia, do: "POST /api/work_orders/74/assign", body: {technician: 9}, status: 200, json: {status: assigned, assignee: 9}}
+      - {as: sofia, do: "GET /api/_outbox?channel=assignment", count: 1}
+      - {as: nils, do: "POST /api/work_orders/74/start", body: {}, status: 403}
+      - {as: olga, do: "POST /api/work_orders/74/start", body: {}, now: "2026-03-02T08:00:00", status: 200, json: {status: in_progress, started_at: "2026-03-02T08:00:00"}}
+      - {as: olga, do: "POST /api/work_orders/74/complete", body: {resolution: ok, labor_minutes: 0}, status: 400}
+      - {as: olga, do: "POST /api/work_orders/74/complete", body: {resolution: ok, labor_minutes: true}, status: 400}
+      - {as: olga, do: "POST /api/work_orders/74/complete", body: {resolution: " ", labor_minutes: 5}, status: 400}
+      - {as: olga, do: "POST /api/work_orders/74/complete", body: {resolution: ok, labor_minutes: 30}, now: "2026-03-02T09:00:00", status: 200,
+         json: {status: completed, completed_at: "2026-03-02T09:00:00", resolution: ok, labor_minutes: 30}}
+      - {as: ruth, do: "GET /api/_outbox?channel=work_completed", count: 1}
+      - {as: ruth, do: "GET /api/assets/1", json: {open_orders: 0}}
+  - {as: ruth, do: "POST /api/work_orders/77/cancel", body: {reason: x}, status: 409}
+  - {as: nils, do: "POST /api/work_orders/74/cancel", body: {reason: x}, status: 403}
+  - {as: ruth, do: "POST /api/work_orders/74/cancel", body: {reason: "  "}, status: 400}
+  - {as: tomas, do: "POST /api/work_orders/49/cancel", body: {reason: dup}, status: 200, json: {status: cancelled, cancel_reason: dup, assignee: 8}}

@@ -1,0 +1,83 @@
+request: "Withdraw technician self-dispatch but keep the workload cap (maintenance, applied after E04)"
+interpretation: >-
+  Data first: every work order with dispatch 'self' and status 'assigned' (ids 72 and 75) returns to
+  the pool with status = open and assignee = null; nothing else of those records changes, and
+  self-dispatched orders in other statuses (in_progress, completed, cancelled) keep assignee and
+  status. update_records is a data operation, so it emits no outbox message and creates no time
+  entries or part usages. Then the claim action is removed (POST .../claim becomes an unknown
+  action: 404 after the 401 check; no claim form in the UI; the E03 p3/p4 claim rule disappears
+  with it). assign keeps its allow (403), guard (409), technician validation (400) and the E02 cap
+  (409 for a valid technician already assigned 3+ assigned/in_progress orders not counting this
+  order; re-assignment to the current assignee always allowed); it only stops setting dispatch.
+  Finally the dispatch field is removed, so it disappears from API records and UI pages, and
+  sending or filtering on it is 400 like any unknown field. Orders 72/75 being open again means
+  their requesters (sara, olga) may edit title/description and cancel them, and sara's workload
+  drops from 3 to 2 and olga's from 2 to 1.
+ops:
+  - update_records:
+      entity: work_orders
+      where: "record.dispatch == 'self' and record.status == 'assigned'"
+      set: {status: "'open'", assignee: "None"}
+
+  - remove_action: {entity: work_orders, name: claim}
+
+  - change_action:
+      entity: work_orders
+      name: assign
+      effects:
+        - fail: "'technician must be an active technician at the asset site'"
+          status: 400
+          when: "params.technician.role != 'technician' or not params.technician.active or params.technician.site != record.asset.site"
+        - fail: "'technician already has 3 or more active work orders'"
+          status: 409
+          when: "params.technician != record.assignee and len([w for w in work_orders if w.assignee == params.technician and w.status in ['assigned', 'in_progress'] and w.id != record.id]) >= 3"
+        - set: {assignee: "params.technician", status: "'assigned'"}
+        - emit: assignment
+          payload: {work_order: "record", asset: "record.asset", technician: "params.technician"}
+
+  - remove_field: {entity: work_orders, name: dispatch}
+
+expect:
+  # ---- migration
+  - {as: sofia, do: "GET /api/work_orders/72", status: 200, json: {status: open, assignee: null, requested_by: 11, title: "Roller replacement", priority: p3, created_at: "2026-02-25T14:00:00", started_at: null}}
+  - {as: sofia, do: "GET /api/work_orders/75", status: 200, json: {status: open, assignee: null, requested_by: 9, title: "Oil change", priority: p3}}
+  - {as: sofia, do: "GET /api/work_orders/56", status: 200, json: {status: in_progress, assignee: 10}}
+  - {as: sofia, do: "GET /api/work_orders/22", status: 200, json: {status: cancelled, assignee: 12}}
+  - {as: sofia, do: "GET /api/work_orders/4", status: 200, json: {status: completed, assignee: 13}}
+  - {as: sofia, do: "GET /api/work_orders/68", status: 200, json: {status: assigned, assignee: 10}}
+  - {as: sofia, do: "GET /api/_outbox", count: 0}
+  - {as: sofia, do: "GET /api/time_entries?work_order=72", count: 0}
+  - {as: sofia, do: "GET /api/work_orders?assignee=11&status=assigned", count: 1}
+  - {as: sofia, do: "GET /api/work_orders?assignee=9&status=assigned", count: 0}
+  # ---- requester rights regained
+  - {as: sara, do: "PATCH /api/work_orders/72", body: {title: "Roller swap"}, status: 200, json: {title: "Roller swap"}}
+  - {as: olga, do: "POST /api/work_orders/75/cancel", body: {reason: "dup"}, status: 200, json: {status: cancelled}}
+  # ---- claim gone
+  - {as: olga, do: "POST /api/work_orders/38/claim", body: {}, status: 404}
+  - {as: wade, do: "POST /api/work_orders/54/claim", body: {}, status: 404}
+  - {as: sofia, do: "POST /api/work_orders/38/claim", body: {}, status: 404}
+  - {as: nobody, do: "POST /api/work_orders/38/claim", body: {}, status: 401}
+  # ---- dispatch gone (unknown-field filters are handled by the runtime, see CHANGE_NOTES.md)
+  - {as: ruth, do: "POST /api/work_orders", body: {asset: 1, title: "t", priority: p3, dispatch: self}, status: 400}
+  - {as: sofia, do: "PATCH /api/work_orders/38", body: {dispatch: self}, status: 400}
+  - {as: sofia, do: "PATCH /api/work_orders/38", body: {dispatch: null}, status: 400}
+  # ---- assign cap preserved
+  - {as: sofia, do: "POST /api/work_orders/38/assign", body: {technician: 8}, status: 409}
+  - {as: sofia, do: "POST /api/work_orders/38/assign", body: {technician: 13}, status: 400}
+  - {as: sofia, do: "POST /api/work_orders/38/assign", body: {technician: 10}, status: 400}
+  - {as: olga, do: "POST /api/work_orders/38/assign", body: {technician: 8}, status: 403}
+  - {as: tomas, do: "POST /api/work_orders/54/assign", body: {technician: 10}, status: 409}
+  - {as: tomas, do: "POST /api/work_orders/54/assign", body: {technician: 11}, status: 200, json: {assignee: 11, status: assigned}}
+  - {as: tomas, do: "POST /api/work_orders/68/assign", body: {technician: 10}, status: 200, json: {assignee: 10}}
+  - {as: tomas, do: "POST /api/work_orders/72/assign", body: {technician: 11}, status: 200, json: {assignee: 11, status: assigned}}
+  - name: "assign fills sara to the cap"
+    steps:
+      - {as: tomas, do: "POST /api/work_orders/72/assign", body: {technician: 11}, status: 200}
+      - {as: tomas, do: "POST /api/work_orders/54/assign", body: {technician: 11}, status: 409}
+      - {as: sofia, do: "GET /api/_outbox?channel=assignment", count: 1}
+  - name: "assign still works end to end"
+    steps:
+      - {as: sofia, do: "POST /api/work_orders/75/assign", body: {technician: 9}, status: 200, json: {assignee: 9, status: assigned}}
+      - {as: olga, do: "POST /api/work_orders/75/start", body: {}, status: 200, json: {status: in_progress}}
+      - {as: olga, do: "POST /api/work_orders/75/log_time", body: {minutes: 30}, status: 200, json: {labor_minutes: 30}}
+      - {as: olga, do: "POST /api/work_orders/75/complete", body: {resolution: "done"}, status: 200, json: {status: completed}}

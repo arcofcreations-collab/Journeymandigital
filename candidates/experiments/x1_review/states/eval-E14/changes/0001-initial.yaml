@@ -1,0 +1,71 @@
+request: "Build the lending library described in spec/apps/library.md"
+ops:
+  - add_entity:
+      name: members
+      fields:
+        username: text required unique
+        name: text required
+        role: enum member|librarian required
+        active: {type: bool, default: "True"}
+      rules:
+        read: "user.role == 'librarian' or record == user"
+        create: "user.role == 'librarian'"
+        update: "user.role == 'librarian' or record == user"
+        delete: "user.role == 'librarian'"
+  - change_field: {entity: members, name: username, write_if: "user.role == 'librarian'"}
+  - change_field: {entity: members, name: role, write_if: "user.role == 'librarian'"}
+  - change_field: {entity: members, name: active, write_if: "user.role == 'librarian'"}
+  - set_users: {entity: members, key: username}
+  - add_entity:
+      name: books
+      fields:
+        title: text required
+        author: text required
+        isbn: text required unique
+        year: int
+      rules:
+        read: "True"
+        create: "user.role == 'librarian'"
+        update: "user.role == 'librarian'"
+        delete: "user.role == 'librarian'"
+  - add_entity:
+      name: loans
+      fields:
+        book: ref books required
+        member: ref members required
+        borrowed_at: datetime required
+        due_at: date required
+        returned_at: datetime
+        overdue: {type: bool, computed: "record.returned_at is None and today > record.due_at"}
+      rules:
+        read: "user.role == 'librarian' or record.member == user"
+        create: "False"
+        update: "False"
+        delete: "False"
+  - add_field: {entity: books, name: status, type: text,
+                computed: "'on_loan' if any(l.book == record and l.returned_at is None for l in loans) else 'available'"}
+  - add_action:
+      entity: books
+      name: borrow
+      params: {member: ref members}
+      allow: "user.role == 'librarian' or params.member is None or params.member == user"
+      guard: >-
+        record.status == 'available'
+        and (params.member or user).active
+        and count(loans, member=(params.member or user), returned_at=None) < 3
+      effects:
+        - create: loans
+          as: loan
+          values: {book: record, member: "params.member or user", borrowed_at: now, due_at: "today + days(14)"}
+        - emit: loan_created
+          payload: {loan: loan, book: record, member: "params.member or user"}
+  - add_action:
+      entity: loans
+      name: return
+      allow: "user.role == 'librarian' or record.member == user"
+      guard: "record.returned_at is None"
+      effects:
+        - set: {returned_at: now}
+  - add_records: {entity: members, from_json: ../../../spec/apps/library_seed.json, key: members}
+  - add_records: {entity: books, from_json: ../../../spec/apps/library_seed.json, key: books}
+  - add_records: {entity: loans, from_json: ../../../spec/apps/library_seed.json, key: loans}

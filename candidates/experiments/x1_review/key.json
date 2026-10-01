@@ -1,0 +1,1446 @@
+[
+ {
+  "set": "eval",
+  "id": "E03",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E03/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E03",
+  "now": "2026-10-01T02:44:57",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1557.5,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1437.0,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C01",
+  "delta_chars": 6847
+ },
+ {
+  "set": "dev",
+  "id": "D04",
+  "category": "slip:guard/constraint",
+  "mutation": "add_action.guard: 'record.returned_at is not None and record.fine > 0 and not record.fine_paid' -> 'record.returned_at is not None and record.fine >= 0 and (not record.fine_paid)'",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D04/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D04",
+  "now": "2026-10-01T01:42:13",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 349.0,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 344.0,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 66,
+    "data_differs": false,
+    "examples": [
+     "('loans', 11, 'pay_fine', 'ben')",
+     "('loans', 15, 'pay_fine', 'ada')",
+     "('loans', 13, 'pay_fine', 'ben')"
+    ]
+   }
+  },
+  "case": "C02",
+  "delta_chars": 8207
+ },
+ {
+  "set": "dev",
+  "id": "D03",
+  "category": "slip:stored-data",
+  "mutation": "add_field.backfill: '0' -> '1'",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D03/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D03",
+  "now": "2026-10-01T01:40:29",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 314.2,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 358.3,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 236,
+    "data_differs": true,
+    "examples": [
+     "('loans', 47, 'return', 'ada')",
+     "('loans', 52, 'return', 'chen')",
+     "('loans', 54, 'return', 'ada')"
+    ]
+   }
+  },
+  "case": "C03",
+  "delta_chars": 3150
+ },
+ {
+  "set": "dev",
+  "id": "D02",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D02/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D02",
+  "now": "2026-10-01T01:37:59",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 248.1,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 261.1,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C04",
+  "delta_chars": 5080
+ },
+ {
+  "set": "dev",
+  "id": "D11",
+  "category": "slip:effect",
+  "mutation": "add_trigger.effects.0.do.0.values.action: \"'pay'\" -> \"'pay_x'\"",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D11/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D11",
+  "now": "2026-10-01T01:49:56",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 325.4,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 294.9,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 0,
+    "data_differs": false,
+    "examples": []
+   }
+  },
+  "case": "C05",
+  "delta_chars": 6771
+ },
+ {
+  "set": "dev",
+  "id": "D04",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D04/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D04",
+  "now": "2026-10-01T01:42:13",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 414.4,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 350.4,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C06",
+  "delta_chars": 7492
+ },
+ {
+  "set": "eval",
+  "id": "E04",
+  "category": "slip:effect",
+  "mutation": "add_entity.rules.delete: 'False' -> 'True'",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E04/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E04",
+  "now": "2026-10-01T02:46:57",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 1360.4,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1283.8,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 0,
+    "data_differs": false,
+    "examples": []
+   }
+  },
+  "case": "C07",
+  "delta_chars": 8902
+ },
+ {
+  "set": "dev",
+  "id": "D04",
+  "category": "slip:guard/constraint",
+  "mutation": "change_action.guard: \"record.returned_at is None and today <= record.due_at and record.renewals < 2 and count(holds, book=record.book, status='waiting') == 0 and record.member.fines_due <= 0\" -> \"record.returned_at is None or today <= record.due_at or record.renewals < 2 or (count(holds, book=record.book, status='waiting') == 0) or (record.member.fines_due <= 0)\"",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D04/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D04",
+  "now": "2026-10-01T01:42:13",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 361.0,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 357.4,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 180,
+    "data_differs": false,
+    "examples": [
+     "('loans', 49, 'renew', 'ada')",
+     "('loans', 47, 'renew', 'ben')",
+     "('loans', 32, 'renew', 'ada')"
+    ]
+   }
+  },
+  "case": "C08",
+  "delta_chars": 7944
+ },
+ {
+  "set": "eval",
+  "id": "E06",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E06/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E06",
+  "now": "2026-10-01T02:52:01",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1509.3,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1396.0,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C09",
+  "delta_chars": 15323
+ },
+ {
+  "set": "dev",
+  "id": "D10",
+  "category": "stray-user",
+  "mutation": "employees 3.role: 'manager' -> 'employee'",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D10/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D10",
+  "now": "2026-10-01T01:37:59",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 131.9,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 95.0,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "hidden_tests_catch": false,
+   "oracle": {
+    "api_differences": 30,
+    "data_differs": true,
+    "examples": [
+     "('employees', 'list', 'xena')",
+     "('employees', 3, 'wen')",
+     "('employees', 'list', 'fiona')"
+    ]
+   }
+  },
+  "case": "C10",
+  "delta_chars": 6261
+ },
+ {
+  "set": "eval",
+  "id": "E14",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E14/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E14",
+  "now": "2026-10-01T02:39:56",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1010.7,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 990.1,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C11",
+  "delta_chars": 9744
+ },
+ {
+  "set": "eval",
+  "id": "E01",
+  "category": "stray-computed",
+  "mutation": "assets.open_orders: \"count(work_orders, asset=record, status='open') + count(work_orders, asset=record, status='assigned') + count(work_orders, asset=record, status='in_progress')\" -> \"count(work_orders, asset=record, status='open_x') + count(work_orders, asset=record, status='assigned') + count(work_orders, asset=record, status='in_progress')\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E01/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E01",
+  "now": "2026-10-01T02:37:50",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1212.0,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1200.8,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": false,
+   "oracle": {
+    "api_differences": 240,
+    "data_differs": false,
+    "examples": [
+     "('assets', 4, 'pavel')",
+     "('assets', 8, 'ravi')",
+     "('assets', 26, 'tomas')"
+    ]
+   }
+  },
+  "case": "C12",
+  "delta_chars": 14223
+ },
+ {
+  "set": "eval",
+  "id": "E12",
+  "category": "stray-guard",
+  "mutation": "claims.pay guard: \"record.status == 'approved'\" -> \"record.status == 'approved_x'\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E12/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E12",
+  "now": "2026-10-01T02:33:34",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 100.2,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 89.5,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 23,
+    "data_differs": false,
+    "examples": [
+     "('claims', 38, 'pay', 'fiona')",
+     "('claims', 21, 'pay', 'fiona')",
+     "('claims', 4, 'pay', 'fiona')"
+    ]
+   }
+  },
+  "case": "C13",
+  "delta_chars": 6053
+ },
+ {
+  "set": "eval",
+  "id": "E08",
+  "category": "slip:computed",
+  "mutation": "add_field.computed: \"len([c for c in copies if c.book == record and c.status == 'available'])\" -> \"len([c for c in copies if c.book == record or c.status == 'available'])\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E08/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E08",
+  "now": "2026-10-01T02:33:33",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "replay:unexplained",
+    "reason": "replaying recorded and generated requests shows behaviour changes that nothing in this change accounts for (see replay.examples): regressions or engine faults",
+    "ms": 6562.9,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "rejected",
+    "stage": "replay:unexplained",
+    "reason": "replaying recorded and generated requests shows behaviour changes that nothing in this change accounts for (see replay.examples): regressions or engine faults",
+    "ms": 6647.6,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 854,
+    "data_differs": false,
+    "examples": [
+     "('books', 5, 'eli')",
+     "('books', 8, 'borrow', 'ivan')",
+     "('books', 17, 'ben')"
+    ]
+   }
+  },
+  "case": "C14",
+  "delta_chars": 12159
+ },
+ {
+  "set": "dev",
+  "id": "D05",
+  "category": "slip:permission",
+  "mutation": "change_field.write_if: \"user.role != 'assistant' or record == user\" -> \"user.role != 'assistant_x' or record == user\"",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D05/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D05",
+  "now": "2026-10-01T01:38:01",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 246.8,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 246.9,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 0,
+    "data_differs": false,
+    "examples": []
+   }
+  },
+  "case": "C15",
+  "delta_chars": 1604
+ },
+ {
+  "set": "dev",
+  "id": "D08",
+  "category": "stray-data",
+  "mutation": "claims 4.status: 'approved' -> 'draft'",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D08/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D08",
+  "now": "2026-10-01T01:37:59",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "replay:consequence",
+    "reason": "this change also alters other behaviour through dependencies: claims.action:pay.guard (see replay.examples). If that is intended, list them under `consequences:`; otherwise adjust the change",
+    "ms": 174.4,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "rejected",
+    "stage": "replay:consequence",
+    "reason": "this change also alters other behaviour through dependencies: claims.action:pay.guard (see replay.examples). If that is intended, list them under `consequences:`; otherwise adjust the change",
+    "ms": 243.7,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": false,
+   "oracle": {
+    "api_differences": 8,
+    "data_differs": true,
+    "examples": [
+     "('claims', 4, 'pay', 'fiona')",
+     "('claims', 'list', 'nadia')",
+     "('claims', 4, 'fiona')"
+    ]
+   }
+  },
+  "case": "C16",
+  "delta_chars": 10681
+ },
+ {
+  "set": "dev",
+  "id": "D07",
+  "category": "stray-computed",
+  "mutation": "books.status: \"'on_loan' if any(l.book == record and l.returned_at is None for l in loans) else 'available'\" -> \"'on_loan' if any((l.book != record and l.returned_at is None for l in loans)) else 'available'\"",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D07/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D07",
+  "now": "2026-10-01T01:42:14",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 303.7,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 273.3,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 364,
+    "data_differs": false,
+    "examples": [
+     "('books', 17, 'ben')",
+     "('books', 6, 'lena')",
+     "('books', 35, 'eli')"
+    ]
+   }
+  },
+  "case": "C17",
+  "delta_chars": 3836
+ },
+ {
+  "set": "eval",
+  "id": "E13",
+  "category": "slip:stored-data",
+  "mutation": "add_field.backfill: '0' -> '1'",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E13/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E13",
+  "now": "2026-10-01T02:33:34",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 171.2,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 168.6,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 314,
+    "data_differs": true,
+    "examples": [
+     "('claims', 24, 'marco')",
+     "('claims', 35, 'marco')",
+     "('claims', 28, 'approve', 'omar')"
+    ]
+   }
+  },
+  "case": "C18",
+  "delta_chars": 6175
+ },
+ {
+  "set": "eval",
+  "id": "E09",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E09/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E09",
+  "now": "2026-10-01T02:33:34",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 248.2,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 234.6,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C19",
+  "delta_chars": 7683
+ },
+ {
+  "set": "eval",
+  "id": "E12",
+  "category": "stray-data",
+  "mutation": "claims 72.description: 'Train to client #72' -> 'Train to client #72x'",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E12/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E12",
+  "now": "2026-10-01T02:33:34",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 101.0,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 92.3,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "hidden_tests_catch": false,
+   "oracle": {
+    "api_differences": 7,
+    "data_differs": true,
+    "examples": [
+     "('claims', 'list', 'nadia')",
+     "('claims', 72, 'fiona')",
+     "('claims', 'list', 'fiona')"
+    ]
+   }
+  },
+  "case": "C20",
+  "delta_chars": 6430
+ },
+ {
+  "set": "eval",
+  "id": "E01",
+  "category": "stray-rule",
+  "mutation": "staff rule create: \"user.role == 'supervisor'\" -> \"user.role == 'supervisor_x'\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E01/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E01",
+  "now": "2026-10-01T02:37:50",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1162.3,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1181.9,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": false,
+   "oracle": {
+    "api_differences": 3,
+    "data_differs": false,
+    "examples": [
+     "('staff', 'create', 'yara')",
+     "('staff', 'create', 'sofia')",
+     "('staff', 'create', 'tomas')"
+    ]
+   }
+  },
+  "case": "C21",
+  "delta_chars": 12535
+ },
+ {
+  "set": "dev",
+  "id": "D04",
+  "category": "slip:computed",
+  "mutation": "add_field.computed: 'min(5.0, 0.5 * max(0, ((record.returned_at.date() if record.returned_at is not None else today) - record.due_at).days))' -> 'min(5.0, 0.5 * max(0, ((record.returned_at.date() if record.returned_at is None else today) - record.due_at).days))'",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D04/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D04",
+  "now": "2026-10-01T01:42:13",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 354.1,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 337.8,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 229,
+    "data_differs": true,
+    "examples": [
+     "('members', 6, 'fatima')",
+     "('members', 11, 'kemal')",
+     "('loans', 15, 'chen')"
+    ]
+   }
+  },
+  "case": "C22",
+  "delta_chars": 7467
+ },
+ {
+  "set": "dev",
+  "id": "D08",
+  "category": "slip:stored-data",
+  "mutation": "update_records.where: \"record.status == 'approved' and record.amount > 1000 and record.employee.manager is not None and record.employee.manager.manager is not None\" -> \"record.status != 'approved' and record.amount > 1000 and (record.employee.manager is not None) and (record.employee.manager.manager is not None)\"",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D08/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D08",
+  "now": "2026-10-01T01:37:59",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 196.2,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 169.9,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 55,
+    "data_differs": true,
+    "examples": [
+     "('claims', 60, 'omar')",
+     "('claims', 21, 'pay', 'fiona')",
+     "('claims', 'list', 'sam')"
+    ]
+   }
+  },
+  "case": "C23",
+  "delta_chars": 8014
+ },
+ {
+  "set": "eval",
+  "id": "E14",
+  "category": "stray-rule",
+  "mutation": "copies rule delete: \"user.role == 'librarian'\" -> \"user.role != 'librarian'\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E14/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E14",
+  "now": "2026-10-01T02:39:56",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 1015.2,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 987.1,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 0,
+    "data_differs": false,
+    "examples": []
+   }
+  },
+  "case": "C24",
+  "delta_chars": 10448
+ },
+ {
+  "set": "dev",
+  "id": "D02",
+  "category": "stray-computed",
+  "mutation": "books.status: \"'on_loan' if any(l.book == record and l.returned_at is None for l in loans) else 'available'\" -> \"'on_loan_x' if any((l.book == record and l.returned_at is None for l in loans)) else 'available'\"",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D02/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D02",
+  "now": "2026-10-01T01:37:59",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 239.8,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 236.5,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 567,
+    "data_differs": false,
+    "examples": [
+     "('books', 5, 'eli')",
+     "('books', 38, 'borrow', 'fatima')",
+     "('books', 10, 'hold', 'kemal')"
+    ]
+   }
+  },
+  "case": "C25",
+  "delta_chars": 6622
+ },
+ {
+  "set": "dev",
+  "id": "D02",
+  "category": "stray-guard",
+  "mutation": "loans.return guard: 'record.returned_at is None' -> 'record.returned_at is not None'",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D02/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D02",
+  "now": "2026-10-01T01:37:59",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 253.4,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 235.0,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 180,
+    "data_differs": false,
+    "examples": [
+     "('loans', 47, 'return', 'ada')",
+     "('loans', 30, 'return', 'ada')",
+     "('loans', 52, 'return', 'chen')"
+    ]
+   }
+  },
+  "case": "C26",
+  "delta_chars": 5710
+ },
+ {
+  "set": "dev",
+  "id": "D07",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D07/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D07",
+  "now": "2026-10-01T01:42:14",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 244.0,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 250.8,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C27",
+  "delta_chars": 1626
+ },
+ {
+  "set": "eval",
+  "id": "E06",
+  "category": "slip:permission",
+  "mutation": "set_rule.expr: \"user.role == 'manager' or record.requested_by == user or record.assignee == user or (user.role in ['supervisor', 'technician'] and user.site == record.asset.site)\" -> \"user.role == 'manager' or record.requested_by != user or record.assignee == user or (user.role in ['supervisor', 'technician'] and user.site == record.asset.site)\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E06/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E06",
+  "now": "2026-10-01T02:52:01",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 1653.2,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1559.0,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 1020,
+    "data_differs": false,
+    "examples": [
+     "('work_orders', 10, 'tess')",
+     "('work_orders', 20, 'lina')",
+     "('work_orders', 82, 'mei')"
+    ]
+   }
+  },
+  "case": "C28",
+  "delta_chars": 16610
+ },
+ {
+  "set": "eval",
+  "id": "E12",
+  "category": "slip:permission",
+  "mutation": "change_action.allow: \"user.role == 'finance' and user.active\" -> \"user.role == 'finance' or user.active\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E12/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E12",
+  "now": "2026-10-01T02:33:34",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 98.4,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 94.8,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 160,
+    "data_differs": false,
+    "examples": [
+     "('claims', 77, 'pay', 'rosa')",
+     "('claims', 74, 'pay', 'marco')",
+     "('claims', 64, 'pay', 'omar')"
+    ]
+   }
+  },
+  "case": "C29",
+  "delta_chars": 6148
+ },
+ {
+  "set": "eval",
+  "id": "E01",
+  "category": "stray-user",
+  "mutation": "staff 9.role: 'technician' -> 'requester'",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E01/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E01",
+  "now": "2026-10-01T02:37:50",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1200.8,
+    "scope_warnings": [
+     "*.any",
+     "staff.field:role"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1146.0,
+    "scope_warnings": [
+     "*.any",
+     "staff.field:role"
+    ]
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 57,
+    "data_differs": true,
+    "examples": [
+     "('staff', 9, 'mei')",
+     "('work_orders', 52, 'olga')",
+     "('staff', 9, 'tess')"
+    ]
+   }
+  },
+  "case": "C30",
+  "delta_chars": 12984
+ },
+ {
+  "set": "eval",
+  "id": "E09",
+  "category": "stray-rule",
+  "mutation": "members rule delete: \"user.role == 'librarian'\" -> \"user.role != 'librarian'\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E09/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E09",
+  "now": "2026-10-01T02:33:34",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 246.0,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 245.1,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 0,
+    "data_differs": false,
+    "examples": []
+   }
+  },
+  "case": "C31",
+  "delta_chars": 8399
+ },
+ {
+  "set": "dev",
+  "id": "D13",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D13/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D13",
+  "now": "2026-10-01T01:49:56",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 92.5,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 82.7,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C32",
+  "delta_chars": 3886
+ },
+ {
+  "set": "eval",
+  "id": "E08",
+  "category": "slip:computed",
+  "mutation": "add_field.computed: \"'on_loan' if any(l.copy == record and l.returned_at is None for l in loans) else 'available'\" -> \"'on_loan' if any((l.copy != record and l.returned_at is None for l in loans)) else 'available'\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E08/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E08",
+  "now": "2026-10-01T02:33:33",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 635.4,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 597.2,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 917,
+    "data_differs": false,
+    "examples": [
+     "('copies', 42, 'chen')",
+     "('books', 17, 'ben')",
+     "('copies', 'list', 'ivan')"
+    ]
+   }
+  },
+  "case": "C33",
+  "delta_chars": 10717
+ },
+ {
+  "set": "eval",
+  "id": "E09",
+  "category": "stray-guard",
+  "mutation": "loans.return guard: 'record.returned_at is None' -> 'record.returned_at is not None'",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E09/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E09",
+  "now": "2026-10-01T02:33:34",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 249.8,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 235.6,
+    "scope_warnings": [
+     "*.any"
+    ]
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 201,
+    "data_differs": false,
+    "examples": [
+     "('loans', 32, 'return', 'dara')",
+     "('loans', 47, 'return', 'ada')",
+     "('loans', 30, 'return', 'ada')"
+    ]
+   }
+  },
+  "case": "C34",
+  "delta_chars": 8322
+ },
+ {
+  "set": "eval",
+  "id": "E08",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E08/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E08",
+  "now": "2026-10-01T02:33:33",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 596.2,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 574.6,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C35",
+  "delta_chars": 12275
+ },
+ {
+  "set": "eval",
+  "id": "E07",
+  "category": "stray-user",
+  "mutation": "staff 4.role: 'requester' -> 'technician'",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E07/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E07",
+  "now": "2026-10-01T02:54:43",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1948.9,
+    "scope_warnings": [
+     "*.any",
+     "staff.field:role"
+    ]
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1912.3,
+    "scope_warnings": [
+     "*.any",
+     "staff.field:role"
+    ]
+   },
+   "hidden_tests_catch": false,
+   "oracle": {
+    "api_differences": 83,
+    "data_differs": true,
+    "examples": [
+     "('work_orders', 75, 'kofi')",
+     "('work_orders', 26, 'kofi')",
+     "('time_entries', 21, 'kofi')"
+    ]
+   }
+  },
+  "case": "C36",
+  "delta_chars": 13165
+ },
+ {
+  "set": "dev",
+  "id": "D09",
+  "category": "valid:original",
+  "mutation": "the implementer's change as written",
+  "base": "/home/user/Journeymandigital/accrete/results/dev/D09/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/dev-D09",
+  "now": "2026-10-01T01:39:48",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "replay:consequence",
+    "reason": "this change also alters other behaviour through dependencies: claims.action:pay.guard (see replay.examples). If that is intended, list them under `consequences:`; otherwise adjust the change",
+    "ms": 177.6,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "rejected",
+    "stage": "replay:consequence",
+    "reason": "this change also alters other behaviour through dependencies: claims.action:pay.guard (see replay.examples). If that is intended, list them under `consequences:`; otherwise adjust the change",
+    "ms": 221.8,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": null,
+   "oracle": {
+    "api_differences": null
+   }
+  },
+  "case": "C37",
+  "delta_chars": 8165
+ },
+ {
+  "set": "eval",
+  "id": "E07",
+  "category": "slip:effect",
+  "mutation": "add_entity.constraints.interval_days_range.expr: 'record.interval_days is None or (record.interval_days >= 1 and record.interval_days <= 365)' -> 'record.interval_days is None or (record.interval_days >= 1 and record.interval_days <= 366)'",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E07/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E07",
+  "now": "2026-10-01T02:54:43",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 1905.2,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1829.5,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 0,
+    "data_differs": false,
+    "examples": []
+   }
+  },
+  "case": "C38",
+  "delta_chars": 11026
+ },
+ {
+  "set": "eval",
+  "id": "E04",
+  "category": "slip:guard/constraint",
+  "mutation": "change_action.guard: \"record.status == 'in_progress' and count(time_entries, work_order=record) > 0\" -> \"record.status == 'in_progress' or count(time_entries, work_order=record) > 0\"",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E04/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E04",
+  "now": "2026-10-01T02:46:57",
+  "round4": {
+   "with_expect": {
+    "verdict": "rejected",
+    "stage": "expectations",
+    "reason": "stated expectations fail on the changed application (see expectations)",
+    "ms": 1309.5,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1286.9,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": true,
+   "oracle": {
+    "api_differences": 47,
+    "data_differs": false,
+    "examples": [
+     "('work_orders', 23, 'complete', 'wade')",
+     "('work_orders', 80, 'complete', 'wade')",
+     "('work_orders', 58, 'complete', 'ravi')"
+    ]
+   }
+  },
+  "case": "C39",
+  "delta_chars": 9726
+ },
+ {
+  "set": "eval",
+  "id": "E14",
+  "category": "stray-data",
+  "mutation": "books 26.title: 'The Meridian Song 26' -> 'The Meridian Song 26x'",
+  "base": "/home/user/Journeymandigital/accrete/results/eval/E14/accrete-artifacts/changes",
+  "start": "/home/user/Journeymandigital/candidates/experiments/x1_review/states/eval-E14",
+  "now": "2026-10-01T02:39:56",
+  "round4": {
+   "with_expect": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1053.4,
+    "scope_warnings": []
+   },
+   "auto_only": {
+    "verdict": "committed",
+    "stage": null,
+    "reason": "",
+    "ms": 1008.5,
+    "scope_warnings": []
+   },
+   "hidden_tests_catch": false,
+   "oracle": {
+    "api_differences": 34,
+    "data_differs": true,
+    "examples": [
+     "('books', 'list', 'jo')",
+     "('books', 26, 'borrow', 'ivan')",
+     "('books', 26, 'fatima')"
+    ]
+   }
+  },
+  "case": "C40",
+  "delta_chars": 10505
+ }
+]

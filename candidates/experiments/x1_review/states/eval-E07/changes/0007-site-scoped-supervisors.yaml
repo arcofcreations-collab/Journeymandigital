@@ -1,0 +1,135 @@
+request: "Site-scoped supervisors and a new manager role (maintenance, applied after E05)"
+interpretation: >-
+  staff.role gains the value 'manager'; sofia (id 1) becomes manager (site North kept), tomas and
+  yara stay supervisors, no other record changes. A manager has, on every site, every right a
+  supervisor had before. "Site supervisor of X" means role supervisor and user.site == X, where X is
+  the asset's site for a work order and the record's own site for an asset or part. Work orders:
+  readable by managers, supervisors and technicians of the asset's site, the requester and the
+  assignee; supervisor rights (assign, cancel from open/assigned/in_progress, PATCH of
+  title/description/priority while unfinished) apply to managers and own-site supervisors only,
+  everyone else falls back to the requested_by rights (title/description while open, cancel while
+  open) or 403. Part usages and time entries follow the work-order read rule. Create: managers any
+  site; everybody else (supervisors included) only for an asset of their own site (403 before 400;
+  a missing/unknown asset is left to the 400 check). Assets and parts: managers unrestricted;
+  supervisors may create only with site == own site (a body without site, or site null, is left to
+  the required-field 400), may PATCH/DELETE only records whose current site is their own, and a
+  PATCH that sends a site other than their own (null is left to the 400) is 403. Staff create,
+  PATCH, DELETE: managers only. Reading staff/assets/parts unchanged. UI forms follow the rules
+  (staff/new for managers; assets/new and parts/new for managers and supervisors).
+ops:
+  - change_field: {entity: staff, name: role, values: [requester, technician, supervisor, manager]}
+  - update_records: {entity: staff, where: "record.id == 1 and record.username == 'sofia'", set: {role: "'manager'"}}
+
+  - set_rule: {entity: staff, rule: create, expr: "user.role == 'manager'"}
+  - set_rule: {entity: staff, rule: update, expr: "user.role == 'manager'"}
+  - set_rule: {entity: staff, rule: delete, expr: "user.role == 'manager'"}
+
+  - set_rule: {entity: assets, rule: create, expr: "user.role == 'manager' or (user.role == 'supervisor' and (record.site is None or record.site == user.site))"}
+  - set_rule: {entity: assets, rule: update, expr: "user.role == 'manager' or (user.role == 'supervisor' and first(assets, id=record.id).site == user.site and ('site' not in input or input['site'] is None or input['site'] == user.site))"}
+  - set_rule: {entity: assets, rule: delete, expr: "user.role == 'manager' or (user.role == 'supervisor' and record.site == user.site)"}
+
+  - set_rule: {entity: parts, rule: create, expr: "user.role == 'manager' or (user.role == 'supervisor' and (record.site is None or record.site == user.site))"}
+  - set_rule: {entity: parts, rule: update, expr: "user.role == 'manager' or (user.role == 'supervisor' and first(parts, id=record.id).site == user.site and ('site' not in input or input['site'] is None or input['site'] == user.site))"}
+  - set_rule: {entity: parts, rule: delete, expr: "user.role == 'manager' or (user.role == 'supervisor' and record.site == user.site)"}
+
+  - set_rule: {entity: work_orders, rule: read, expr: "user.role == 'manager' or record.requested_by == user or record.assignee == user or (user.role in ['supervisor', 'technician'] and user.site == record.asset.site)"}
+  - set_rule: {entity: work_orders, rule: create, expr: "user.role == 'manager' or record.asset is None or record.asset.site == user.site"}
+  - set_rule: {entity: work_orders, rule: update, expr: "user.role == 'manager' or (user.role == 'supervisor' and record.asset.site == user.site) or (record.requested_by == user and 'priority' not in input)"}
+  - set_rule: {entity: work_orders, rule: update_guard, expr: "record.status in ['open', 'assigned', 'in_progress'] if (user.role == 'manager' or (user.role == 'supervisor' and record.asset.site == user.site)) else record.status == 'open'"}
+  - change_action:
+      entity: work_orders
+      name: assign
+      allow: "user.role == 'manager' or (user.role == 'supervisor' and record.asset.site == user.site)"
+  - change_action:
+      entity: work_orders
+      name: cancel
+      allow: "user.role == 'manager' or (user.role == 'supervisor' and record.asset.site == user.site) or record.requested_by == user"
+      guard: "record.status in ['open', 'assigned', 'in_progress'] if (user.role == 'manager' or (user.role == 'supervisor' and record.asset.site == user.site)) else record.status == 'open'"
+
+  - set_rule: {entity: part_usages, rule: read, expr: "user.role == 'manager' or record.work_order.requested_by == user or record.work_order.assignee == user or (user.role in ['supervisor', 'technician'] and user.site == record.work_order.asset.site)"}
+  - set_rule: {entity: time_entries, rule: read, expr: "user.role == 'manager' or record.work_order.requested_by == user or record.work_order.assignee == user or (user.role in ['supervisor', 'technician'] and user.site == record.work_order.asset.site)"}
+
+expect:
+  # ---- data
+  - {as: sofia, do: "GET /api/staff/1", status: 200, json: {role: manager, site: North, username: sofia, active: true}}
+  - {as: sofia, do: "GET /api/staff/2", status: 200, json: {role: supervisor, site: South}}
+  - {as: sofia, do: "GET /api/staff/16", status: 200, json: {role: supervisor, site: East}}
+  - {as: sofia, do: "GET /api/staff?role=manager", count: 1}
+  - {as: sofia, do: "GET /api/staff?role=supervisor", count: 2}
+  # ---- staff management
+  - {as: sofia, do: "POST /api/staff", body: {username: zed, name: Zed, role: manager, site: West}, status: 201, json: {role: manager}}
+  - {as: sofia, do: "POST /api/staff", body: {username: zed, name: Zed, role: boss, site: West}, status: 400}
+  - {as: tomas, do: "POST /api/staff", body: {username: zed, name: Zed, role: requester, site: South}, status: 403}
+  - {as: tomas, do: "POST /api/staff", body: {}, status: 403}
+  - {as: tomas, do: "PATCH /api/staff/5", body: {name: X}, status: 403}
+  - {as: tomas, do: "DELETE /api/staff/14", status: 403}
+  - {as: sofia, do: "PATCH /api/staff/2", body: {role: manager}, status: 200, json: {role: manager}}
+  - {as: tomas, do: "GET /api/staff", count: 16}
+  # ---- work order reads
+  - {as: sofia, do: "GET /api/work_orders", count: 82}
+  - {as: tomas, do: "GET /api/work_orders/74", status: 403}
+  - {as: tomas, do: "GET /api/work_orders/54", status: 200}
+  - {as: yara, do: "GET /api/work_orders/66", status: 200}
+  - {as: yara, do: "GET /api/work_orders/76", status: 403}
+  - {as: tomas, do: "GET /api/time_entries/1", status: 403}
+  - {as: sofia, do: "GET /api/time_entries", count: 39}
+  # ---- assign / cancel / patch
+  - {as: tomas, do: "POST /api/work_orders/74/assign", body: {technician: 8}, status: 403}
+  - {as: sofia, do: "POST /api/work_orders/76/assign", body: {technician: 11}, status: 200, json: {assignee: 11}}
+  - {as: tomas, do: "POST /api/work_orders/76/assign", body: {technician: 11}, status: 200, json: {assignee: 11}}
+  - {as: yara, do: "POST /api/work_orders/76/assign", body: {technician: 11}, status: 403}
+  - {as: yara, do: "POST /api/work_orders/77/cancel", body: {reason: x}, status: 403}
+  - {as: tomas, do: "POST /api/work_orders/53/cancel", body: {reason: x}, status: 200, json: {status: cancelled}}
+  - {as: sofia, do: "POST /api/work_orders/53/cancel", body: {reason: x}, status: 200, json: {status: cancelled}}
+  - {as: yara, do: "POST /api/work_orders/47/cancel", body: {reason: x}, status: 200}
+  - {as: tomas, do: "PATCH /api/work_orders/68", body: {priority: p1}, status: 200, json: {priority: p1}}
+  - {as: yara, do: "PATCH /api/work_orders/68", body: {title: x}, status: 403}
+  - {as: sofia, do: "PATCH /api/work_orders/68", body: {priority: p3}, status: 200}
+  - {as: tomas, do: "PATCH /api/work_orders/17", body: {title: x}, status: 409}
+  - {as: tomas, do: "POST /api/work_orders/74/cancel", body: {reason: x}, status: 403}
+  - name: "supervisor moved to another site keeps only requester rights"
+    steps:
+      - {as: sofia, do: "PATCH /api/staff/2", body: {site: North}, status: 200}
+      - {as: tomas, do: "GET /api/work_orders/53", status: 200}
+      - {as: tomas, do: "POST /api/work_orders/53/cancel", body: {reason: x}, status: 409}
+      - {as: tomas, do: "PATCH /api/work_orders/54", body: {priority: p1}, status: 403}
+      - {as: tomas, do: "PATCH /api/work_orders/54", body: {title: renamed}, status: 200}
+      - {as: tomas, do: "POST /api/work_orders/54/cancel", body: {reason: x}, status: 200}
+      - {as: tomas, do: "POST /api/work_orders/74/assign", body: {technician: 9}, status: 200}
+  # ---- work order create
+  - {as: tomas, do: "POST /api/work_orders", body: {asset: 1, title: t, priority: p3}, status: 403}
+  - {as: tomas, do: "POST /api/work_orders", body: {asset: 1, title: "", priority: bad}, status: 403}
+  - {as: tomas, do: "POST /api/work_orders", body: {asset: 14, title: t, priority: p3}, status: 201}
+  - {as: tomas, do: "POST /api/work_orders", body: {asset: 999, title: t, priority: p3}, status: 400}
+  - {as: sofia, do: "POST /api/work_orders", body: {asset: 25, title: t, priority: p3}, status: 201}
+  - {as: sofia, do: "POST /api/work_orders", body: {asset: 26, title: t, priority: p4}, status: 400}
+  # ---- assets
+  - {as: tomas, do: "POST /api/assets", body: {tag: X1, name: X, site: South, criticality: low}, status: 201}
+  - {as: tomas, do: "POST /api/assets", body: {tag: X1, name: X, site: North, criticality: low}, status: 403}
+  - {as: tomas, do: "POST /api/assets", body: {tag: X1, name: X, site: North, criticality: bad}, status: 403}
+  - {as: tomas, do: "POST /api/assets", body: {tag: X1, name: X, criticality: low}, status: 400}
+  - {as: tomas, do: "POST /api/assets", body: {tag: X1, name: X, site: South, criticality: bad}, status: 400}
+  - {as: sofia, do: "POST /api/assets", body: {tag: X1, name: X, site: East, criticality: low}, status: 201}
+  - {as: tomas, do: "PATCH /api/assets/14", body: {name: Y}, status: 200, json: {name: Y}}
+  - {as: tomas, do: "PATCH /api/assets/14", body: {site: South, name: Y}, status: 200}
+  - {as: tomas, do: "PATCH /api/assets/14", body: {site: North}, status: 403}
+  - {as: tomas, do: "PATCH /api/assets/14", body: {site: North, criticality: bad}, status: 403}
+  - {as: tomas, do: "PATCH /api/assets/14", body: {criticality: bad}, status: 400}
+  - {as: tomas, do: "PATCH /api/assets/1", body: {name: Y}, status: 403}
+  - {as: tomas, do: "PATCH /api/assets/1", body: {site: South}, status: 403}
+  - {as: tomas, do: "DELETE /api/assets/31", status: 403}
+  - {as: yara, do: "DELETE /api/assets/31", status: 204}
+  - {as: sofia, do: "PATCH /api/assets/31", body: {site: South}, status: 200, json: {site: South}}
+  - {as: tomas, do: "PATCH /api/assets/24", body: {retired: false}, status: 200}
+  - {as: tomas, do: "PATCH /api/assets/14", body: {retired: true}, status: 409}
+  # ---- parts
+  - {as: tomas, do: "POST /api/parts", body: {sku: P1, name: P, site: South, unit_cost: 1, quantity: 1, reorder_level: 0}, status: 201}
+  - {as: tomas, do: "POST /api/parts", body: {sku: P1, name: P, site: North, unit_cost: 1, quantity: 1, reorder_level: 0}, status: 403}
+  - {as: tomas, do: "POST /api/parts", body: {sku: P1, name: P, unit_cost: 1, quantity: 1, reorder_level: 0}, status: 400}
+  - {as: tomas, do: "PATCH /api/parts/4", body: {quantity: 9}, status: 200}
+  - {as: tomas, do: "PATCH /api/parts/4", body: {site: East}, status: 403}
+  - {as: tomas, do: "PATCH /api/parts/1", body: {quantity: 9}, status: 403}
+  - {as: tomas, do: "DELETE /api/parts/1", status: 403}
+  - {as: sofia, do: "DELETE /api/parts/7", status: 204}
+  - {as: ruth, do: "POST /api/parts", body: {sku: P1, name: P, site: North, unit_cost: 1, quantity: 1, reorder_level: 0}, status: 403}
+  - {as: tomas, do: "GET /api/parts", count: 8}

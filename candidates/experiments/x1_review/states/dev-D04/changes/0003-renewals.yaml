@@ -1,0 +1,55 @@
+request: "Loan renewals: POST /api/loans/{id}/renew (body {}) by the borrowing member or any librarian (other member -> 403). Extends due_at by 14 days from the current due_at and increments new loan field renewals. 409 if returned, overdue (today after due_at; renewing on the due date is allowed), renewals already 2, or the book has a waiting hold. On success emits one loan_renewed message {loan, due_at: new date} and returns the loan; failures change nothing. renewals is 0 for existing and new loans; loans still cannot be PATCHed. overdue and due_at rules use the extended date. UI shows a renew form exactly when the caller may renew now. Holds unchanged."
+interpretation: >-
+  Add loans.renewals (int, required, system, default 0, existing loans backfilled with 0). Add action
+  loans.renew with the same allow as return (librarian or the loan's member) and a guard that requires
+  returned_at is None, today <= due_at, renewals < 2 and no waiting hold on the loan's book; the effects
+  set due_at = due_at + 14 days and renewals + 1, then emit loan_renewed {loan, due_at} with the new date.
+  Because overdue is computed from the stored due_at, it uses the extended date automatically. The UI
+  renew form follows allow + guard. Holds and the existing update rule (False) are untouched.
+ops:
+  - add_field:
+      entity: loans
+      name: renewals
+      type: int
+      required: true
+      system: true
+      default: "0"
+      backfill: "0"
+  - add_action:
+      entity: loans
+      name: renew
+      allow: "user.role == 'librarian' or record.member == user"
+      guard: >-
+        record.returned_at is None
+        and today <= record.due_at
+        and record.renewals < 2
+        and count(holds, book=record.book, status='waiting') == 0
+      guard_message: "'this loan cannot be renewed now'"
+      effects:
+        - set: {due_at: "record.due_at + days(14)", renewals: "record.renewals + 1"}
+        - emit: loan_renewed
+          payload: {loan: record, due_at: record.due_at}
+expect:
+  - name: "member renews own loan on time"
+    steps:
+      - {as: chen, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-01T10:00:00", status: 200, json: {id: 52, due_at: "2026-03-18", renewals: 1, overdue: false}}
+      - {as: chen, do: "GET /api/_outbox?channel=loan_renewed", count: 1}
+  - {as: chen, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-04T23:00:00", status: 200, json: {due_at: "2026-03-18", renewals: 1}}
+  - {as: chen, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-05T00:00:00", status: 409}
+  - {as: ada, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-01T10:00:00", status: 200, json: {due_at: "2026-03-18", renewals: 1}}
+  - {as: hana, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-01T10:00:00", status: 403}
+  - {as: ada, do: "POST /api/loans/1/renew", body: {}, now: "2025-11-10T10:00:00", status: 409}
+  - name: "third renewal refused; overdue uses extended date"
+    steps:
+      - {as: chen, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-01T10:00:00", status: 200}
+      - {as: chen, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-10T10:00:00", status: 200, json: {due_at: "2026-04-01", renewals: 2}}
+      - {as: chen, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-20T10:00:00", status: 409}
+      - {as: chen, do: "GET /api/loans/52", now: "2026-03-30T10:00:00", status: 200, json: {overdue: false, renewals: 2}}
+      - {as: chen, do: "GET /api/_outbox?channel=loan_renewed", count: 2}
+  - name: "waiting hold blocks renewal"
+    steps:
+      - {as: hana, do: "POST /api/books/22/hold", body: {}, now: "2026-03-01T09:00:00", status: 200}
+      - {as: chen, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-01T10:00:00", status: 409}
+      - {as: chen, do: "GET /api/loans/52", now: "2026-03-01T10:00:00", json: {due_at: "2026-03-04", renewals: 0}}
+  - {as: ada, do: "PATCH /api/loans/52", body: {renewals: 1}, status: 403}
+  - {as: ada, do: "GET /api/loans/1", json: {renewals: 0}}

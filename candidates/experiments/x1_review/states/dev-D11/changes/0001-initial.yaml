@@ -1,0 +1,70 @@
+request: "Build the expense-claims application described in spec/apps/expenses.md"
+ops:
+  - add_entity:
+      name: employees
+      fields:
+        username: text required unique
+        name: text required
+        role: enum employee|manager|finance required
+        manager: ref employees
+        department: text required
+      rules:
+        read: "True"
+        create: "user.role == 'finance'"
+        update: "user.role == 'finance'"
+        delete: "user.role == 'finance'"
+  - set_users: {entity: employees, key: username}
+  - add_entity:
+      name: claims
+      fields:
+        employee: {type: ref, ref: employees, required: true, system: true, default: user}
+        amount: number required
+        category: enum travel|meals|equipment|other required
+        description: text required
+        status: {type: enum, values: [draft, submitted, approved, rejected, paid], required: true, system: true, default: "'draft'"}
+        submitted_at: {type: datetime, system: true}
+        decided_at: {type: datetime, system: true}
+        decided_by: {type: ref, ref: employees, system: true}
+        rejection_reason: {type: text, system: true}
+      rules:
+        read: "record.employee == user or record.employee.manager == user or user.role == 'finance'"
+        create: "True"
+        update: "record.employee == user"
+        update_guard: "record.status == 'draft'"
+        delete: "record.employee == user"
+        delete_guard: "record.status == 'draft'"
+      constraints:
+        amount_range: {expr: "record.amount > 0 and record.amount <= 5000", message: "must be greater than 0 and at most 5000", field: amount}
+  - add_action:
+      entity: claims
+      name: submit
+      allow: "record.employee == user"
+      guard: "record.status == 'draft'"
+      effects:
+        - set: {status: "'submitted'", submitted_at: now}
+  - add_action:
+      entity: claims
+      name: approve
+      allow: "record.employee.manager == user"
+      guard: "record.status == 'submitted'"
+      effects:
+        - set: {status: "'approved'", decided_at: now, decided_by: user}
+  - add_action:
+      entity: claims
+      name: reject
+      params: {reason: text required}
+      allow: "record.employee.manager == user"
+      guard: "record.status == 'submitted'"
+      effects:
+        - set: {status: "'rejected'", decided_at: now, decided_by: user, rejection_reason: params.reason}
+  - add_action:
+      entity: claims
+      name: pay
+      allow: "user.role == 'finance'"
+      guard: "record.status == 'approved'"
+      effects:
+        - set: {status: "'paid'"}
+        - emit: payment
+          payload: {claim: record, employee: record.employee, amount: record.amount}
+  - add_records: {entity: employees, from_json: ../../../spec/apps/expenses_seed.json, key: employees}
+  - add_records: {entity: claims, from_json: ../../../spec/apps/expenses_seed.json, key: claims}
