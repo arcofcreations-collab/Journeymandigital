@@ -1,0 +1,17 @@
+{
+ "id": "E09",
+ "set": "eval",
+ "system": "accrete2",
+ "trial": 2,
+ "app": "library",
+ "categories": [
+  "permissions",
+  "new_relationship",
+  "data_migration",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "version": "8282ea6",
+ "attempts": [],
+ "extra": []
+}

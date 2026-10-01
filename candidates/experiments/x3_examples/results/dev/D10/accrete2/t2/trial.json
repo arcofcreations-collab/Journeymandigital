@@ -1,0 +1,16 @@
+{
+ "id": "D10",
+ "set": "dev",
+ "system": "accrete2",
+ "trial": 2,
+ "app": "expenses",
+ "categories": [
+  "cross_cutting",
+  "new_concept",
+  "data_migration"
+ ],
+ "expect_rejection": false,
+ "version": "8282ea6",
+ "attempts": [],
+ "extra": []
+}

@@ -1,0 +1,17 @@
+{
+ "id": "E12",
+ "set": "eval",
+ "system": "accrete2",
+ "trial": 2,
+ "app": "expenses",
+ "categories": [
+  "failure_atomicity",
+  "new_concept",
+  "permissions",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "version": "8282ea6",
+ "attempts": [],
+ "extra": []
+}

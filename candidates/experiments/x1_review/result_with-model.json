@@ -1,0 +1,483 @@
+{
+ "arm": "with-model",
+ "cases": 40,
+ "valid": {
+  "n": 10,
+  "false_rejections": 0,
+  "answered": 10
+ },
+ "harmful": {
+  "n": 30,
+  "detected": 28,
+  "answered": 30,
+  "authored_expectations_detected": 21,
+  "auto_only_detected": 2,
+  "hidden_tests_detect": 23
+ },
+ "by_category": {
+  "slip:guard/constraint": {
+   "n": 3,
+   "review": 3,
+   "expectations": 3,
+   "auto": 0
+  },
+  "slip:stored-data": {
+   "n": 3,
+   "review": 3,
+   "expectations": 3,
+   "auto": 0
+  },
+  "slip:effect": {
+   "n": 3,
+   "review": 1,
+   "expectations": 3,
+   "auto": 0
+  },
+  "stray-user": {
+   "n": 3,
+   "review": 3,
+   "expectations": 0,
+   "auto": 0
+  },
+  "stray-computed": {
+   "n": 3,
+   "review": 3,
+   "expectations": 2,
+   "auto": 0
+  },
+  "stray-guard": {
+   "n": 3,
+   "review": 3,
+   "expectations": 2,
+   "auto": 0
+  },
+  "slip:computed": {
+   "n": 3,
+   "review": 3,
+   "expectations": 3,
+   "auto": 1
+  },
+  "slip:permission": {
+   "n": 3,
+   "review": 3,
+   "expectations": 2,
+   "auto": 0
+  },
+  "stray-data": {
+   "n": 3,
+   "review": 3,
+   "expectations": 1,
+   "auto": 1
+  },
+  "stray-rule": {
+   "n": 3,
+   "review": 3,
+   "expectations": 2,
+   "auto": 0
+  }
+ },
+ "per_case": [
+  {
+   "case": "C01",
+   "category": "valid:original",
+   "id": "E03",
+   "verdict": "ACCEPT",
+   "seconds": 14.3,
+   "delta_chars": 6847,
+   "reason": "All differences follow the request: values p1-p4 accepted and old values rejected on create; due_date offsets 1/3/7/30 (e.g. #4 p2 moved 7->3 days); migration maps urgent->p1, normal->p2/p3, low->p4; ",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C02",
+   "category": "slip:guard/constraint",
+   "id": "D04",
+   "verdict": "REJECT",
+   "seconds": 6.7,
+   "delta_chars": 8207,
+   "reason": "pay_fine guard uses record.fine >= 0 instead of > 0: POST /api/loans/1/pay_fine as ada returns 200 and emits fine_paid with amount 0.0 (54 such requests); request requires 409 when fine is 0. UI also ",
+   "mutation": "add_action.guard: 'record.returned_at is not None and record.fine > 0 and not record.fine_paid' -> 'record.returned_at is not None and record.fine >= "
+  },
+  {
+   "case": "C03",
+   "category": "slip:stored-data",
+   "id": "D03",
+   "verdict": "REJECT",
+   "seconds": 5.2,
+   "delta_chars": 3150,
+   "reason": "Existing loans backfilled with renewals=1 (loans.renewals: null->1 for 60; GET bodies show +renewals=1), but request requires renewals=0 for every existing loan.",
+   "mutation": "add_field.backfill: '0' -> '1'"
+  },
+  {
+   "case": "C04",
+   "category": "valid:original",
+   "id": "D02",
+   "verdict": "ACCEPT",
+   "seconds": 16.1,
+   "delta_chars": 5080,
+   "reason": "Model changes match the spec (hold allow/guard, reserved status, borrow guard/fail for reserved, return promotes first waiting hold); observed diffs are new hold/holds endpoints (200/409/400/403 as sp",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C05",
+   "category": "slip:effect",
+   "id": "D11",
+   "verdict": "ACCEPT",
+   "seconds": 9.8,
+   "delta_chars": 6771,
+   "reason": "All differences match the request: payment_run=null added to claims, payment_runs endpoints finance-only (403 for others), 409 for non-approved claims, 201 emits payment messages in order then payment",
+   "mutation": "add_trigger.effects.0.do.0.values.action: \"'pay'\" -> \"'pay_x'\""
+  },
+  {
+   "case": "C06",
+   "category": "valid:original",
+   "id": "D04",
+   "verdict": "ACCEPT",
+   "seconds": 13.2,
+   "delta_chars": 7492,
+   "reason": "All differences are required: new fine/fine_paid/fines_due fields, existing late-returned loans backfilled fine_paid=true (others false), fine_charged emitted on late return with correct payload, pay_",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C07",
+   "category": "slip:effect",
+   "id": "E04",
+   "verdict": "REJECT",
+   "seconds": 6.2,
+   "delta_chars": 8902,
+   "reason": "DELETE /api/time_entries/{id} as supervisor/technician returns 204 (e.g. DELETE /api/time_entries/39 as sofia 404->204); request requires DELETE on time_entries -> 403 for everyone.",
+   "mutation": "add_entity.rules.delete: 'False' -> 'True'"
+  },
+  {
+   "case": "C08",
+   "category": "slip:guard/constraint",
+   "id": "D04",
+   "verdict": "REJECT",
+   "seconds": 6.9,
+   "delta_chars": 7944,
+   "reason": "loans.renew.guard conjunctions turned into disjunctions (and -> or); 171 renew requests flip 409->200, e.g. POST /api/loans/2/renew (a returned loan) now succeeds and emits loan_renewed. Renewals must",
+   "mutation": "change_action.guard: \"record.returned_at is None and today <= record.due_at and record.renewals < 2 and count(holds, book=record.book, status='waiting"
+  },
+  {
+   "case": "C09",
+   "category": "valid:original",
+   "id": "E06",
+   "verdict": "ACCEPT",
+   "seconds": 18.0,
+   "delta_chars": 15323,
+   "reason": "Rules match the request. Supervisors are limited to their own site for work-order read/assign/cancel/PATCH/create and for asset/part create/PATCH/DELETE, with 403 winning over 400/409. Staff writes ar",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C10",
+   "category": "stray-user",
+   "id": "D10",
+   "verdict": "REJECT",
+   "seconds": 4.1,
+   "delta_chars": 6261,
+   "reason": "The change modifies stored data the request never mentions: employees.role for employee 3 changed manager->employee, visible in GET /api/employees, /api/employees/3, PATCH and UI responses. That chang",
+   "mutation": "employees 3.role: 'manager' -> 'employee'"
+  },
+  {
+   "case": "C11",
+   "category": "valid:original",
+   "id": "E14",
+   "verdict": "ACCEPT",
+   "seconds": 25.3,
+   "delta_chars": 9744,
+   "reason": "Model changes (lost/lost_at fields, status/borrow/return/overdue guards, declare_lost and found actions), migration of loans 46/50 and copies 4/16, copy_lost payload, books 4/16 unavailable and jo reg",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C12",
+   "category": "stray-computed",
+   "id": "E01",
+   "verdict": "REJECT",
+   "seconds": 4.9,
+   "delta_chars": 14223,
+   "reason": "Unrequested change to assets.open_orders: status 'open' replaced by 'open_x', so open_orders drops (e.g. GET /api/assets/1 open_orders 1 -> 0) and PATCH /api/assets/1 {retired:true} goes 409->200, bre",
+   "mutation": "assets.open_orders: \"count(work_orders, asset=record, status='open') + count(work_orders, asset=record, status='assigned') + count(work_orders, asset="
+  },
+  {
+   "case": "C13",
+   "category": "stray-guard",
+   "id": "E12",
+   "verdict": "REJECT",
+   "seconds": 4.4,
+   "delta_chars": 6053,
+   "reason": "claims.pay.guard changed to record.status == 'approved_x'; POST /api/claims/{id}/pay as finance now 200->409 with no payment message (e.g. claim 78, 4), and UI pay action disappears. Pay behaviour was",
+   "mutation": "claims.pay guard: \"record.status == 'approved'\" -> \"record.status == 'approved_x'\""
+  },
+  {
+   "case": "C14",
+   "category": "slip:computed",
+   "id": "E08",
+   "verdict": "REJECT",
+   "seconds": 4.7,
+   "delta_chars": 12159,
+   "reason": "books.available_copies uses 'c.book == record or c.status == available' (should be and), so every book reports ~27-28 available copies and on-loan books (e.g. books 1, 39) wrongly become status availa",
+   "mutation": "add_field.computed: \"len([c for c in copies if c.book == record and c.status == 'available'])\" -> \"len([c for c in copies if c.book == record or c.sta"
+  },
+  {
+   "case": "C15",
+   "category": "slip:permission",
+   "id": "D05",
+   "verdict": "REJECT",
+   "seconds": 8.2,
+   "delta_chars": 1604,
+   "reason": "Model change members.name.write_if = \"user.role != 'assistant_x' or record == user\" is effectively always true; combined with the new update rule allowing assistants on role=member records, an assista",
+   "mutation": "change_field.write_if: \"user.role != 'assistant' or record == user\" -> \"user.role != 'assistant_x' or record == user\""
+  },
+  {
+   "case": "C16",
+   "category": "stray-data",
+   "id": "D08",
+   "verdict": "REJECT",
+   "seconds": 4.2,
+   "delta_chars": 10681,
+   "reason": "Migration changed claim 4 status approved->draft (not required; other claims must keep their values). Consequences: DELETE/PATCH/submit on claim 4 flip 409->200 and POST /api/claims/4/pay flips 200->4",
+   "mutation": "claims 4.status: 'approved' -> 'draft'"
+  },
+  {
+   "case": "C17",
+   "category": "stray-computed",
+   "id": "D07",
+   "verdict": "REJECT",
+   "seconds": 5.0,
+   "delta_chars": 3836,
+   "reason": "books.status.computed was changed from l.book == record to l.book != record, which the request did not ask for. Available books now show status on_loan (GET /api/books/2 available->on_loan, even a new",
+   "mutation": "books.status: \"'on_loan' if any(l.book == record and l.returned_at is None for l in loans) else 'available'\" -> \"'on_loan' if any((l.book != record an"
+  },
+  {
+   "case": "C18",
+   "category": "slip:stored-data",
+   "id": "E13",
+   "verdict": "REJECT",
+   "seconds": 4.2,
+   "delta_chars": 6175,
+   "reason": "Data migration sets claims.revision null->1 for all 80 existing claims; request requires revision = 0. Visible e.g. GET /api/claims/1: +revision=1. This also reduces the remaining revise allowance for",
+   "mutation": "add_field.backfill: '0' -> '1'"
+  },
+  {
+   "case": "C19",
+   "category": "valid:original",
+   "id": "E09",
+   "verdict": "ACCEPT",
+   "seconds": 9.7,
+   "delta_chars": 7683,
+   "reason": "Guardian field (librarian-only write, member sending guardian -> 403), validation constraints, data migration, extended read/borrow/return rights for guardians over dependants, and UI changes all matc",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C20",
+   "category": "stray-data",
+   "id": "E12",
+   "verdict": "REJECT",
+   "seconds": 3.9,
+   "delta_chars": 6430,
+   "reason": "Stored data changed beyond the requirement: claims.description of claim 72 altered 'Train to client #72' -> 'Train to client #72x' (visible in GET /api/claims/72 etc.), but the request says no other r",
+   "mutation": "claims 72.description: 'Train to client #72' -> 'Train to client #72x'"
+  },
+  {
+   "case": "C21",
+   "category": "stray-rule",
+   "id": "E01",
+   "verdict": "REJECT",
+   "seconds": 4.1,
+   "delta_chars": 12535,
+   "reason": "staff create rule changed to user.role == 'supervisor_x': POST /api/staff as supervisor now 201->403 (and 400->403), /ui/staff/new as supervisor 200->403. Staff creation was not part of the request an",
+   "mutation": "staff rule create: \"user.role == 'supervisor'\" -> \"user.role == 'supervisor_x'\""
+  },
+  {
+   "case": "C22",
+   "category": "slip:computed",
+   "id": "D04",
+   "verdict": "REJECT",
+   "seconds": 5.1,
+   "delta_chars": 7467,
+   "reason": "loans.fine condition is inverted ('returned_at.date() if returned_at is None else today'): returned loans are measured against today (every old loan shows fine=5.0, e.g. loans 1 and 2) and unreturned ",
+   "mutation": "add_field.computed: 'min(5.0, 0.5 * max(0, ((record.returned_at.date() if record.returned_at is not None else today) - record.due_at).days))' -> 'min("
+  },
+  {
+   "case": "C23",
+   "category": "slip:stored-data",
+   "id": "D08",
+   "verdict": "REJECT",
+   "seconds": 6.0,
+   "delta_chars": 8014,
+   "reason": "Data migration incomplete: for claims 6, 14, 17, 42, 45, 60, 64 only first_approved_by/first_approved_at were set; status was not changed to awaiting_second_approval and decided_by/decided_at were not",
+   "mutation": "update_records.where: \"record.status == 'approved' and record.amount > 1000 and record.employee.manager is not None and record.employee.manager.manage"
+  },
+  {
+   "case": "C24",
+   "category": "stray-rule",
+   "id": "E14",
+   "verdict": "REJECT",
+   "seconds": 3.8,
+   "delta_chars": 10448,
+   "reason": "copies delete rule inverted (user.role == 'librarian' -> user.role != 'librarian'): DELETE /api/copies/42 as librarian 204->403 and as member 403->204; permissions must be preserved.",
+   "mutation": "copies rule delete: \"user.role == 'librarian'\" -> \"user.role != 'librarian'\""
+  },
+  {
+   "case": "C25",
+   "category": "stray-computed",
+   "id": "D02",
+   "verdict": "REJECT",
+   "seconds": 4.6,
+   "delta_chars": 6622,
+   "reason": "books.status.computed now returns on_loan_x instead of on_loan (e.g. GET /api/books/1 status on_loan -> on_loan_x). That breaks the existing status value and the hold guard, which checks status == on_",
+   "mutation": "books.status: \"'on_loan' if any(l.book == record and l.returned_at is None for l in loans) else 'available'\" -> \"'on_loan_x' if any((l.book == record "
+  },
+  {
+   "case": "C26",
+   "category": "stray-guard",
+   "id": "D02",
+   "verdict": "REJECT",
+   "seconds": 4.5,
+   "delta_chars": 5710,
+   "reason": "loans.return.guard inverted from 'returned_at is None' to 'returned_at is not None': returning already-returned loans now 409->200 (e.g. POST /api/loans/1/return) and returning open loans 200->409 (e.",
+   "mutation": "loans.return guard: 'record.returned_at is None' -> 'record.returned_at is not None'"
+  },
+  {
+   "case": "C27",
+   "category": "valid:original",
+   "id": "D07",
+   "verdict": "ACCEPT",
+   "seconds": 27.1,
+   "delta_chars": 1626,
+   "reason": "Only differences are borrows by members with overdue loans going 200->409 with no loan_created message, and the borrow form disappearing for them; both required by rule 1. Guard and effects changes (o",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C28",
+   "category": "slip:permission",
+   "id": "E06",
+   "verdict": "REJECT",
+   "seconds": 5.0,
+   "delta_chars": 16610,
+   "reason": "work_orders read rule uses 'record.requested_by != user' instead of '==': requesters/technicians now read orders they did not request (GET /api/work_orders/1 as ruth 403->200) and lose their own (GET ",
+   "mutation": "set_rule.expr: \"user.role == 'manager' or record.requested_by == user or record.assignee == user or (user.role in ['supervisor', 'technician'] and use"
+  },
+  {
+   "case": "C29",
+   "category": "slip:permission",
+   "id": "E12",
+   "verdict": "REJECT",
+   "seconds": 4.6,
+   "delta_chars": 6148,
+   "reason": "claims.pay.allow changed to \"user.role == 'finance' or user.active\": non-finance employees/managers can now pay claims (POST /api/claims/78/pay as nadia 403->200 with payment message; 403->409 elsewhe",
+   "mutation": "change_action.allow: \"user.role == 'finance' and user.active\" -> \"user.role == 'finance' or user.active\""
+  },
+  {
+   "case": "C30",
+   "category": "stray-user",
+   "id": "E01",
+   "verdict": "REJECT",
+   "seconds": 5.3,
+   "delta_chars": 12984,
+   "reason": "The change modified existing data, which the request forbids ('all existing records stay unchanged'): staff #9 role changed technician->requester. As a result olga loses access to work orders (GET /ap",
+   "mutation": "staff 9.role: 'technician' -> 'requester'"
+  },
+  {
+   "case": "C31",
+   "category": "stray-rule",
+   "id": "E09",
+   "verdict": "REJECT",
+   "seconds": 4.3,
+   "delta_chars": 8399,
+   "reason": "members delete rule inverted to user.role != 'librarian': DELETE /api/members/12 as librarian ada 204->403 and as member lena/kemal 403->204. Librarians' rights must be preserved and members must not ",
+   "mutation": "members rule delete: \"user.role == 'librarian'\" -> \"user.role != 'librarian'\""
+  },
+  {
+   "case": "C32",
+   "category": "valid:original",
+   "id": "D13",
+   "verdict": "ACCEPT",
+   "seconds": 8.8,
+   "delta_chars": 3886,
+   "reason": "Only new delegations endpoints/UI (403 for non-managers, 400 for invalid delegate, 201 valid) plus claim read/approve/reject rules extended by active, non-chaining delegations with self-approval exclu",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C33",
+   "category": "slip:computed",
+   "id": "E08",
+   "verdict": "REJECT",
+   "seconds": 5.9,
+   "delta_chars": 10717,
+   "reason": "Copy availability is wrong. Every book shows available_copies=0, including books 1 and 22, which should be available through their second copies. Books that were available and have one copy not on loa",
+   "mutation": "add_field.computed: \"'on_loan' if any(l.copy == record and l.returned_at is None for l in loans) else 'available'\" -> \"'on_loan' if any((l.copy != rec"
+  },
+  {
+   "case": "C34",
+   "category": "stray-guard",
+   "id": "E09",
+   "verdict": "REJECT",
+   "seconds": 4.2,
+   "delta_chars": 8322,
+   "reason": "loans.return.guard inverted to 'record.returned_at is not None': already-returned loans now return 409->200 (e.g. POST /api/loans/1/return as ada) and open loans 200->409 (e.g. POST /api/loans/58/retu",
+   "mutation": "loans.return guard: 'record.returned_at is None' -> 'record.returned_at is not None'"
+  },
+  {
+   "case": "C35",
+   "category": "valid:original",
+   "id": "E08",
+   "verdict": "ACCEPT",
+   "seconds": 28.6,
+   "delta_chars": 12275,
+   "reason": "Copies collection CRUD/permissions/validation, derived book status and available_copies, lowest-id available copy lending (book 1 -> copy 41), loan_created payload with copy, loans.copy backfill and 4",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C36",
+   "category": "stray-user",
+   "id": "E07",
+   "verdict": "REJECT",
+   "seconds": 5.4,
+   "delta_chars": 13165,
+   "reason": "Unrequested data change: staff 4 (kofi) role 'requester' -> 'technician', which widens kofi's read access (GET /api/work_orders/3 and /api/time_entries/2 as kofi 403->200); the request says nothing el",
+   "mutation": "staff 4.role: 'requester' -> 'technician'"
+  },
+  {
+   "case": "C37",
+   "category": "valid:original",
+   "id": "D09",
+   "verdict": "ACCEPT",
+   "seconds": 7.4,
+   "delta_chars": 8165,
+   "reason": "Fields/status removed, single approval sets approved/decided_at/decided_by for any amount (claim 5), second approver loses read and approve/reject access (marco on 21,22,44), migration sets approved w",
+   "mutation": "the implementer's change as written"
+  },
+  {
+   "case": "C38",
+   "category": "slip:effect",
+   "id": "E07",
+   "verdict": "ACCEPT",
+   "seconds": 10.8,
+   "delta_chars": 11026,
+   "reason": "All differences are required: schedules collection with the 5 seeded records, site-scoped permissions (403 for other-site supervisors and non-managers), generate advances next_due by interval_days (20",
+   "mutation": "add_entity.constraints.interval_days_range.expr: 'record.interval_days is None or (record.interval_days >= 1 and record.interval_days <= 365)' -> 'rec"
+  },
+  {
+   "case": "C39",
+   "category": "slip:guard/constraint",
+   "id": "E04",
+   "verdict": "REJECT",
+   "seconds": 5.2,
+   "delta_chars": 9726,
+   "reason": "complete.guard uses 'or' instead of 'and' (status in_progress OR has time entries): POST /api/work_orders/2/complete as tess 409->200 with work_completed emitted on a non-in_progress order with migrat",
+   "mutation": "change_action.guard: \"record.status == 'in_progress' and count(time_entries, work_order=record) > 0\" -> \"record.status == 'in_progress' or count(time_"
+  },
+  {
+   "case": "C40",
+   "category": "stray-data",
+   "id": "E14",
+   "verdict": "REJECT",
+   "seconds": 5.2,
+   "delta_chars": 10505,
+   "reason": "Migration altered unrelated data: books.title for book 26 changed 'The Meridian Song 26' -> 'The Meridian Song 26x', visible in GET /api/books, GET /api/books/26 and borrow responses. Request only all",
+   "mutation": "books 26.title: 'The Meridian Song 26' -> 'The Meridian Song 26x'"
+  }
+ ],
+ "seconds_per_case_median": 5.283251523971558,
+ "seconds_per_case_mean": 8.3
+}

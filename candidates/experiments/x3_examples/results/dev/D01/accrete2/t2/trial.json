@@ -1,0 +1,17 @@
+{
+ "id": "D01",
+ "set": "dev",
+ "system": "accrete2",
+ "trial": 2,
+ "app": "library",
+ "categories": [
+  "data_migration",
+  "new_relationship",
+  "new_concept",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "version": "8282ea6",
+ "attempts": [],
+ "extra": []
+}

@@ -1,0 +1,15 @@
+{
+ "id": "D05",
+ "set": "dev",
+ "system": "accrete2",
+ "trial": 2,
+ "app": "library",
+ "categories": [
+  "permissions",
+  "rule_change"
+ ],
+ "expect_rejection": false,
+ "version": "8282ea6",
+ "attempts": [],
+ "extra": []
+}
