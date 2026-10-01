@@ -1,0 +1,50 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/x4runs/eval/E13/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E13/test_E13.py",
+ "passed": 8,
+ "total": 8,
+ "seconds": 0.37,
+ "results": [
+  {
+   "test": "challenges.eval.E13.test_E13::test_new_fields_default_and_read_only",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E13.test_E13::test_withdraw_recent_submission_and_resubmit",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E13.test_E13::test_withdraw_window_is_seven_days",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E13.test_E13::test_withdraw_permissions_and_states",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E13.test_E13::test_revise_rejected_claim_up_to_twice",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E13.test_E13::test_revise_permissions_and_states",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E13.test_E13::test_revised_claim_can_be_approved_paid_or_deleted",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E13.test_E13::test_ui_withdraw_and_revise_forms",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
