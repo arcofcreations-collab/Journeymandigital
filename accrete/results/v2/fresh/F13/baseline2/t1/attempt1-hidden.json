@@ -1,0 +1,30 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/fresh/F13/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/fresh/F13/test_F13.py",
+ "passed": 4,
+ "total": 4,
+ "seconds": 0.57,
+ "results": [
+  {
+   "test": "challenges.fresh.F13.test_F13::test_existing_claims_renamed",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F13.test_F13::test_create_and_patch_use_new_name",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F13.test_F13::test_workflow_and_payment_unchanged",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.fresh.F13.test_F13::test_ui_shows_new_name",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
