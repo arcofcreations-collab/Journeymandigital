@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Members{% endblock %}
+{% block content %}
+<h1>Members</h1>
+{% if ctx.is_librarian %}<p><a href="{{ url_for('ui.new_member') }}">New member</a></p>{% endif %}
+<table>
+  <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th></tr></thead>
+  <tbody>
+  {% for member in members %}
+    <tr data-id="{{ member.id }}">
+      <td><a href="{{ url_for('ui.show_member', member_id=member.id) }}">{{ member.username }}</a></td>
+      <td>{{ member.name }}</td>
+      <td>{{ member.role }}</td>
+      <td>{{ member.active|display }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

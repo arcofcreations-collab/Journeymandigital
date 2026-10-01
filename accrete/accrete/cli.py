@@ -62,13 +62,18 @@ def print_report(rep, out=sys.stdout):
               f"(e.g. ids {p['examples']})", file=out)
     fp = rep.get("footprint")
     if fp:
-        print(f"  footprint: operations={fp['operations']} fields={fp['fields']} visibility={fp['visibility']}", file=out)
+        print(f"  direct footprint: {', '.join(fp['direct'])}", file=out)
+        if fp.get("consequences"):
+            print(f"  possible consequences (dependents): {', '.join(fp['consequences'])}", file=out)
     rp = rep.get("replay")
     if rp and "probes" in rp:
-        print(f"  replay: {rp['probes']} requests; {rp['identical']} identical, {rp['explained']} changed inside the "
-              f"footprint, {rp['unexplained']} unexplained", file=out)
+        print(f"  replay: {rp['probes']} requests: {rp['identical']} identical, {rp['direct']} changed as intended, "
+              f"{rp['acknowledged']} acknowledged consequences, {rp['consequence']} UNACKNOWLEDGED consequences, "
+              f"{rp['unexplained']} unexplained", file=out)
         for ex in rp.get("examples", []):
-            print(f"    REGRESSION? {ex['request']}: {ex['why']}", file=out)
+            print(f"    {ex['kind'].upper()} {ex['request']}: {ex['before'][0]} -> {ex['after'][0]} [{', '.join(ex['labels'])}]", file=out)
+            print(f"        before: {ex['before'][1][:160]}", file=out)
+            print(f"        after:  {ex['after'][1][:160]}", file=out)
     for e in rep.get("expectations", []) or []:
         print(f"  expect {'ok  ' if e['passed'] else 'FAIL'} {e['name']} {e['detail']}", file=out)
     if rep.get("timings"):

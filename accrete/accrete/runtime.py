@@ -212,6 +212,7 @@ class Ctx:
         self._computing = set()
         self.journal = []  # (eid, rid, previous stored dict or None)
         self.outbox_mark = len(world["outbox"])
+        self.next_id_mark = (dict(world["next_id"]), world["outbox_next"])
         ue = M.user_entity(model)
         if ue and user_name is not None:
             key = model["users"]["key"]
@@ -277,6 +278,8 @@ class Ctx:
             else:
                 recs[rid] = prev
         del self.world["outbox"][self.outbox_mark:]
+        self.world["next_id"] = dict(self.next_id_mark[0])
+        self.world["outbox_next"] = self.next_id_mark[1]
         self.journal.clear()
         self.invalidate()
 

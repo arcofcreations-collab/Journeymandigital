@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field %}
+{% block title %}Claim #{{ claim.id }}{% endblock %}
+{% block content %}
+<h1>Claim #{{ claim.id }}</h1>
+<dl>
+  {{ field("employee", claim.employee, href=url_for('ui.show_employee', employee_id=claim.employee)) }}
+  {{ field("amount", claim.amount) }}
+  {{ field("category", claim.category) }}
+  {{ field("description", claim.description) }}
+  {{ field("status", claim.status) }}
+  {{ field("submitted_at", claim.submitted_at) }}
+  {{ field("decided_at", claim.decided_at) }}
+  {{ field("decided_by", claim.decided_by, href=claim.decided_by and url_for('ui.show_employee', employee_id=claim.decided_by)) }}
+  {{ field("rejection_reason", claim.rejection_reason) }}
+</dl>
+
+{% if "submit" in actions %}
+<form data-action="submit" method="post" action="{{ url_for('ui.submit_claim', claim_id=claim.id) }}">
+  <button type="submit">Submit for approval</button>
+</form>
+{% endif %}
+{% if "approve" in actions %}
+<form data-action="approve" method="post" action="{{ url_for('ui.approve_claim', claim_id=claim.id) }}">
+  <button type="submit">Approve</button>
+</form>
+{% endif %}
+{% if "reject" in actions %}
+<form data-action="reject" method="post" action="{{ url_for('ui.reject_claim', claim_id=claim.id) }}">
+  <label>Reason <textarea name="reason" required></textarea></label>
+  <button type="submit">Reject</button>
+</form>
+{% endif %}
+{% if "pay" in actions %}
+<form data-action="pay" method="post" action="{{ url_for('ui.pay_claim', claim_id=claim.id) }}">
+  <button type="submit">Pay</button>
+</form>
+{% endif %}
+{% endblock %}

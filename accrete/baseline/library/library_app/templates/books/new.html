@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}New book{% endblock %}
+{% block content %}
+<h1>New book</h1>
+<form data-create="books" method="post" action="{{ url_for('ui.create_book') }}">
+  <label>Title <input name="title" required></label>
+  <label>Author <input name="author" required></label>
+  <label>ISBN <input name="isbn" required></label>
+  <label>Year <input name="year" type="number" step="1"></label>
+  <button type="submit">Create</button>
+</form>
+{% endblock %}

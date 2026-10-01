@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field %}
+{% block title %}Loan #{{ loan.id }}{% endblock %}
+{% block content %}
+<h1>Loan #{{ loan.id }}</h1>
+<dl>
+  {{ field("book", loan.book, href=url_for('ui.show_book', book_id=loan.book)) }}
+  {{ field("member", loan.member, href=url_for('ui.show_member', member_id=loan.member)) }}
+  {{ field("borrowed_at", loan.borrowed_at) }}
+  {{ field("due_at", loan.due_at) }}
+  {{ field("returned_at", loan.returned_at) }}
+  {{ field("overdue", loan.overdue) }}
+</dl>
+
+{% if "return" in actions %}
+<form data-action="return" method="post" action="{{ url_for('ui.return_loan', loan_id=loan.id) }}">
+  <button type="submit">Return</button>
+</form>
+{% endif %}
+{% endblock %}

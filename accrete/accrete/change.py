@@ -51,6 +51,16 @@ def _elements(model):
     return out
 
 
+def _touched_ids(old_world, new_world):
+    out = {}
+    for eid in set(old_world["records"]) | set(new_world["records"]):
+        o, n = old_world["records"].get(eid, {}), new_world["records"].get(eid, {})
+        ids = {rid for rid in set(o) | set(n) if o.get(rid) != n.get(rid)}
+        if ids:
+            out[eid] = ids
+    return out
+
+
 def _data_changes(old_world, new_world, new_model):
     """Which (entity id, field id) values changed, and which entities gained/lost records."""
     fields, membership = set(), set()
@@ -69,26 +79,33 @@ def _data_changes(old_world, new_world, new_model):
 
 
 class Footprint:
-    """What a change may legitimately alter in observable behaviour."""
+    """What a change may alter in observable behaviour, as labels:
+
+      "E.read"            which records of E are visible
+      "E.create" | "E.update" | "E.delete" | "E.action:N" | "E.any"   outcome of an operation
+      "E.field:F"         the value or presence of field F in E's records
+
+    ``direct`` labels come from elements the operators modify themselves; ``consequences`` are
+    labels reached only through dependencies (other features that read what changed). Direct
+    differences are accepted; consequences must be acknowledged by the change.
+    """
 
     def __init__(self):
-        self.fields = set()        # (entity name, field name) whose values in responses may differ
-        self.visibility = set()    # entity names whose read rule / membership may differ
-        self.ops = set()           # (entity name, op) op in create/update/delete/action:<name>/any
+        self.direct = set()
+        self.consequences = set()
         self.renamed_fields = {}   # (entity new name, old field name) -> new field name
         self.renamed_entities = {}  # old name -> new name
-        self.reasons = []          # human-readable account: element -> consequence
-        self.declared = []         # extra footprint declared by the change author
+        self.reasons = []
+        self.declared = []
+
+    def all(self):
+        return self.direct | self.consequences
 
     def to_json(self):
-        return {"fields": sorted(f"{e}.{f}" for e, f in self.fields), "visibility": sorted(self.visibility),
-                "operations": sorted(f"{e}.{o}" for e, o in self.ops),
+        return {"direct": sorted(self.direct), "consequences": sorted(self.consequences - self.direct),
                 "renamed_fields": {f"{e}.{o}": n for (e, o), n in self.renamed_fields.items()},
                 "renamed_entities": self.renamed_entities, "declared": self.declared,
-                "consequences": self.reasons[:200]}
-
-    def allows_op(self, ent, op):
-        return (ent, op) in self.ops or (ent, "any") in self.ops or ent in self.visibility
+                "why": self.reasons[:200]}
 
 
 def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
@@ -107,7 +124,6 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
                 return e["fields"][fid]["name"]
         return fid
 
-    # renames (for translating old responses before comparing)
     for eid, e in new_model["entities"].items():
         oe = old_model["entities"].get(eid)
         if oe and oe["name"] != e["name"]:
@@ -118,84 +134,80 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
                 if of and of["name"] != f["name"]:
                     fp.renamed_fields[(e["name"], of["name"])] = f["name"]
 
-    affected_fields = set()   # (eid, fid)
-    affected_entities = set()  # eids whose membership/visibility changes
+    D = fp.direct
+    seeds_fields, seeds_colls = set(), set()  # what dependents may read: (ename, fname), enames
     for k in changed:
         kind = k[0]
         if kind == "entity":
             eid = k[1]
+            n = ename(eid)
             if eid not in old_model["entities"] or eid not in new_model["entities"]:
-                fp.ops.add((ename(eid), "any"))
-                fp.visibility.add(ename(eid))
-                affected_entities.add(eid)
-                fp.reasons.append(f"entity {ename(eid)} added or removed: all of its operations")
+                D.update({f"{n}.any", f"{n}.read"})
+                seeds_colls.add(n)
+                fp.reasons.append(f"entity {n} added or removed")
         elif kind == "field":
             eid, fid = k[1], k[2]
-            affected_fields.add((eid, fid))
-            fp.ops.update({(ename(eid), "create"), (ename(eid), "update")})
-            fp.reasons.append(f"field {ename(eid)}.{fname(eid, fid)} changed: its values, create and update")
+            n, f = ename(eid), fname(eid, fid)
+            D.update({f"{n}.field:{f}", f"{n}.create", f"{n}.update"})
+            seeds_fields.add((n, f))
+            for old_name, new_name in fp.renamed_fields.items():
+                if old_name[0] == n and new_name == f:
+                    D.add(f"{n}.field:{old_name[1]}")
+            fp.reasons.append(f"field {n}.{f} changed")
         elif kind == "rule":
             eid, rule = k[1], k[2]
-            if rule == "read":
-                fp.visibility.add(ename(eid))
-                affected_entities.add(eid)
-            else:
-                fp.ops.add((ename(eid), {"update_guard": "update", "delete_guard": "delete"}.get(rule, rule)))
-            fp.reasons.append(f"rule {ename(eid)}.{rule} changed")
+            n = ename(eid)
+            D.add(f"{n}.read" if rule == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete'}.get(rule, rule)}")
+            fp.reasons.append(f"rule {n}.{rule} changed")
         elif kind == "constraint":
-            eid = k[1]
-            fp.ops.update({(ename(eid), "create"), (ename(eid), "update")})
-            affected_entities.add(("writes", eid))
-            fp.reasons.append(f"a constraint on {ename(eid)} changed: create/update and actions writing {ename(eid)}")
+            n = ename(k[1])
+            D.update({f"{n}.create", f"{n}.update"})
+            fp.reasons.append(f"a constraint on {n} changed")
+            for e in new_model["entities"].values():
+                for a in e["actions"].values():
+                    if _writes(a["effects"], n, e["name"]):
+                        fp.consequences.add(f"{e['name']}.action:{a['name']}")
+                        fp.reasons.append(f"action {e['name']}.{a['name']} writes {n}, so the constraint can affect it")
         elif kind == "action":
             eid, aid = k[1], k[2]
-            a = (new_model["entities"].get(eid, {}).get("actions", {}).get(aid)
-                 or old_model["entities"].get(eid, {}).get("actions", {}).get(aid))
-            fp.ops.add((ename(eid), f"action:{a['name']}"))
-            oa = old_model["entities"].get(eid, {}).get("actions", {}).get(aid)
-            if oa and a and oa["name"] != a["name"]:
-                fp.ops.add((ename(eid), f"action:{oa['name']}"))
-            fp.reasons.append(f"action {ename(eid)}.{a['name']} changed")
+            n = ename(eid)
+            for mdl in (new_model, old_model):
+                a = mdl["entities"].get(eid, {}).get("actions", {}).get(aid)
+                if a:
+                    D.add(f"{n}.action:{a['name']}")
+            fp.reasons.append(f"action {n}.{aid} changed")
         elif kind == "trigger":
             eid, tid = k[1], k[2]
-            t = (new_model["entities"].get(eid, {}).get("triggers", {}).get(tid)
-                 or old_model["entities"].get(eid, {}).get("triggers", {}).get(tid))
-            ev = t["on"]
-            fp.ops.add((ename(eid), ev if ev.startswith("action:") else ev))
-            fp.reasons.append(f"trigger {ename(eid)}.{t['name']} changed: {ev}")
+            n = ename(eid)
+            for mdl in (new_model, old_model):
+                t = mdl["entities"].get(eid, {}).get("triggers", {}).get(tid)
+                if t:
+                    D.add(f"{n}.{t['on']}")
+            fp.reasons.append(f"trigger on {n} changed")
         elif kind == "users":
-            fp.ops.add(("*", "any"))
-            fp.reasons.append("the user directory changed: every request")
+            D.add("*.any")
+            fp.reasons.append("the user directory changed")
 
     dfields, membership = _data_changes(old_world, new_world, new_model)
     for eid, fid in dfields:
-        affected_fields.add((eid, fid))
-        fp.reasons.append(f"stored values of {ename(eid)}.{fname(eid, fid)} changed")
+        n, f = ename(eid), fname(eid, fid)
+        D.add(f"{n}.field:{f}")
+        seeds_fields.add((n, f))
+        fp.reasons.append(f"stored values of {n}.{f} changed")
     for eid in membership:
-        affected_entities.add(eid)
-        fp.visibility.add(ename(eid))
-        fp.reasons.append(f"records of {ename(eid)} added or removed")
+        n = ename(eid)
+        D.add(f"{n}.read")
+        seeds_colls.add(n)
+        fp.reasons.append(f"records of {n} added or removed")
+    ue = M.user_entity(new_model)
+    if ue and (any(eid == ue["id"] for eid, _ in dfields) or ue["id"] in membership):
+        D.add("*.any")
+        fp.reasons.append("user records changed: any request may now authenticate differently")
 
-    # close over the dependency graph of the *new* model (and the old one, for removed reads)
     for mdl in (new_model, old_model):
-        _close(mdl, fp, affected_fields, affected_entities, ename, fname)
-    # writers of constrained entities
-    for item in list(affected_entities):
-        if isinstance(item, tuple) and item[0] == "writes":
-            target = ename(item[1])
-            for e in new_model["entities"].values():
-                for a in e["actions"].values():
-                    if _writes(a["effects"], target, e["name"]):
-                        fp.ops.add((e["name"], f"action:{a['name']}"))
-                        fp.reasons.append(f"action {e['name']}.{a['name']} writes {target}")
+        _close(mdl, fp, seeds_fields, seeds_colls)
     for d in declared:
-        ent, _, op = d.partition(".")
-        if op in ("read", "visibility"):
-            fp.visibility.add(ent)
-        elif op.startswith("field:"):
-            fp.fields.add((ent, op[6:]))
-        else:
-            fp.ops.add((ent, op or "any"))
+        fp.consequences.add(d)
         fp.declared.append(d)
     return fp
 
@@ -205,63 +217,54 @@ def _writes(effects, target, own):
         if eff.get("create") == target or ("set" in eff and "update" not in eff and own == target):
             return True
         if "update" in eff or "delete" in eff:
-            return True  # unknown target type: be conservative
+            return True  # target type unknown statically: be conservative
         if _writes(eff.get("then"), target, own) or _writes(eff.get("else"), target, own):
             return True
     return False
 
 
-def _close(mdl, fp, affected_fields, affected_entities, ename, fname):
+def _close(mdl, fp, seeds_fields, seeds_colls):
+    """Every behaviour that reads (transitively) what changed becomes a consequence."""
     deps = M.dependencies(mdl)
-    name_of = {}
-    for e in mdl["entities"].values():
-        for f in e["fields"].values():
-            name_of[(e["name"], f["name"])] = (e["id"], f["id"])
-    changed_pairs = {(ename(eid), fname(eid, fid)) for eid, fid in affected_fields}
-    changed_colls = {ename(x) for x in affected_entities if not isinstance(x, tuple)}
-    for eid, fid in affected_fields:
-        fp.fields.add((ename(eid), fname(eid, fid)))
-    grew = True
-    seen = set()
+    changed_pairs, changed_colls = set(seeds_fields), set(seeds_colls)
+    C = fp.consequences
+    grew, seen = True, set()
     while grew:
         grew = False
         for loc, (reads, colls, owner) in deps.items():
-            if loc in seen:
+            if loc in seen or not (reads & changed_pairs or colls & changed_colls):
                 continue
-            if reads & changed_pairs or colls & changed_colls:
-                seen.add(loc)
-                grew = True
-                kind = loc[0]
-                ent = mdl["entities"][loc[1]]
-                desc = M.describe(mdl, loc)
-                if kind == "field":
-                    f = ent["fields"][loc[2]]
-                    fp.fields.add((ent["name"], f["name"]))
-                    changed_pairs.add((ent["name"], f["name"]))
-                    if loc[3] in ("read_if",):
-                        fp.ops.add((ent["name"], "any"))
-                    if loc[3] in ("write_if", "default"):
-                        fp.ops.update({(ent["name"], "create"), (ent["name"], "update")})
-                elif kind == "rule":
-                    if loc[2] == "read":
-                        fp.visibility.add(ent["name"])
-                        changed_colls.add(ent["name"])
-                    else:
-                        fp.ops.add((ent["name"], {"update_guard": "update", "delete_guard": "delete"}.get(loc[2], loc[2])))
-                elif kind == "constraint":
-                    fp.ops.update({(ent["name"], "create"), (ent["name"], "update")})
-                elif kind == "action":
-                    a = ent["actions"][loc[2]]
-                    fp.ops.add((ent["name"], f"action:{a['name']}"))
-                elif kind == "trigger":
-                    t = ent["triggers"][loc[2]]
-                    fp.ops.add((ent["name"], t["on"]))
-                fp.reasons.append(f"{desc} depends on what changed")
+            seen.add(loc)
+            grew = True
+            kind = loc[0]
+            ent = mdl["entities"][loc[1]]
+            n = ent["name"]
+            if kind == "field":
+                f = ent["fields"][loc[2]]
+                if loc[3] == "computed":
+                    C.add(f"{n}.field:{f['name']}")
+                    changed_pairs.add((n, f["name"]))
+                elif loc[3] == "read_if":
+                    C.add(f"{n}.field:{f['name']}")
+                else:
+                    C.update({f"{n}.create", f"{n}.update"})
+            elif kind == "rule":
+                C.add(f"{n}.read" if loc[2] == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete'}.get(loc[2], loc[2])}")
+            elif kind == "constraint":
+                C.update({f"{n}.create", f"{n}.update"})
+            elif kind == "action":
+                C.add(f"{n}.action:{ent['actions'][loc[2]]['name']}")
+            elif kind == "trigger":
+                C.add(f"{n}.{ent['triggers'][loc[2]]['on']}")
+            fp.reasons.append(f"{M.describe(mdl, loc)} reads what changed")
 
 
 # ------------------------------------------------------------------ probes & replay
-def generate_probes(model, world, now, per_entity=3):
-    """Requests that exercise every collection, record operation and action as several users."""
+def generate_probes(model, world, now, per_entity=3, focus=None):
+    """Requests that exercise every collection, record operation and action as several users.
+
+    ``focus`` maps entity id -> record ids whose stored data the change touched; those records
+    are always probed, because their dependent behaviour is where consequences show up."""
     probes = []
     ue = M.user_entity(model)
     users = [None]
@@ -279,7 +282,10 @@ def generate_probes(model, world, now, per_entity=3):
     for e in model["entities"].values():
         coll = e["name"]
         ids = sorted(R.records(world, e["id"]))
-        sample = ids[:per_entity] + ids[-per_entity:] if len(ids) > 2 * per_entity else ids
+        sample = ids[:per_entity] + ids[-per_entity:] if len(ids) > 2 * per_entity else list(ids)
+        for rid in sorted((focus or {}).get(e["id"], ()))[:40]:
+            if rid not in sample and rid in R.records(world, e["id"]):
+                sample.append(rid)
         for u in users:
             probes.append({"method": "GET", "path": f"/api/{coll}", "query": {}, "body": None, "user": u, "now": t})
             for rid in sample:
@@ -348,87 +354,94 @@ def _translate(fp, coll, value):
     return value
 
 
-def _explain_diff(fp, method, path, old, new):
-    """Return None if the difference is inside the footprint, else a reason string."""
+def _labels_needed(fp, method, path, old, new):
+    """The footprint labels that would explain the difference between two outcomes.
+    Returns a list of alternatives; each alternative is a set of labels that together explain it."""
     coll, parts = _target(path)
     if coll is None:
-        return "unrouted request differs"
-    new_coll = fp.renamed_entities.get(coll, coll)
+        return [{"*.any"}]
+    n = fp.renamed_entities.get(coll, coll)
     op = _op_of(method, parts)
     (os_, ob, oe), (ns, nb, ne) = old, new
+    base = [{f"{n}.any"}, {"*.any"}]
     if op == "outbox":
-        return None if (fp.ops or fp.fields) and _outbox_ok(fp) else "outbox differs"
-    if (new_coll, "any") in fp.ops or ("*", "any") in fp.ops:
-        return None
-    entity_ops = {"list": "read", "read": "read"}
+        return base + [{"*.outbox"}]
     if os_ != ns or (isinstance(ob, dict) and isinstance(nb, dict) and ob.get("error") != nb.get("error")):
-        if new_coll in fp.visibility:
-            return None
-        if op in ("create", "update", "delete") and (new_coll, op) in fp.ops:
-            return None
-        if op.startswith("action:") and (new_coll, op) in fp.ops:
-            return None
-        if ns == 500:
-            return f"new version crashes: {nb.get('message') if isinstance(nb, dict) else nb}"
-        return f"status {os_} -> {ns} for {op} on {new_coll}, which this change should not affect"
-    if oe != ne and not (op.startswith("action:") and (new_coll, op) in fp.ops) and not (op in ("create", "update", "delete") and (new_coll, op) in fp.ops):
-        return f"integration messages differ for {op} on {new_coll}"
+        alts = base + [{f"{n}.read"}]
+        if op not in ("list", "read"):
+            alts.append({f"{n}.{op}"})
+        return alts
+    if oe != ne:
+        return base + [{f"{n}.{op}"}]
     if os_ >= 400:
-        return None
-    if op.startswith("action:") and (new_coll, op) in fp.ops:
-        return None
-    if op in ("create", "update", "delete") and (new_coll, op) in fp.ops:
-        return None
+        return [set()]
+    if op not in ("list", "read"):
+        alts = base + [{f"{n}.{op}"}]
+        keys = _diff_keys(fp, n, _translate(fp, n, ob) if isinstance(ob, dict) else ob, nb)
+        if keys is not None:
+            alts.append({f"{n}.field:{k}" for k in keys})
+        return alts
     if op == "list":
-        oi = {i["id"]: _translate(fp, new_coll, i) for i in (ob or {}).get("items", [])}
+        oi = {i["id"]: _translate(fp, n, i) for i in (ob or {}).get("items", [])}
         ni = {i["id"]: i for i in (nb or {}).get("items", [])}
-        if set(oi) != set(ni) and new_coll not in fp.visibility:
-            return f"list of {new_coll} contains different records"
+        need = set()
+        if set(oi) != set(ni):
+            need.add(f"{n}.read")
         for rid in set(oi) & set(ni):
-            r = _record_diff(fp, new_coll, oi[rid], ni[rid])
-            if r:
-                return r
+            need |= {f"{n}.field:{k}" for k in _diff_keys(fp, n, oi[rid], ni[rid]) or []}
+        return base + [need]
+    keys = _diff_keys(fp, n, _translate(fp, n, ob) if isinstance(ob, dict) else ob, nb)
+    return base + [{f"{n}.field:{k}" for k in keys}] if keys is not None else base
+
+
+def _diff_keys(fp, n, o, nw):
+    if not isinstance(o, dict) or not isinstance(nw, dict):
         return None
-    if isinstance(ob, dict) and isinstance(nb, dict):
-        return _record_diff(fp, new_coll, _translate(fp, new_coll, ob), nb)
-    return None if ob == nb else f"response differs for {op} on {new_coll}"
+    return {k for k in set(o) | set(nw) if o.get(k) != nw.get(k) or (k in o) != (k in nw)}
 
 
-def _outbox_ok(fp):
-    return True
+def classify(fp, acknowledged, method, path, old, new):
+    """'direct', 'acknowledged' or 'unacknowledged' (with the labels involved)."""
+    alts = _labels_needed(fp, method, path, old, new)
+    ack_all = "all" in acknowledged
+    best = None
+    for need in alts:
+        if need <= fp.direct:
+            return "direct", need
+        if need <= fp.all() | set(acknowledged):
+            missing = need - fp.direct - set(acknowledged)
+            if not missing or ack_all:
+                best = best or ("acknowledged", need)
+            elif need <= fp.all():
+                best = best if best and best[0] == "acknowledged" else ("consequence", need - fp.direct)
+    if best:
+        return best
+    smallest = min(alts, key=len)
+    return "unexplained", smallest
 
 
-def _record_diff(fp, coll, o, n):
-    for k in set(o) | set(n):
-        if k == "id" and False:
-            continue
-        if o.get(k) != n.get(k) or (k in o) != (k in n):
-            if (coll, k) in fp.fields:
-                continue
-            if coll in fp.visibility and (k in o) != (k in n):
-                continue
-            return f"{coll}.{k} changed from {json.dumps(o.get(k))} to {json.dumps(n.get(k))}"
-    return None
-
-
-def replay(old_model, old_world, new_model, new_world, probes, fp, limit_examples=8):
-    stats = {"probes": len(probes), "identical": 0, "explained": 0, "unexplained": 0, "examples": [], "explained_examples": []}
+def replay(old_model, old_world, new_model, new_world, probes, fp, acknowledged=(), limit_examples=8):
+    stats = {"probes": len(probes), "identical": 0, "direct": 0, "acknowledged": 0, "consequence": 0,
+             "unexplained": 0, "consequence_labels": {}, "examples": [], "direct_examples": []}
     for p in probes:
         old = _run_probe(old_model, old_world, p)
         new = _run_probe(new_model, new_world, _rename_probe(fp, p))
         if _same(old, new, fp, p):
             stats["identical"] += 1
             continue
-        why = _explain_diff(fp, p["method"], p["path"], old, new)
-        brief = {"request": f"{p['method']} {p['path']} as {p.get('user')}", "old": [old[0], _short(old[1])], "new": [new[0], _short(new[1])]}
-        if why is None:
-            stats["explained"] += 1
-            if len(stats["explained_examples"]) < limit_examples:
-                stats["explained_examples"].append(brief)
-        else:
-            stats["unexplained"] += 1
-            if len(stats["examples"]) < limit_examples:
-                stats["examples"].append(dict(brief, why=why))
+        verdict, labels = classify(fp, acknowledged, p["method"], p["path"], old, new)
+        if new[0] == 500 and old[0] != 500:
+            verdict, labels = "unexplained", {"crash"}
+        stats[verdict] += 1
+        brief = {"request": f"{p['method']} {p['path']} as {p.get('user')}" + (f" {json.dumps(p.get('body'))}" if p.get("body") else ""),
+                 "before": [old[0], _short(old[1])], "after": [new[0], _short(new[1])], "labels": sorted(labels)}
+        if verdict == "consequence":
+            for lab in labels:
+                stats["consequence_labels"][lab] = stats["consequence_labels"].get(lab, 0) + 1
+        if verdict in ("consequence", "unexplained") and len(stats["examples"]) < limit_examples:
+            stats["examples"].append(dict(brief, kind=verdict))
+        elif verdict in ("direct", "acknowledged") and len(stats["direct_examples"]) < limit_examples:
+            stats["direct_examples"].append(brief)
     return stats
 
 
@@ -563,7 +576,7 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
                                  "add an update_records operator, a backfill, or `existing: exempt`")
 
         t = time.perf_counter()
-        fp = compute_footprint(model0, model1, world0, world1, list(extra_footprint) + list(change.get("intent") or []))
+        fp = compute_footprint(model0, model1, world0, world1, list(extra_footprint))
         report["footprint"] = fp.to_json()
         timings["footprint_ms"] = _ms(t)
 
@@ -572,12 +585,20 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
             report["replay"] = {"skipped": "first change: there is no previous version"}
         else:
             probe_now = dt.datetime.fromisoformat(change["probe_now"]) if change.get("probe_now") else now
-            probes = store.requests() + generate_probes(model0, world0, probe_now)
-            report["replay"] = replay(model0, copy.deepcopy(world0), model1, copy.deepcopy(world1), probes, fp)
-            if report["replay"]["unexplained"]:
-                raise ChangeRejected("replaying recorded and generated requests shows behaviour changes outside "
-                                     "what this change touches (see replay.examples): likely regressions. If they are "
-                                     "intended, declare them under `intent:`")
+            probes = store.requests() + generate_probes(model0, world0, probe_now, focus=_touched_ids(world0, world1))
+            ack = list(change.get("consequences") or [])
+            if isinstance(change.get("consequences"), str):
+                ack = [change["consequences"]]
+            report["replay"] = replay(model0, copy.deepcopy(world0), model1, copy.deepcopy(world1), probes, fp, ack)
+            rp = report["replay"]
+            if rp["unexplained"]:
+                raise ChangeRejected("replaying recorded and generated requests shows behaviour changes that nothing in "
+                                     "this change accounts for (see replay.examples): regressions or engine faults")
+            if rp["consequence"]:
+                labs = ", ".join(sorted(rp["consequence_labels"]))
+                raise ChangeRejected(f"this change also alters other behaviour through dependencies: {labs} "
+                                     f"(see replay.examples). If that is intended, list them under `consequences:`; "
+                                     f"otherwise adjust the change")
         timings["replay_ms"] = _ms(t)
 
         t = time.perf_counter()
@@ -622,10 +643,15 @@ def revert(directory, seq, dry_run=False, force=False):
         return {"verdict": "rejected", "reason": "later changes build on this one: " + "; ".join(conflicts)
                 + ". Revert those first, or rerun with --force to attempt it anyway (it is still fully checked)."}
     fp = entry.get("footprint", {})
-    declared = [f"{x}" for x in fp.get("operations", [])] + [f"{v}.read" for v in fp.get("visibility", [])] + \
-               [f"{x.split('.')[0]}.field:{x.split('.', 1)[1]}" for x in fp.get("fields", [])]
-    change = {"request": f"revert change #{seq}: {entry.get('request', '')}", "ops": entry["inverse"]}
-    rep = apply_change(directory, change, dry_run=dry_run, extra_footprint=declared, kind="revert")
+    # undoing a change may alter exactly what the change altered (and what it acknowledged)
+    ack = list(fp.get("direct", [])) + list(fp.get("consequences", [])) + list(fp.get("declared", []))
+    for k, v in fp.get("renamed_fields", {}).items():
+        ent = k.split(".", 1)[0]
+        ack.append(f"{ent}.field:{v}")
+        ack.append(f"{ent}.field:{k.split('.', 1)[1]}")
+    change = {"request": f"revert change #{seq}: {entry.get('request', '')}", "ops": entry["inverse"],
+              "consequences": ack}
+    rep = apply_change(directory, change, dry_run=dry_run, kind="revert")
     if rep.get("verdict") == "committed":
         st = Store(directory)
         with st.db:

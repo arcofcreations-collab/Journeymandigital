@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}New employee{% endblock %}
+{% block content %}
+<h1>New employee</h1>
+<form data-create="employees" method="post" action="{{ url_for('ui.create_employee') }}">
+  <label>Username <input name="username" required></label>
+  <label>Name <input name="name" required></label>
+  <label>Role
+    <select name="role">
+      {% for role in roles %}<option value="{{ role }}">{{ role }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Manager
+    <select name="manager">
+      <option value="">(none)</option>
+      {% for manager in managers %}<option value="{{ manager.id }}">{{ manager.name }} ({{ manager.username }})</option>{% endfor %}
+    </select>
+  </label>
+  <label>Department <input name="department" required></label>
+  <button type="submit">Create</button>
+</form>
+{% endblock %}

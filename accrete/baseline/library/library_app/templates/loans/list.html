@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Loans{% endblock %}
+{% block content %}
+<h1>Loans</h1>
+<table>
+  <thead><tr><th>Loan</th><th>Book</th><th>Member</th><th>Borrowed</th><th>Due</th><th>Returned</th><th>Overdue</th></tr></thead>
+  <tbody>
+  {% for loan in loans %}
+    <tr data-id="{{ loan.id }}">
+      <td><a href="{{ url_for('ui.show_loan', loan_id=loan.id) }}">#{{ loan.id }}</a></td>
+      <td><a href="{{ url_for('ui.show_book', book_id=loan.book) }}">{{ loan.book }}</a></td>
+      <td>{{ loan.member }}</td>
+      <td>{{ loan.borrowed_at }}</td>
+      <td>{{ loan.due_at }}</td>
+      <td>{{ loan.returned_at|display }}</td>
+      <td>{{ loan.overdue|display }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
