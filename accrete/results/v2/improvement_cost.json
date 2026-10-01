@@ -1,0 +1,9 @@
+{
+ "baseline_v2_tooling": {
+  "agent_duration_ms": 1236258,
+  "tool_uses": 67,
+  "tokens": 328887,
+  "what": "dev.py (overview, check with contract/UI scan, call, new-migration, migrate, snapshot/dbdiff/notes), rewritten READMEs, migration runner + seed refactor",
+  "built_by": "independent agent"
+ }
+}

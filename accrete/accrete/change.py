@@ -65,14 +65,19 @@ def _loc_labels(mdl, loc):
             return {f"{n}.field:{f['name']}"}
         return {f"{n}.create", f"{n}.update"}
     if kind == "rule":
-        return {f"{n}.read" if loc[2] == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete', 'create_guard': 'create'}.get(loc[2], loc[2])}"}
+        return {f"{n}.{loc[2]}"}
     if kind == "constraint":
         return {f"{n}.create", f"{n}.update"}
     if kind == "action":
-        return {f"{n}.action:{ent['actions'][loc[2]]['name']}"}
+        return {_action_part(n, ent["actions"][loc[2]]["name"], loc[3])}
     if kind == "trigger":
         return {f"{n}.{ent['triggers'][loc[2]]['on']}"}
     return set()
+
+
+def _action_part(n, aname, key):
+    part = {"allow": "allow", "guard": "guard", "guard_message": "guard", "effects": "effects", "params": "params"}.get(key)
+    return f"{n}.action:{aname}" + (f".{part}" if part else "")
 
 
 def _touched_ids(old_world, new_world):
@@ -185,7 +190,7 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
         elif kind == "rule":
             eid, rule = k[1], k[2]
             n = ename(eid)
-            D.add(f"{n}.read" if rule == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete', 'create_guard': 'create'}.get(rule, rule)}")
+            D.add(f"{n}.{rule}")
             fp.reasons.append(f"rule {n}.{rule} changed")
         elif kind == "constraint":
             n = ename(k[1])
@@ -199,10 +204,16 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
         elif kind == "action":
             eid, aid = k[1], k[2]
             n = ename(eid)
-            for mdl in (new_model, old_model):
-                a = mdl["entities"].get(eid, {}).get("actions", {}).get(aid)
-                if a:
-                    D.add(f"{n}.action:{a['name']}")
+            a0 = old_model["entities"].get(eid, {}).get("actions", {}).get(aid)
+            a1 = new_model["entities"].get(eid, {}).get("actions", {}).get(aid)
+            if not a0 or not a1 or a0["name"] != a1["name"]:
+                for a in (a0, a1):
+                    if a:
+                        D.add(f"{n}.action:{a['name']}")
+            else:
+                for key in ("allow", "guard", "guard_message", "effects", "params"):
+                    if json.dumps(a0.get(key), sort_keys=True) != json.dumps(a1.get(key), sort_keys=True):
+                        D.add(_action_part(n, a1["name"], key))
             fp.reasons.append(f"action {n}.{aid} changed")
         elif kind == "trigger":
             eid, tid = k[1], k[2]
@@ -277,6 +288,27 @@ def _causes(effects, target, event, own):
     return False
 
 
+def scope_warnings(fp, change):
+    """Elements this change modifies that neither its request nor its interpretation mentions.
+    Not a rejection: a prompt to confirm that an edit outside the stated scope is intended."""
+    import re
+    text = (str(change.get("request") or "") + " " + str(change.get("interpretation") or "")).lower()
+    words = set(re.findall(r"[a-z0-9_]+", text))
+
+    def mentioned(name):
+        name = name.lower()
+        variants = {name, name.rstrip("s"), name + "s", name.replace("_", " ")}
+        return any(v in words or (" " in v and v in text) for v in variants)
+    out = []
+    for lab in sorted(fp.direct):
+        ent, _, rest = lab.partition(".")
+        if ent == "*" or not mentioned(ent) and not mentioned(rest.split(":")[-1].split(".")[0]):
+            out.append(lab)
+        elif rest.startswith("field:") and not mentioned(rest[6:]) and not mentioned(ent):
+            out.append(lab)
+    return out
+
+
 def _writes(effects, target, own):
     for eff in effects or []:
         if eff.get("create") == target or ("set" in eff and "update" not in eff and own == target):
@@ -314,36 +346,45 @@ def _close(mdl, fp, seeds_fields, seeds_colls):
                 else:
                     C.update({f"{n}.create", f"{n}.update"})
             elif kind == "rule":
-                C.add(f"{n}.read" if loc[2] == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete', 'create_guard': 'create'}.get(loc[2], loc[2])}")
+                C.add(f"{n}.{loc[2]}")
             elif kind == "constraint":
                 C.update({f"{n}.create", f"{n}.update"})
             elif kind == "action":
-                C.add(f"{n}.action:{ent['actions'][loc[2]]['name']}")
+                C.add(_action_part(n, ent["actions"][loc[2]]["name"], loc[3]))
             elif kind == "trigger":
                 C.add(f"{n}.{ent['triggers'][loc[2]]['on']}")
             fp.reasons.append(f"{M.describe(mdl, loc)} reads what changed")
 
 
 # ------------------------------------------------------------------ probes & replay
-def generate_probes(model, world, now, per_entity=3, focus=None):
+def generate_probes(model, world, now, per_entity=3, focus=None, thorough=False):
     """Requests that exercise every collection, record operation and action as several users.
 
     ``focus`` maps entity id -> record ids whose stored data the change touched; those records
-    are always probed, because their dependent behaviour is where consequences show up."""
+    are always probed, because their dependent behaviour is where consequences show up.
+    Besides normal requests, the set includes edge cases: filters (including an unknown field),
+    an empty create, a create with fractional numbers, and a no-op PATCH of every writable field
+    (field permissions). ``thorough`` (engine-upgrade snapshots) uses every user and up to 40
+    records per collection."""
     probes = []
     ue = M.user_entity(model)
     users = [None]
     if ue:
         key = model["users"]["key"]
         recs = R.records(world, ue["id"])
-        groups = {}
-        enum_fields = [f["id"] for f in ue["fields"].values() if f["type"] in ("enum", "bool") and not f.get("computed")]
-        for rid in sorted(recs):
-            sig = tuple(recs[rid].get(f) for f in enum_fields)
-            groups.setdefault(sig, []).append(recs[rid].get(key))
-        for names in groups.values():
-            users += names[:2]
+        if thorough:
+            users += [recs[rid].get(key) for rid in sorted(recs)]
+        else:
+            groups = {}
+            enum_fields = [f["id"] for f in ue["fields"].values() if f["type"] in ("enum", "bool") and not f.get("computed")]
+            for rid in sorted(recs):
+                sig = tuple(recs[rid].get(f) for f in enum_fields)
+                groups.setdefault(sig, []).append(recs[rid].get(key))
+            for names in groups.values():
+                users += names[:2]
     t = now.isoformat()
+    if thorough:
+        per_entity = 20
     for e in model["entities"].values():
         coll = e["name"]
         ids = sorted(R.records(world, e["id"]))
@@ -351,8 +392,20 @@ def generate_probes(model, world, now, per_entity=3, focus=None):
         for rid in sorted((focus or {}).get(e["id"], ()))[:40]:
             if rid not in sample and rid in R.records(world, e["id"]):
                 sample.append(rid)
+        stored = [f for f in M.ordered_fields(e) if not f.get("computed")]
+        writable = [f for f in stored if not f.get("system")]
+        first_rec = R.records(world, e["id"]).get(ids[0]) if ids else None
+        filters = []
+        if first_rec is not None:
+            for f in stored[:3]:
+                v = first_rec.get(f["id"])
+                if v is not None and not isinstance(v, (list, dict)):
+                    filters.append({f["name"]: json.dumps(v) if isinstance(v, bool) else str(v)})
+        filters.append({"no_such_field": "1"})
         for u in users:
             probes.append({"method": "GET", "path": f"/api/{coll}", "query": {}, "body": None, "user": u, "now": t})
+            for q in filters:
+                probes.append({"method": "GET", "path": f"/api/{coll}", "query": q, "body": None, "user": u, "now": t})
             for rid in sample:
                 probes.append({"method": "GET", "path": f"/api/{coll}/{rid}", "query": {}, "body": None, "user": u, "now": t})
                 for a in e["actions"].values():
@@ -361,34 +414,44 @@ def generate_probes(model, world, now, per_entity=3, focus=None):
             if ids:
                 src = R.records(world, e["id"])[ids[-1]]
                 body = {}
-                for f in e["fields"].values():
-                    if f.get("computed") or f.get("system"):
-                        continue
+                for f in writable:
                     v = src.get(f["id"])
                     if f.get("unique") and isinstance(v, str):
                         v = v + "-probe"
                     if v is not None:
                         body[f["name"]] = v
                 probes.append({"method": "POST", "path": f"/api/{coll}", "query": {}, "body": body, "user": u, "now": t})
-                first = next((f for f in M.ordered_fields(e) if not f.get("computed") and not f.get("system")), None)
-                if first is not None:
+                frac = {k: (v + 0.125 if isinstance(v, float) else v) for k, v in body.items()}
+                if frac != body:
+                    probes.append({"method": "POST", "path": f"/api/{coll}", "query": {}, "body": frac, "user": u, "now": t})
+                probes.append({"method": "POST", "path": f"/api/{coll}", "query": {}, "body": {}, "user": u, "now": t})
+                for f in writable:
                     probes.append({"method": "PATCH", "path": f"/api/{coll}/{ids[0]}", "query": {},
-                                   "body": {first["name"]: src.get(first["id"]) if first["type"] != "ref" else src.get(first["id"])},
-                                   "user": u, "now": t})
+                                   "body": {f["name"]: first_rec.get(f["id"])}, "user": u, "now": t})
                 probes.append({"method": "DELETE", "path": f"/api/{coll}/{ids[-1]}", "query": {}, "body": None, "user": u, "now": t})
     probes.append({"method": "GET", "path": "/api/_outbox", "query": {}, "body": None, "user": users[-1], "now": t})
     return probes
 
 
 def _run_probe(model, world, p):
+    """(status, body, emitted messages, records written) -- the last so that side-effects a
+    response does not show (e.g. the loan an action creates) are compared too."""
     now = dt.datetime.fromisoformat(p["now"]) if p.get("now") else dt.datetime(2026, 1, 1)
     mark = len(world["outbox"])
     status, out, ctx = R.handle_full(model, world, p["method"], p["path"], p.get("query") or {}, p.get("body"), p.get("user"), now)
     emitted = copy.deepcopy(world["outbox"][mark:])
+    writes = {}
+    if status < 400:
+        for eid, rid, _prev in ctx.journal:
+            ent = model["entities"].get(eid)
+            if not ent:
+                continue
+            data = R.records(world, eid).get(rid)
+            writes.setdefault(ent["name"], {})[str(rid)] = (
+                None if data is None else {f["name"]: data.get(fid) for fid, f in ent["fields"].items() if not f.get("computed")})
     ctx.rollback()  # every probe sees the same starting state
     del world["outbox"][mark:]
-    world_next = world.get("next_id")
-    return status, out, emitted
+    return status, out, emitted, writes
 
 
 def _target(path):
@@ -419,7 +482,32 @@ def _translate(fp, coll, value):
     return value
 
 
-def _labels_needed(fp, method, path, old, new):
+def _op_labels(n, op, os_, ns):
+    """Which part of an operation explains a change between two status codes.
+    403 comes from a permission (rule/allow), 409 from a guard, 400 from input validation;
+    `fail` effects can produce any of them."""
+    statuses = {os_, ns}
+    if op.startswith("action:"):
+        a = f"{n}.{op}"
+        if 404 in statuses:
+            return [{a}]
+        if 403 in statuses:
+            return [{f"{a}.allow"}, {f"{a}.effects"}, {f"{n}.read"}]
+        if 409 in statuses:
+            return [{f"{a}.guard"}, {f"{a}.effects"}]
+        if 400 in statuses:
+            return [{f"{a}.params"}, {f"{a}.effects"}]
+        return [{f"{a}.effects"}]
+    if op in ("create", "update", "delete"):
+        if 403 in statuses:
+            return [{f"{n}.{op}"}, {f"{n}.read"}]
+        if 409 in statuses:
+            return [{f"{n}.{op}_guard"}, {f"{n}.{op}"}] if op != "create" else [{f"{n}.create_guard"}]
+        return [{f"{n}.{op}"}]
+    return [{f"{n}.read"}]
+
+
+def _labels_needed(fp, method, path, old, new, query=None):
     """The footprint labels that would explain the difference between two outcomes.
     Returns a list of alternatives; each alternative is a set of labels that together explain it."""
     coll, parts = _target(path)
@@ -427,36 +515,93 @@ def _labels_needed(fp, method, path, old, new):
         return [{"*.any"}]
     n = fp.renamed_entities.get(coll, coll)
     op = _op_of(method, parts)
-    (os_, ob, oe), (ns, nb, ne) = old, new
+    (os_, ob, oe, ow), (ns, nb, ne, nw) = old, new
     base = [{f"{n}.any"}, {"*.any"}]
+    wl = _write_labels(fp, ow, nw)
     if op == "outbox":
         return base + [{"*.outbox"}]
+    if (os_, ob, oe) == (ns, nb, ne):
+        # only the stored side-effects differ: the operation's effects changed, or exactly those fields did
+        return base + _op_labels(n, op, os_, ns) + [wl]
     if os_ != ns or (isinstance(ob, dict) and isinstance(nb, dict) and ob.get("error") != nb.get("error")):
-        alts = base + [{f"{n}.read"}]
-        if op not in ("list", "read"):
-            alts.append({f"{n}.{op}"})
-        return alts
+        if op in ("list", "read"):
+            return base + [{f"{n}.read"}]
+        return base + _op_labels(n, op, os_, ns)
     if oe != ne:
-        return base + [{f"{n}.{op}"}]
+        return base + _op_labels(n, op, os_, ns)
     if os_ >= 400:
         return [set()]
     if op not in ("list", "read"):
-        alts = base + [{f"{n}.{op}"}]
+        alts = base + _op_labels(n, op, os_, ns)
         keys = _diff_keys(fp, n, _translate(fp, n, ob) if isinstance(ob, dict) else ob, nb)
         if keys is not None:
-            alts.append({f"{n}.field:{k}" for k in keys})
+            alts.append({f"{n}.field:{k}" for k in keys} | wl)
         return alts
     if op == "list":
         oi = {i["id"]: _translate(fp, n, i) for i in (ob or {}).get("items", [])}
         ni = {i["id"]: i for i in (nb or {}).get("items", [])}
         need = set()
+        fields = set()
+        for rid in set(oi) & set(ni):
+            fields |= {f"{n}.field:{k}" for k in _diff_keys(fp, n, oi[rid], ni[rid]) or []}
+        alts = base
         if set(oi) != set(ni):
             need.add(f"{n}.read")
-        for rid in set(oi) & set(ni):
-            need |= {f"{n}.field:{k}" for k in _diff_keys(fp, n, oi[rid], ni[rid]) or []}
-        return base + [need]
+            if query:  # a filtered list changes membership when the filtered field changes
+                alts = alts + [fields | {f"{n}.field:{fp.renamed_fields.get((n, k), k)}" for k in query}]
+        return alts + [need | fields]
     keys = _diff_keys(fp, n, _translate(fp, n, ob) if isinstance(ob, dict) else ob, nb)
     return base + [{f"{n}.field:{k}" for k in keys}] if keys is not None else base
+
+
+def covers(have, label):
+    """Does a set of labels explain `label`? Parents cover their parts: E.action:N covers
+    E.action:N.allow etc., E.any covers everything of E, *.any and 'all' cover everything."""
+    if label in have or "*.any" in have or "all" in have:
+        return True
+    ent = label.split(".", 1)[0]
+    if f"{ent}.any" in have:
+        return True
+    parts = label.split(".")
+    for k in range(len(parts) - 1, 0, -1):
+        if ".".join(parts[:k]) in have and parts[k - 1].startswith("action:"):
+            return True
+    if label.endswith("_guard") and label[: -len("_guard")] in have:
+        return True  # older labels: E.update covered E.update_guard
+    return False
+
+
+def _covered(need, have):
+    return all(covers(have, x) for x in need)
+
+
+def _translate_writes(fp, w):
+    out = {}
+    for ename, recs in (w or {}).items():
+        en = fp.renamed_entities.get(ename, ename)
+        out[en] = {rid: (None if d is None else {fp.renamed_fields.get((en, k), k): v for k, v in d.items()})
+                   for rid, d in recs.items()}
+    return out
+
+
+def _write_labels(fp, ow, nw):
+    """Labels explaining a difference in written records: the fields whose written values differ
+    (fields present on only one side are new or removed fields: explained by their own label)."""
+    o = _translate_writes(fp, ow)
+    need = set()
+    for en in set(o) | set(nw or {}):
+        a, b = o.get(en, {}), (nw or {}).get(en, {})
+        for rid in set(a) | set(b):
+            x, y = a.get(rid), b.get(rid)
+            if (x is None) != (y is None):
+                need.add(f"{en}.create" if y is not None else f"{en}.delete")
+                continue
+            if x is None:
+                continue
+            for k in set(x) & set(y):
+                if x[k] != y[k]:
+                    need.add(f"{en}.field:{k}")
+    return need
 
 
 def _diff_keys(fp, n, o, nw):
@@ -465,20 +610,21 @@ def _diff_keys(fp, n, o, nw):
     return {k for k in set(o) | set(nw) if o.get(k) != nw.get(k) or (k in o) != (k in nw)}
 
 
-def classify(fp, acknowledged, method, path, old, new):
-    """'direct', 'acknowledged' or 'unacknowledged' (with the labels involved)."""
-    alts = _labels_needed(fp, method, path, old, new)
-    ack_all = "all" in acknowledged
+def classify(fp, acknowledged, method, path, old, new, query=None):
+    """'direct', 'acknowledged', 'consequence' or 'unexplained' (with the labels involved)."""
+    alts = _labels_needed(fp, method, path, old, new, query)
+    ack = set(acknowledged)
+    possible = fp.all() | ack
     best = None
     for need in alts:
-        if need <= fp.direct:
+        if _covered(need, fp.direct):
             return "direct", need
-        if need <= fp.all() | set(acknowledged):
-            missing = need - fp.direct - set(acknowledged)
-            if not missing or ack_all:
+        if _covered(need, possible):
+            missing = {x for x in need if not covers(fp.direct, x) and not covers(ack, x)}
+            if not missing:
                 best = best or ("acknowledged", need)
-            elif need <= fp.all():
-                best = best if best and best[0] == "acknowledged" else ("consequence", need - fp.direct)
+            elif _covered(need, fp.all()):
+                best = best if best and best[0] == "acknowledged" else ("consequence", missing)
     if best:
         return best
     smallest = min(alts, key=len)
@@ -497,7 +643,7 @@ def replay(old_model, old_world, new_model, new_world, probes, fp, acknowledged=
         if _same(old, new, fp, p):
             stats["identical"] += 1
             continue
-        verdict, labels = classify(fp, acknowledged, p["method"], p["path"], old, new)
+        verdict, labels = classify(fp, acknowledged, p["method"], p["path"], old, new, p.get("query"))
         if new[0] == 500 and old[0] != 500:
             verdict, labels = "unexplained", {"crash"}
         stats[verdict] += 1
@@ -517,9 +663,12 @@ def _rename_probe(fp, p):
     coll, parts = _target(p["path"])
     if coll and coll in fp.renamed_entities:
         p = dict(p, path="/api/" + "/".join([fp.renamed_entities[coll]] + parts[1:]))
-    if isinstance(p.get("body"), dict) and coll:
+    if coll:
         newc = fp.renamed_entities.get(coll, coll)
-        p = dict(p, body={fp.renamed_fields.get((newc, k), k): v for k, v in p["body"].items()})
+        if isinstance(p.get("body"), dict):
+            p = dict(p, body={fp.renamed_fields.get((newc, k), k): v for k, v in p["body"].items()})
+        if p.get("query"):
+            p = dict(p, query={fp.renamed_fields.get((newc, k), k): v for k, v in p["query"].items()})
     return p
 
 
@@ -531,7 +680,9 @@ def _same(old, new, fp, p):
         ob = {"items": [_translate(fp, newc, i) for i in ob["items"]]}
     elif isinstance(ob, dict) and coll:
         ob = _translate(fp, newc, ob)
-    return old[0] == new[0] and ob == new[1] and old[2] == new[2]
+    if not (old[0] == new[0] and ob == new[1] and old[2] == new[2]):
+        return False
+    return not _write_labels(fp, old[3] if len(old) > 3 else {}, new[3] if len(new) > 3 else {})
 
 
 def _short(v):
@@ -669,6 +820,7 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
         t = time.perf_counter()
         fp = compute_footprint(model0, model1, world0, world1, list(extra_footprint))
         report["footprint"] = fp.to_json()
+        report["scope_warnings"] = scope_warnings(fp, change)
         timings["footprint_ms"] = _ms(t)
 
         t = time.perf_counter()
@@ -701,15 +853,15 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
 
         report["inverse"] = inverse
         report["verdict"] = "dry-run passed" if dry_run else "committed"
-        golden = (report.get("replay") or {}).pop("_golden", None)
+        (report.get("replay") or {}).pop("_golden", None)
         timings["total_ms"] = _ms(t0)
         report["timings"] = timings
         if not dry_run:
             store.save_all(model1, world1)
             report["seq"] = store.append_ledger(report)
-            if golden is None:
-                golden = [[p, list(_run_probe(model1, copy.deepcopy(world1), p))]
-                          for p in generate_probes(model1, world1, now)]
+            golden = [[p, list(_run_probe(model1, world1, p))] for p in
+                      store.requests() + generate_probes(model1, world1, now, thorough=True)]
+            golden += [[p, list(_run_any(model1, world1, p))] for p in ui_probes(model1, world1, now)]
             store.save_golden({"engine": engine_version(), "seq": report["seq"], "world": world1,
                                "probes": golden})
         return report
@@ -738,13 +890,38 @@ def engine_version():
     return h.hexdigest()[:16]
 
 
+def ui_probes(model, world, now, per_entity=3):
+    """UI pages for the golden snapshot: list, a few detail pages and the create form, as each
+    sampled user. (Replay of application changes compares the API; engine upgrades also the UI.)"""
+    sample_users = sorted({p.get("user") for p in generate_probes(model, world, now, per_entity=1)}, key=str)
+    out = []
+    t = now.isoformat()
+    for e in model["entities"].values():
+        ids = sorted(R.records(world, e["id"]))
+        sample = ids[:per_entity] + ids[-per_entity:] if len(ids) > 2 * per_entity else ids
+        for u in sample_users:
+            out.append({"method": "GET", "path": f"/ui/{e['name']}", "user": u, "now": t, "ui": True})
+            out.append({"method": "GET", "path": f"/ui/{e['name']}/new", "user": u, "now": t, "ui": True})
+            for rid in sample:
+                out.append({"method": "GET", "path": f"/ui/{e['name']}/{rid}", "user": u, "now": t, "ui": True})
+    return out
+
+
+def _run_any(model, world, p):
+    if p.get("ui"):
+        from . import ui as U
+        now = dt.datetime.fromisoformat(p["now"])
+        return U.handle(model, world, p["path"], p.get("user"), now)
+    return _run_probe(model, world, p)
+
+
 def snapshot(directory):
     """Record golden responses for the current state (also done automatically on every commit)."""
     store = Store(directory)
     model, world = store.load()
     now = dt.datetime.utcnow().replace(microsecond=0)
-    probes = store.requests() + generate_probes(model, world, now)
-    golden = [[p, list(_run_probe(model, copy.deepcopy(world), p))] for p in probes]
+    probes = store.requests() + generate_probes(model, world, now, thorough=True) + ui_probes(model, world, now)
+    golden = [[p, list(_run_any(model, copy.deepcopy(world), p))] for p in probes]
     store.save_golden({"engine": engine_version(), "seq": None, "world": world, "probes": golden})
     store.close()
     return len(golden)
@@ -763,7 +940,7 @@ def upgrade_check(directory, limit_examples=10):
     world["records"] = {eid: {int(k): v for k, v in recs.items()} for eid, recs in world["records"].items()}
     diffs = []
     for p, want in g["probes"]:
-        got = _run_probe(model, copy.deepcopy(world), p)
+        got = _run_any(model, copy.deepcopy(world), p)
         if json.loads(json.dumps(list(got), default=str)) != json.loads(json.dumps(want, default=str)):
             diffs.append({"request": f"{p['method']} {p['path']} as {p.get('user')}" + (f" {json.dumps(p.get('body'))}" if p.get("body") else ""),
                           "before": [want[0], _short(want[1])], "after": [got[0], _short(got[1])]})

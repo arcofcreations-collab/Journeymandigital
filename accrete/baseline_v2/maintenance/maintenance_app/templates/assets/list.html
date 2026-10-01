@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Assets{% endblock %}
+{% block content %}
+<h1>Assets</h1>
+{% if ctx.role == "supervisor" %}<p><a href="{{ url_for('ui.new_asset') }}">New asset</a></p>{% endif %}
+<table>
+  <thead><tr><th>Tag</th><th>Name</th><th>Site</th><th>Criticality</th><th>Retired</th><th>Open orders</th></tr></thead>
+  <tbody>
+  {% for asset in assets %}
+    <tr data-id="{{ asset.id }}">
+      <td><a href="{{ url_for('ui.show_asset', asset_id=asset.id) }}">{{ asset.tag }}</a></td>
+      <td>{{ asset.name }}</td>
+      <td>{{ asset.site }}</td>
+      <td>{{ asset.criticality }}</td>
+      <td>{{ asset.retired|display }}</td>
+      <td>{{ asset.open_orders }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

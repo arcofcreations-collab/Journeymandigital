@@ -56,6 +56,9 @@ def print_report(rep, out=sys.stdout):
         print(f"  - {n}", file=out)
     for w in rep.get("warnings", []):
         print(f"  ! {w}", file=out)
+    if rep.get("scope_warnings"):
+        print(f"  ! SCOPE: this change modifies {', '.join(rep['scope_warnings'])}, which the request and interpretation do "
+              f"not mention", file=out)
     sc = rep.get("static_check", {}).get("problems") or []
     for p in sc[:20]:
         print(f"  static: {p}", file=out)
@@ -93,7 +96,11 @@ def next_steps(rep):
     """Concrete advice for the most likely next action after a report."""
     v = rep.get("verdict")
     if v in ("committed", "dry-run passed"):
-        return [] if v == "committed" else ["all checks passed; run the same command without --dry-run to commit"]
+        out = [] if v == "committed" else ["all checks passed; run the same command without --dry-run to commit"]
+        if rep.get("scope_warnings"):
+            out.append("SCOPE: confirm the edits to " + ", ".join(rep["scope_warnings"]) + " are intended (the checks treat "
+                       "everything your operators modify as intended; a wrong operator is only caught by your expectations)")
+        return out
     out = []
     reason = rep.get("reason", "")
     if reason.startswith("operator"):

@@ -6,19 +6,37 @@ derives the whole API, UI, validation and permissions from the model, so a chang
 once and nothing else needs editing. Every change runs through a pipeline that checks it and
 then commits it atomically (or rejects it with a precise reason).
 
-## Workflow
+## Fast path (most changes need only these steps)
+
+1. `accrete context APP` prints everything needed to start, in one screen:
+   - the whole model;
+   - the users grouped by role;
+   - two sample records per collection, exactly as the API returns them;
+   - the recent ledger;
+   - the exact request semantics (error order per operation).
+
+   The model is also in `APP/changes/*.yaml`, but you rarely need to read those files.
+2. Write `APP/changes/NNNN-name.yaml` with `request`, `interpretation`, `ops` and `expect`. Put
+   in `expect` the examples that show the request is met, including UI pages (see below).
+3. `accrete apply APP APP/changes/NNNN-name.yaml --notes APP/CHANGE_NOTES.md`
+   - All checks run first; the change commits only if every one passes. No separate dry run is
+     needed: **a rejected change alters nothing**.
+   - On a rejection, the lines starting `NEXT:` say what to fix. Fix the file and apply again.
+   - On commit, `--notes` writes the change notes: request, interpretation, what changed, and
+     what was verified.
+
+What the checks catch, and what they do not, is measured in "How far to trust the checks"
+below. Read it once; it tells you which verification is still your job.
+
+Other commands:
 
 ```bash
-accrete show APP_DIR [ENTITY]                       # what the application is now (read this first)
-accrete apply APP_DIR change.yaml --dry-run         # run every check, commit nothing
-accrete apply APP_DIR change.yaml                   # check and commit
-accrete call APP_DIR GET /api/books/3 --as ada      # try a request (add --body '{...}' --now ISO; nothing is saved)
-accrete log APP_DIR [SEQ]                           # history; SEQ shows a full report
-accrete revert APP_DIR SEQ                          # undo a committed change (checked like any change)
+accrete call APP GET /api/books/3 --as ada [--body '{...}'] [--now ISO]   # one request, nothing saved
+accrete show APP [ENTITY]          # the model only
+accrete log APP [SEQ]              # history; SEQ shows a full report
+accrete revert APP SEQ             # undo a committed change (checked like any change)
+accrete upgrade-check APP          # after installing a new accrete version: same behaviour?
 ```
-
-Put change files in `APP_DIR/changes/`. If `apply` says REJECTED, read the reason, fix the
-change file, and apply again. A rejected change alters nothing.
 
 ## Change file
 
@@ -36,9 +54,24 @@ expect:                                                # examples checked on the
 consequences: [books.action:borrow]                    # only if the report asks (see below)
 ```
 
-`expect` entries: `as` (username), `do` ("METHOD /path?query"), optional `body`, `now`
-(ISO datetime, default: now), and checks `status`, `json` (subset match) and `count` (number of
-list items). Use `steps` for sequences; each expectation starts from the unchanged data.
+`expect` entries:
+- `as` (username), `do` ("METHOD /path?query"), and optionally `body` and `now` (ISO datetime;
+  default: now);
+- checks: `status`, `json` (subset match) and `count` (number of list items);
+- use `steps` for sequences; each expectation starts from the unchanged data.
+
+**UI expectations.** `do: "GET /ui/E/ID"`, `/ui/E` or `/ui/E/new`, with `status` and `ui:`.
+The keys of `ui:` are:
+- `fields: {name: text}`: the displayed `data-field` text;
+- `actions: [..]`: the exact set of action forms;
+- `actions_include` / `actions_exclude`;
+- `inputs: [..]`: the exact set of form inputs;
+- `inputs_include`;
+- `rows`: the ids shown, or their count.
+
+Example:
+`{as: chen, do: "GET /ui/books/2", ui: {actions: [borrow], fields: {status: available}}}`.
+These replace hand-written UI test scripts.
 Expectations run through the same runtime that serves the application, so together with the
 replay they are the verification of a change; `accrete call` answers ad hoc questions.
 
@@ -132,6 +165,43 @@ Functions:
 - string and date methods: `.lower()`, `.date()`, `.year`, `.weekday()`.
 
 Text constants need quotes inside YAML strings: `"'draft'"`.
+
+## Escape hatch: functions (when expressions are not enough)
+
+```yaml
+- add_function: {name: late_days, params: [loan, today], body: |
+    if loan.returned_at is not None or loan.due_at >= today:
+        return 0
+    return (today - loan.due_at).days}
+- add_field: {entity: loans, name: days_late, type: int, computed: "late_days(record, today)"}
+```
+
+A function is a small piece of Python callable from any expression. The allowed statements are
+assignment, `if`, `for`, `return`, `break`, `continue` and comprehensions. These are **not**
+allowed: imports, `while`, private names, global state. A function sees only its arguments, the
+built-ins and other functions. Use `change_function` and `remove_function` to change or remove
+one.
+
+**What still holds for code that uses a function:**
+- atomic commits and exact revert, since functions are part of the model and the ledger;
+- the data check, the replay and the expectations, which treat behaviour as a black box;
+- error precedence;
+- functions cannot write data or emit messages: only effects can.
+
+**What is weaker:**
+- Static checking of a function body is limited to:
+  - names: every name must be known;
+  - attributes: every `.attr` must be a field of some entity or a value method.
+- Types inside a body are not checked.
+- A call is assumed to read **everything**, because a function can follow references. So any
+  change to the model lists callers among its possible consequences. They are only reported if
+  replay sees an actual difference.
+- `rename_field` does not rewrite function bodies. A rename that a body still uses is rejected
+  until you `change_function` it in the same change.
+- A function that raises for some records makes the requests that reach it fail (500). Replay
+  reports this as an unexplained crash and rejects the change.
+- Termination is not proven. Loops run only over finite sequences and there is no `while`, but
+  deep recursion is possible.
 
 ## Operator reference
 

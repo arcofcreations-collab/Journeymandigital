@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}New claim{% endblock %}
+{% block content %}
+<h1>New claim</h1>
+<form data-create="claims" method="post" action="{{ url_for('ui.create_claim') }}">
+  <label>Amount <input name="amount" type="number" step="0.01" min="0.01" max="5000" required></label>
+  <label>Category
+    <select name="category">
+      {% for category in categories %}<option value="{{ category }}">{{ category }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Description <textarea name="description" required></textarea></label>
+  <button type="submit">Create</button>
+</form>
+{% endblock %}

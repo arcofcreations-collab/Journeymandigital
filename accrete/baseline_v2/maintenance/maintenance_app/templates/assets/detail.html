@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field %}
+{% block title %}{{ asset.tag }}{% endblock %}
+{% block content %}
+<h1>Asset #{{ asset.id }}</h1>
+<dl>
+  {{ field("tag", asset.tag) }}
+  {{ field("name", asset.name) }}
+  {{ field("site", asset.site) }}
+  {{ field("criticality", asset.criticality) }}
+  {{ field("retired", asset.retired) }}
+  {{ field("open_orders", asset.open_orders, href=url_for('ui.list_work_orders', asset=asset.id)) }}
+</dl>
+{% endblock %}

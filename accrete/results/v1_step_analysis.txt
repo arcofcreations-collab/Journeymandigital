@@ -1,5 +1,21 @@
-Traceback (most recent call last):
-  File "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/steps.py", line 3, in <module>
-    for line in open("scratchpad/agent_map.txt"):
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: [Errno 2] No such file or directory: 'scratchpad/agent_map.txt'
+accrete 30 runs; mean calls per run: 16.2
+   script-check         2.7
+   apply-dry            2.6
+   read                 2.5
+   probe                2.4
+   timestamp            2.0
+   apply                1.5
+   inspect-model        1.4
+   SubagentHandback     1.0
+   write-change         0.1
+baseline 28 runs; mean calls per run: 26.4
+   read                 8.8
+   script-check         8.5
+   run-tests            4.7
+   timestamp            2.1
+   SubagentHandback     1.0
+   write-test           0.6
+   write-code           0.3
+   edit-code            0.1
+   notes                0.1
+   edit-test            0.0

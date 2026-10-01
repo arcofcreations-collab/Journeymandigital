@@ -1,0 +1,162 @@
+[
+ {
+  "category": "slip:computed",
+  "cases": 5,
+  "equivalent": 1,
+  "effective": 4,
+  "rejected_with_expect": 4,
+  "rejected_auto_only": 1,
+  "hidden_tests_catch": 4,
+  "stages_auto_only": {
+   "missed": 3,
+   "replay:unexplained": 1
+  },
+  "equivalent_but_rejected": 0
+ },
+ {
+  "category": "slip:effect",
+  "cases": 64,
+  "equivalent": 4,
+  "effective": 60,
+  "rejected_with_expect": 52,
+  "rejected_auto_only": 3,
+  "hidden_tests_catch": 59,
+  "stages_auto_only": {
+   "missed": 57,
+   "data": 1,
+   "replay:consequence": 2
+  },
+  "equivalent_but_rejected": 0
+ },
+ {
+  "category": "slip:guard/constraint",
+  "cases": 24,
+  "equivalent": 9,
+  "effective": 15,
+  "rejected_with_expect": 14,
+  "rejected_auto_only": 2,
+  "hidden_tests_catch": 15,
+  "stages_auto_only": {
+   "missed": 13,
+   "data": 2
+  },
+  "equivalent_but_rejected": 2
+ },
+ {
+  "category": "slip:permission",
+  "cases": 32,
+  "equivalent": 4,
+  "effective": 28,
+  "rejected_with_expect": 27,
+  "rejected_auto_only": 1,
+  "hidden_tests_catch": 27,
+  "stages_auto_only": {
+   "missed": 27,
+   "replay:consequence": 1
+  },
+  "equivalent_but_rejected": 0
+ },
+ {
+  "category": "slip:stored-data",
+  "cases": 13,
+  "equivalent": 1,
+  "effective": 12,
+  "rejected_with_expect": 11,
+  "rejected_auto_only": 6,
+  "hidden_tests_catch": 12,
+  "stages_auto_only": {
+   "missed": 6,
+   "data": 5,
+   "replay:consequence": 1
+  },
+  "equivalent_but_rejected": 0
+ },
+ {
+  "category": "stray-computed",
+  "cases": 16,
+  "equivalent": 1,
+  "effective": 15,
+  "rejected_with_expect": 11,
+  "rejected_auto_only": 4,
+  "hidden_tests_catch": 10,
+  "stages_auto_only": {
+   "replay:consequence": 4,
+   "missed": 11
+  },
+  "equivalent_but_rejected": 0
+ },
+ {
+  "category": "stray-data",
+  "cases": 24,
+  "equivalent": 0,
+  "effective": 24,
+  "rejected_with_expect": 2,
+  "rejected_auto_only": 2,
+  "hidden_tests_catch": 1,
+  "stages_auto_only": {
+   "missed": 22,
+   "replay:consequence": 2
+  },
+  "equivalent_but_rejected": 0
+ },
+ {
+  "category": "stray-guard",
+  "cases": 24,
+  "equivalent": 1,
+  "effective": 23,
+  "rejected_with_expect": 12,
+  "rejected_auto_only": 1,
+  "hidden_tests_catch": 17,
+  "stages_auto_only": {
+   "missed": 22,
+   "replay:consequence": 1
+  },
+  "equivalent_but_rejected": 0
+ },
+ {
+  "category": "stray-rule",
+  "cases": 24,
+  "equivalent": 11,
+  "effective": 13,
+  "rejected_with_expect": 7,
+  "rejected_auto_only": 0,
+  "hidden_tests_catch": 8,
+  "stages_auto_only": {
+   "missed": 13
+  },
+  "equivalent_but_rejected": 1
+ },
+ {
+  "category": "stray-user",
+  "cases": 24,
+  "equivalent": 0,
+  "effective": 24,
+  "rejected_with_expect": 3,
+  "rejected_auto_only": 0,
+  "hidden_tests_catch": 6,
+  "stages_auto_only": {
+   "missed": 24
+  },
+  "equivalent_but_rejected": 0
+ },
+ {
+  "category": "valid:extra-field",
+  "cases": 24,
+  "equivalent": 0,
+  "effective": 24,
+  "accepted_with_expect": 23,
+  "false_rejections": [
+   "E03: this change also alters other behaviour through dependencies: work_orders.field:overdue (see replay.examples). If that is intended, list them under `consequences:`; otherwise adjust the change"
+  ]
+ },
+ {
+  "category": "valid:original",
+  "cases": 24,
+  "equivalent": 0,
+  "effective": 24,
+  "accepted_with_expect": 23,
+  "false_rejections": [
+   "E03: this change also alters other behaviour through dependencies: work_orders.field:overdue (see replay.examples). If that is intended, list them under `consequences:`; otherwise adjust the change"
+  ]
+ }
+]

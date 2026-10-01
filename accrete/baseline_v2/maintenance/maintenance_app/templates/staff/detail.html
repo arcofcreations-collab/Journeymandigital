@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field %}
+{% block title %}{{ staff.name }}{% endblock %}
+{% block content %}
+<h1>Staff member #{{ staff.id }}</h1>
+<dl>
+  {{ field("username", staff.username) }}
+  {{ field("name", staff.name) }}
+  {{ field("role", staff.role) }}
+  {{ field("site", staff.site) }}
+  {{ field("active", staff.active) }}
+</dl>
+{% endblock %}
