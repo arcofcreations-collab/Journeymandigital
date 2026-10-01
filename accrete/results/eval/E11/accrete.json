@@ -1,0 +1,28 @@
+{
+ "id": "E11",
+ "system": "accrete",
+ "app": "expenses",
+ "categories": [
+  "new_relationship",
+  "data_migration",
+  "rule_change",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 8,
+ "hidden_total": 9,
+ "hidden_failures": [
+  "test_cost_centre_writes: AssertionError: <Response 201 '{\"id\": 5, \"code\": \"\", \"name\": \"Marketing\", \"department\": null, \"budget\": 1000.0, \"committed\": 0, \"remaining\": 1000.0}'>\nassert 201 == 400\n +  where 201 = <Response 201 '"
+ ],
+ "base_checked": 45,
+ "regressions": [],
+ "clarification_written": false,
+ "success": false,
+ "accrete_version": "db1c0f1",
+ "t_start": 1790822014.1901538,
+ "t_end": 1790822131.4494817,
+ "self_timed_s": 117.3,
+ "duration_ms": 123826,
+ "tool_uses": 16,
+ "tokens": 82215
+}

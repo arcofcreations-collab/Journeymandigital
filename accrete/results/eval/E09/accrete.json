@@ -1,0 +1,26 @@
+{
+ "id": "E09",
+ "system": "accrete",
+ "app": "library",
+ "categories": [
+  "permissions",
+  "new_relationship",
+  "data_migration",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 9,
+ "hidden_total": 9,
+ "hidden_failures": [],
+ "base_checked": 59,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": "db1c0f1",
+ "t_start": 1790822014.9230227,
+ "t_end": 1790822107.0278895,
+ "self_timed_s": 92.1,
+ "duration_ms": 104854,
+ "tool_uses": 12,
+ "tokens": 69857
+}
