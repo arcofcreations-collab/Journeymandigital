@@ -1,0 +1,3180 @@
+[
+ {
+  "mutant": "count+1",
+  "description": "count() reports one too many when anything matches",
+  "apps": 31,
+  "detected_in_apps": 19,
+  "tests_fail_in_apps": 13,
+  "observable_by_tests_but_missed": 1,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 50,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 551,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 183,
+    "probes": 3186,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 50,
+    "probes": 3508,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 50,
+    "probes": 4028,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 50,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 50,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 50,
+    "probes": 3106,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D07",
+    "check": "same",
+    "differences": 0,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D09",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "same",
+    "differences": 0,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4880,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4922,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D13",
+    "check": "same",
+    "differences": 0,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 551,
+    "probes": 6403,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 558,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 553,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 553,
+    "probes": 8617,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 551,
+    "probes": 7937,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 546,
+    "probes": 7983,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 546,
+    "probes": 8471,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 54,
+    "probes": 3667,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 50,
+    "probes": 2974,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 50,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4382,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "same",
+    "differences": 0,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 54,
+    "probes": 4720,
+    "acceptance_tests_fail": true
+   }
+  ]
+ },
+ {
+  "mutant": "days+1",
+  "description": "days(n) adds an extra day",
+  "apps": 31,
+  "detected_in_apps": 20,
+  "tests_fail_in_apps": 15,
+  "observable_by_tests_but_missed": 1,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 315,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 3508,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 4028,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 4548,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 3106,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 50,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D08",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D09",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "same",
+    "differences": 0,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4880,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4922,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D13",
+    "check": "same",
+    "differences": 0,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 315,
+    "probes": 6403,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 324,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 319,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 319,
+    "probes": 8617,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 313,
+    "probes": 7937,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 251,
+    "probes": 7983,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 258,
+    "probes": 8471,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 243,
+    "probes": 3667,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 2974,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4382,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "same",
+    "differences": 0,
+    "probes": 5316,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 270,
+    "probes": 4720,
+    "acceptance_tests_fail": false
+   }
+  ]
+ },
+ {
+  "mutant": "guard-before-allow",
+  "description": "action error precedence: 409 guard checked before 403 allow",
+  "apps": 31,
+  "detected_in_apps": 31,
+  "tests_fail_in_apps": 20,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 555,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "DIFFERENT",
+    "differences": 1830,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 1989,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 555,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 885,
+    "probes": 3508,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 1365,
+    "probes": 4028,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 1845,
+    "probes": 4548,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 555,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 567,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 730,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D08",
+    "check": "DIFFERENT",
+    "differences": 2082,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D09",
+    "check": "DIFFERENT",
+    "differences": 1830,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D10",
+    "check": "DIFFERENT",
+    "differences": 1830,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "DIFFERENT",
+    "differences": 1830,
+    "probes": 4880,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D12",
+    "check": "DIFFERENT",
+    "differences": 1830,
+    "probes": 4922,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D13",
+    "check": "DIFFERENT",
+    "differences": 1830,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "DIFFERENT",
+    "differences": 1830,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 2597,
+    "probes": 6403,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 3120,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 3120,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 3760,
+    "probes": 8617,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 3243,
+    "probes": 7937,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 3252,
+    "probes": 7983,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 3268,
+    "probes": 8471,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 537,
+    "probes": 3667,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 555,
+    "probes": 2974,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 555,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "DIFFERENT",
+    "differences": 1845,
+    "probes": 4382,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E12",
+    "check": "DIFFERENT",
+    "differences": 2010,
+    "probes": 4276,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E13",
+    "check": "DIFFERENT",
+    "differences": 2985,
+    "probes": 5316,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 1314,
+    "probes": 4720,
+    "acceptance_tests_fail": true
+   }
+  ]
+ },
+ {
+  "mutant": "list-desc",
+  "description": "lists returned in descending id order",
+  "apps": 31,
+  "detected_in_apps": 31,
+  "tests_fail_in_apps": 30,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "DIFFERENT",
+    "differences": 53,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 112,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 73,
+    "probes": 3186,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 3508,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 4028,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 4548,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 3106,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D08",
+    "check": "DIFFERENT",
+    "differences": 53,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D09",
+    "check": "DIFFERENT",
+    "differences": 53,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D10",
+    "check": "DIFFERENT",
+    "differences": 91,
+    "probes": 4836,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D11",
+    "check": "DIFFERENT",
+    "differences": 91,
+    "probes": 4880,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D12",
+    "check": "DIFFERENT",
+    "differences": 73,
+    "probes": 4922,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D13",
+    "check": "DIFFERENT",
+    "differences": 53,
+    "probes": 4080,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D14",
+    "check": "DIFFERENT",
+    "differences": 53,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 152,
+    "probes": 6403,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 152,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 152,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 183,
+    "probes": 8617,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 183,
+    "probes": 7937,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 166,
+    "probes": 7983,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 207,
+    "probes": 8471,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 85,
+    "probes": 3667,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 60,
+    "probes": 2974,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E11",
+    "check": "DIFFERENT",
+    "differences": 73,
+    "probes": 4382,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E12",
+    "check": "DIFFERENT",
+    "differences": 53,
+    "probes": 4276,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E13",
+    "check": "DIFFERENT",
+    "differences": 53,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 97,
+    "probes": 4720,
+    "acceptance_tests_fail": true
+   }
+  ]
+ },
+ {
+  "mutant": "list-ignores-read",
+  "description": "lists ignore the read rule",
+  "apps": 31,
+  "detected_in_apps": 31,
+  "tests_fail_in_apps": 18,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 44,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 3508,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 4028,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D09",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D10",
+    "check": "DIFFERENT",
+    "differences": 112,
+    "probes": 4836,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D11",
+    "check": "DIFFERENT",
+    "differences": 112,
+    "probes": 4880,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D12",
+    "check": "DIFFERENT",
+    "differences": 110,
+    "probes": 4922,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D13",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 4080,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D14",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 44,
+    "probes": 6403,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 44,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 44,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 98,
+    "probes": 8617,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 98,
+    "probes": 7937,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 113,
+    "probes": 7983,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 113,
+    "probes": 8471,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 3667,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 83,
+    "probes": 2974,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E11",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 4382,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E12",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 4276,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E13",
+    "check": "DIFFERENT",
+    "differences": 56,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 84,
+    "probes": 4720,
+    "acceptance_tests_fail": false
+   }
+  ]
+ },
+ {
+  "mutant": "date-format",
+  "description": "datetimes serialised with a space instead of T",
+  "apps": 31,
+  "detected_in_apps": 31,
+  "tests_fail_in_apps": 21,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "DIFFERENT",
+    "differences": 168,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 315,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 3508,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 4028,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 3106,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D08",
+    "check": "DIFFERENT",
+    "differences": 168,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D09",
+    "check": "DIFFERENT",
+    "differences": 168,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D10",
+    "check": "DIFFERENT",
+    "differences": 325,
+    "probes": 4836,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D11",
+    "check": "DIFFERENT",
+    "differences": 325,
+    "probes": 4880,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D12",
+    "check": "DIFFERENT",
+    "differences": 168,
+    "probes": 4922,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D13",
+    "check": "DIFFERENT",
+    "differences": 168,
+    "probes": 4080,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D14",
+    "check": "DIFFERENT",
+    "differences": 168,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 315,
+    "probes": 6403,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 324,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 319,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 629,
+    "probes": 8617,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 623,
+    "probes": 7937,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 496,
+    "probes": 7983,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 496,
+    "probes": 8471,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 3667,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 225,
+    "probes": 2974,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 204,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "DIFFERENT",
+    "differences": 167,
+    "probes": 4382,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E12",
+    "check": "DIFFERENT",
+    "differences": 168,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "DIFFERENT",
+    "differences": 168,
+    "probes": 5316,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 224,
+    "probes": 4720,
+    "acceptance_tests_fail": true
+   }
+  ]
+ },
+ {
+  "mutant": "required-skipped",
+  "description": "required fields not enforced",
+  "apps": 31,
+  "detected_in_apps": 31,
+  "tests_fail_in_apps": 12,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "DIFFERENT",
+    "differences": 16,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 22,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 3186,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 3508,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 4028,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "DIFFERENT",
+    "differences": 16,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D09",
+    "check": "DIFFERENT",
+    "differences": 16,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "DIFFERENT",
+    "differences": 16,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "DIFFERENT",
+    "differences": 16,
+    "probes": 4880,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D12",
+    "check": "DIFFERENT",
+    "differences": 31,
+    "probes": 4922,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D13",
+    "check": "DIFFERENT",
+    "differences": 16,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "DIFFERENT",
+    "differences": 16,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 25,
+    "probes": 6403,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 25,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 25,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 25,
+    "probes": 8617,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 25,
+    "probes": 7937,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 23,
+    "probes": 7983,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 26,
+    "probes": 8471,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 3667,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 2974,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "DIFFERENT",
+    "differences": 17,
+    "probes": 4382,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E12",
+    "check": "DIFFERENT",
+    "differences": 16,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "DIFFERENT",
+    "differences": 16,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 4720,
+    "acceptance_tests_fail": false
+   }
+  ]
+ },
+ {
+  "mutant": "unique-skipped",
+  "description": "uniqueness not enforced",
+  "apps": 31,
+  "detected_in_apps": 31,
+  "tests_fail_in_apps": 7,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 10,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 10,
+    "probes": 3186,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 3508,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 4028,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D09",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4880,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D12",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4922,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D13",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 15,
+    "probes": 6403,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 15,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 15,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 15,
+    "probes": 8617,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 15,
+    "probes": 7937,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 7,
+    "probes": 7983,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 7,
+    "probes": 8471,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 3667,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 2974,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 6,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "DIFFERENT",
+    "differences": 4,
+    "probes": 4382,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E12",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4720,
+    "acceptance_tests_fail": false
+   }
+  ]
+ },
+ {
+  "mutant": "write-if-ignored",
+  "description": "field-level write permissions ignored",
+  "apps": 31,
+  "detected_in_apps": 12,
+  "tests_fail_in_apps": 3,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:maintenance",
+    "check": "same",
+    "differences": 0,
+    "probes": 5182,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 3508,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 4028,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D09",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "same",
+    "differences": 0,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4880,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4922,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D13",
+    "check": "same",
+    "differences": 0,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "same",
+    "differences": 0,
+    "probes": 6403,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E02",
+    "check": "same",
+    "differences": 0,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "same",
+    "differences": 0,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E04",
+    "check": "same",
+    "differences": 0,
+    "probes": 8617,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E05",
+    "check": "same",
+    "differences": 0,
+    "probes": 7937,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E06",
+    "check": "same",
+    "differences": 0,
+    "probes": 7983,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "same",
+    "differences": 0,
+    "probes": 8471,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 3667,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 40,
+    "probes": 2974,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4382,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "same",
+    "differences": 0,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 4720,
+    "acceptance_tests_fail": false
+   }
+  ]
+ },
+ {
+  "mutant": "number-rounding",
+  "description": "numbers stored with 1 decimal",
+  "apps": 31,
+  "detected_in_apps": 1,
+  "tests_fail_in_apps": 4,
+  "observable_by_tests_but_missed": 3,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "same",
+    "differences": 0,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:expenses",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:maintenance",
+    "check": "same",
+    "differences": 0,
+    "probes": 5182,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D01",
+    "check": "same",
+    "differences": 0,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "same",
+    "differences": 0,
+    "probes": 3508,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D03",
+    "check": "same",
+    "differences": 0,
+    "probes": 4028,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D04",
+    "check": "same",
+    "differences": 0,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "same",
+    "differences": 0,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D06",
+    "check": "same",
+    "differences": 0,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "same",
+    "differences": 0,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D09",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "same",
+    "differences": 0,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4880,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D12",
+    "check": "DIFFERENT",
+    "differences": 33,
+    "probes": 4922,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D13",
+    "check": "same",
+    "differences": 0,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "same",
+    "differences": 0,
+    "probes": 6403,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E02",
+    "check": "same",
+    "differences": 0,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "same",
+    "differences": 0,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E04",
+    "check": "same",
+    "differences": 0,
+    "probes": 8617,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E05",
+    "check": "same",
+    "differences": 0,
+    "probes": 7937,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E06",
+    "check": "same",
+    "differences": 0,
+    "probes": 7983,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "same",
+    "differences": 0,
+    "probes": 8471,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E08",
+    "check": "same",
+    "differences": 0,
+    "probes": 3667,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E09",
+    "check": "same",
+    "differences": 0,
+    "probes": 2974,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E10",
+    "check": "same",
+    "differences": 0,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4382,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "same",
+    "differences": 0,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "same",
+    "differences": 0,
+    "probes": 4720,
+    "acceptance_tests_fail": false
+   }
+  ]
+ },
+ {
+  "mutant": "ui-forms-ignore-guard",
+  "description": "UI shows action forms even when the guard fails",
+  "apps": 31,
+  "detected_in_apps": 31,
+  "tests_fail_in_apps": 17,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 21,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:expenses",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 10,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 21,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 37,
+    "probes": 3508,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 44,
+    "probes": 4028,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 44,
+    "probes": 4548,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 21,
+    "probes": 2950,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 23,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 29,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4036,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D09",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4880,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D12",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4922,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D13",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 10,
+    "probes": 6403,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 12,
+    "probes": 7083,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 11,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 11,
+    "probes": 8617,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 10,
+    "probes": 7937,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 9,
+    "probes": 7983,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 11,
+    "probes": 8471,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 17,
+    "probes": 3667,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 22,
+    "probes": 2974,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 21,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 4382,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E12",
+    "check": "DIFFERENT",
+    "differences": 11,
+    "probes": 4276,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E13",
+    "check": "DIFFERENT",
+    "differences": 8,
+    "probes": 5316,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 29,
+    "probes": 4720,
+    "acceptance_tests_fail": true
+   }
+  ]
+ },
+ {
+  "mutant": "rollback-keeps-outbox",
+  "description": "failed requests keep the messages they emitted",
+  "apps": 31,
+  "detected_in_apps": 0,
+  "tests_fail_in_apps": 0,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "same",
+    "differences": 0,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:expenses",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:maintenance",
+    "check": "same",
+    "differences": 0,
+    "probes": 5182,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D01",
+    "check": "same",
+    "differences": 0,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "same",
+    "differences": 0,
+    "probes": 3508,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D03",
+    "check": "same",
+    "differences": 0,
+    "probes": 4028,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D04",
+    "check": "same",
+    "differences": 0,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "same",
+    "differences": 0,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D06",
+    "check": "same",
+    "differences": 0,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "same",
+    "differences": 0,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D09",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "same",
+    "differences": 0,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4880,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4922,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D13",
+    "check": "same",
+    "differences": 0,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "same",
+    "differences": 0,
+    "probes": 6403,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E02",
+    "check": "same",
+    "differences": 0,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "same",
+    "differences": 0,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E04",
+    "check": "same",
+    "differences": 0,
+    "probes": 8617,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E05",
+    "check": "same",
+    "differences": 0,
+    "probes": 7937,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E06",
+    "check": "same",
+    "differences": 0,
+    "probes": 7983,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "same",
+    "differences": 0,
+    "probes": 8471,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E08",
+    "check": "same",
+    "differences": 0,
+    "probes": 3667,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E09",
+    "check": "same",
+    "differences": 0,
+    "probes": 2974,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E10",
+    "check": "same",
+    "differences": 0,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4382,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "same",
+    "differences": 0,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "same",
+    "differences": 0,
+    "probes": 4720,
+    "acceptance_tests_fail": false
+   }
+  ]
+ },
+ {
+  "mutant": "unknown-filter-ignored",
+  "description": "unknown filters silently return []",
+  "apps": 31,
+  "detected_in_apps": 31,
+  "tests_fail_in_apps": 2,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 36,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:expenses",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:maintenance",
+    "check": "DIFFERENT",
+    "differences": 48,
+    "probes": 5182,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 48,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 48,
+    "probes": 3508,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 48,
+    "probes": 4028,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 48,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 36,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 36,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 36,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D09",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "DIFFERENT",
+    "differences": 45,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "DIFFERENT",
+    "differences": 60,
+    "probes": 4880,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D12",
+    "check": "DIFFERENT",
+    "differences": 45,
+    "probes": 4922,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D13",
+    "check": "DIFFERENT",
+    "differences": 45,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "DIFFERENT",
+    "differences": 80,
+    "probes": 6403,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E02",
+    "check": "DIFFERENT",
+    "differences": 80,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "DIFFERENT",
+    "differences": 80,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E04",
+    "check": "DIFFERENT",
+    "differences": 96,
+    "probes": 8617,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E05",
+    "check": "DIFFERENT",
+    "differences": 96,
+    "probes": 7937,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E06",
+    "check": "DIFFERENT",
+    "differences": 96,
+    "probes": 7983,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "DIFFERENT",
+    "differences": 112,
+    "probes": 8471,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 48,
+    "probes": 3667,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 36,
+    "probes": 2974,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 36,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "DIFFERENT",
+    "differences": 45,
+    "probes": 4382,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E12",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "DIFFERENT",
+    "differences": 30,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 48,
+    "probes": 4720,
+    "acceptance_tests_fail": false
+   }
+  ]
+ },
+ {
+  "mutant": "defaults-on-provided-null",
+  "description": "defaults overwrite explicit values",
+  "apps": 31,
+  "detected_in_apps": 13,
+  "tests_fail_in_apps": 1,
+  "observable_by_tests_but_missed": 0,
+  "per_app": [
+   {
+    "app": "base:library",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:expenses",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "base:maintenance",
+    "check": "same",
+    "differences": 0,
+    "probes": 5182,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D01",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 3186,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D02",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 3508,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D03",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4028,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D04",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4548,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D05",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D06",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 3106,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D07",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D08",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D09",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D10",
+    "check": "same",
+    "differences": 0,
+    "probes": 4836,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D11",
+    "check": "same",
+    "differences": 0,
+    "probes": 4880,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4922,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D13",
+    "check": "same",
+    "differences": 0,
+    "probes": 4080,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "dev:D14",
+    "check": "same",
+    "differences": 0,
+    "probes": 4036,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E01",
+    "check": "same",
+    "differences": 0,
+    "probes": 6403,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E02",
+    "check": "same",
+    "differences": 0,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E03",
+    "check": "same",
+    "differences": 0,
+    "probes": 7083,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E04",
+    "check": "same",
+    "differences": 0,
+    "probes": 8617,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E05",
+    "check": "same",
+    "differences": 0,
+    "probes": 7937,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E06",
+    "check": "same",
+    "differences": 0,
+    "probes": 7983,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "same",
+    "differences": 0,
+    "probes": 8471,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E08",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 3667,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E09",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 2974,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E10",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 2950,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E11",
+    "check": "DIFFERENT",
+    "differences": 10,
+    "probes": 4382,
+    "acceptance_tests_fail": true
+   },
+   {
+    "app": "eval:E12",
+    "check": "same",
+    "differences": 0,
+    "probes": 4276,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E13",
+    "check": "same",
+    "differences": 0,
+    "probes": 5316,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E14",
+    "check": "DIFFERENT",
+    "differences": 2,
+    "probes": 4720,
+    "acceptance_tests_fail": false
+   }
+  ]
+ }
+]

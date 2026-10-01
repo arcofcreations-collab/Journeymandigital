@@ -11,217 +11,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 50,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:maintenance",
     "check": "DIFFERENT",
     "differences": 551,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 183,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 50,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 50,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 50,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 50,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 50,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D07",
     "check": "same",
     "differences": 0,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D09",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
     "check": "same",
     "differences": 0,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "same",
     "differences": 0,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D12",
     "check": "same",
     "differences": 0,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D13",
     "check": "same",
     "differences": 0,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "DIFFERENT",
     "differences": 551,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E02",
     "check": "DIFFERENT",
     "differences": 558,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E03",
     "check": "DIFFERENT",
     "differences": 553,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E04",
     "check": "DIFFERENT",
     "differences": 553,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E05",
     "check": "DIFFERENT",
     "differences": 551,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E06",
     "check": "DIFFERENT",
     "differences": 546,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E07",
     "check": "DIFFERENT",
     "differences": 546,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 54,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 50,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 50,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "same",
     "differences": 0,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E12",
     "check": "same",
     "differences": 0,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
     "check": "same",
     "differences": 0,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 54,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": true
    }
   ]
@@ -238,217 +238,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:maintenance",
     "check": "DIFFERENT",
     "differences": 315,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D07",
     "check": "DIFFERENT",
     "differences": 50,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D08",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D09",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
     "check": "same",
     "differences": 0,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "same",
     "differences": 0,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D12",
     "check": "same",
     "differences": 0,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D13",
     "check": "same",
     "differences": 0,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "DIFFERENT",
     "differences": 315,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E02",
     "check": "DIFFERENT",
     "differences": 324,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
     "check": "DIFFERENT",
     "differences": 319,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E04",
     "check": "DIFFERENT",
     "differences": 319,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E05",
     "check": "DIFFERENT",
     "differences": 313,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E06",
     "check": "DIFFERENT",
     "differences": 251,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E07",
     "check": "DIFFERENT",
     "differences": 258,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 243,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "same",
     "differences": 0,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E12",
     "check": "same",
     "differences": 0,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
     "check": "same",
     "differences": 0,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 270,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": false
    }
   ]
@@ -465,217 +465,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 555,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
     "check": "DIFFERENT",
     "differences": 1830,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:maintenance",
     "check": "DIFFERENT",
     "differences": 1989,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 555,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 885,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 1365,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 1845,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 555,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 567,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
     "check": "DIFFERENT",
     "differences": 730,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D08",
     "check": "DIFFERENT",
     "differences": 2082,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D09",
     "check": "DIFFERENT",
     "differences": 1830,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D10",
     "check": "DIFFERENT",
     "differences": 1830,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "DIFFERENT",
     "differences": 1830,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D12",
     "check": "DIFFERENT",
     "differences": 1830,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D13",
     "check": "DIFFERENT",
     "differences": 1830,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "DIFFERENT",
     "differences": 1830,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "DIFFERENT",
     "differences": 2597,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E02",
     "check": "DIFFERENT",
     "differences": 3120,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E03",
     "check": "DIFFERENT",
     "differences": 3120,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E04",
     "check": "DIFFERENT",
     "differences": 3760,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E05",
     "check": "DIFFERENT",
     "differences": 3243,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E06",
     "check": "DIFFERENT",
     "differences": 3252,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E07",
     "check": "DIFFERENT",
     "differences": 3268,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 537,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 555,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 555,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "DIFFERENT",
     "differences": 1845,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E12",
     "check": "DIFFERENT",
     "differences": 2010,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E13",
     "check": "DIFFERENT",
     "differences": 2985,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 1314,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": true
    }
   ]
@@ -692,217 +692,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
     "check": "DIFFERENT",
     "differences": 53,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:maintenance",
     "check": "DIFFERENT",
     "differences": 112,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 73,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D07",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D08",
     "check": "DIFFERENT",
     "differences": 53,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D09",
     "check": "DIFFERENT",
     "differences": 53,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D10",
     "check": "DIFFERENT",
     "differences": 91,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D11",
     "check": "DIFFERENT",
     "differences": 91,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D12",
     "check": "DIFFERENT",
     "differences": 73,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D13",
     "check": "DIFFERENT",
     "differences": 53,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D14",
     "check": "DIFFERENT",
     "differences": 53,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E01",
     "check": "DIFFERENT",
     "differences": 152,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E02",
     "check": "DIFFERENT",
     "differences": 152,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E03",
     "check": "DIFFERENT",
     "differences": 152,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E04",
     "check": "DIFFERENT",
     "differences": 183,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E05",
     "check": "DIFFERENT",
     "differences": 183,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E06",
     "check": "DIFFERENT",
     "differences": 166,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E07",
     "check": "DIFFERENT",
     "differences": 207,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 85,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 60,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E11",
     "check": "DIFFERENT",
     "differences": 73,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E12",
     "check": "DIFFERENT",
     "differences": 53,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E13",
     "check": "DIFFERENT",
     "differences": 53,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 97,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": true
    }
   ]
@@ -919,217 +919,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:maintenance",
     "check": "DIFFERENT",
     "differences": 44,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D09",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D10",
     "check": "DIFFERENT",
     "differences": 112,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D11",
     "check": "DIFFERENT",
     "differences": 112,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D12",
     "check": "DIFFERENT",
     "differences": 110,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D13",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D14",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "DIFFERENT",
     "differences": 44,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E02",
     "check": "DIFFERENT",
     "differences": 44,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
     "check": "DIFFERENT",
     "differences": 44,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E04",
     "check": "DIFFERENT",
     "differences": 98,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E05",
     "check": "DIFFERENT",
     "differences": 98,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E06",
     "check": "DIFFERENT",
     "differences": 113,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E07",
     "check": "DIFFERENT",
     "differences": 113,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 83,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E11",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E12",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E13",
     "check": "DIFFERENT",
     "differences": 56,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 84,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": false
    }
   ]
@@ -1146,217 +1146,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
     "check": "DIFFERENT",
     "differences": 168,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:maintenance",
     "check": "DIFFERENT",
     "differences": 315,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D07",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D08",
     "check": "DIFFERENT",
     "differences": 168,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D09",
     "check": "DIFFERENT",
     "differences": 168,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D10",
     "check": "DIFFERENT",
     "differences": 325,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D11",
     "check": "DIFFERENT",
     "differences": 325,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D12",
     "check": "DIFFERENT",
     "differences": 168,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D13",
     "check": "DIFFERENT",
     "differences": 168,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D14",
     "check": "DIFFERENT",
     "differences": 168,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E01",
     "check": "DIFFERENT",
     "differences": 315,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E02",
     "check": "DIFFERENT",
     "differences": 324,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
     "check": "DIFFERENT",
     "differences": 319,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E04",
     "check": "DIFFERENT",
     "differences": 629,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E05",
     "check": "DIFFERENT",
     "differences": 623,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E06",
     "check": "DIFFERENT",
     "differences": 496,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E07",
     "check": "DIFFERENT",
     "differences": 496,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 225,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 204,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "DIFFERENT",
     "differences": 167,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E12",
     "check": "DIFFERENT",
     "differences": 168,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
     "check": "DIFFERENT",
     "differences": 168,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 224,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": true
    }
   ]
@@ -1373,217 +1373,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 4,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
     "check": "DIFFERENT",
     "differences": 16,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:maintenance",
     "check": "DIFFERENT",
     "differences": 22,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 6,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 4,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 4,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 4,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 4,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 4,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
     "check": "DIFFERENT",
     "differences": 4,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
     "check": "DIFFERENT",
     "differences": 16,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D09",
     "check": "DIFFERENT",
     "differences": 16,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
     "check": "DIFFERENT",
     "differences": 16,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "DIFFERENT",
     "differences": 16,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D12",
     "check": "DIFFERENT",
     "differences": 31,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D13",
     "check": "DIFFERENT",
     "differences": 16,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "DIFFERENT",
     "differences": 16,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "DIFFERENT",
     "differences": 25,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E02",
     "check": "DIFFERENT",
     "differences": 25,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
     "check": "DIFFERENT",
     "differences": 25,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E04",
     "check": "DIFFERENT",
     "differences": 25,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E05",
     "check": "DIFFERENT",
     "differences": 25,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E06",
     "check": "DIFFERENT",
     "differences": 23,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E07",
     "check": "DIFFERENT",
     "differences": 26,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 6,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 4,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 4,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "DIFFERENT",
     "differences": 17,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E12",
     "check": "DIFFERENT",
     "differences": 16,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
     "check": "DIFFERENT",
     "differences": 16,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 6,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": false
    }
   ]
@@ -1592,225 +1592,225 @@
   "mutant": "unique-skipped",
   "description": "uniqueness not enforced",
   "apps": 31,
-  "detected_in_apps": 31,
+  "detected_in_apps": 0,
   "tests_fail_in_apps": 7,
-  "observable_by_tests_but_missed": 0,
+  "observable_by_tests_but_missed": 7,
   "per_app": [
    {
     "app": "base:library",
-    "check": "DIFFERENT",
-    "differences": 6,
-    "probes": 2950,
+    "check": "same",
+    "differences": 0,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 4036,
+    "check": "same",
+    "differences": 0,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:maintenance",
-    "check": "DIFFERENT",
-    "differences": 10,
-    "probes": 5182,
+    "check": "same",
+    "differences": 0,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
-    "check": "DIFFERENT",
-    "differences": 10,
-    "probes": 3186,
+    "check": "same",
+    "differences": 0,
+    "probes": 3079,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D02",
-    "check": "DIFFERENT",
-    "differences": 6,
-    "probes": 3508,
+    "check": "same",
+    "differences": 0,
+    "probes": 3420,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D03",
-    "check": "DIFFERENT",
-    "differences": 6,
-    "probes": 4028,
+    "check": "same",
+    "differences": 0,
+    "probes": 3940,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D04",
-    "check": "DIFFERENT",
-    "differences": 6,
-    "probes": 4548,
+    "check": "same",
+    "differences": 0,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
-    "check": "DIFFERENT",
-    "differences": 6,
-    "probes": 2950,
+    "check": "same",
+    "differences": 0,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D06",
-    "check": "DIFFERENT",
-    "differences": 6,
-    "probes": 3106,
+    "check": "same",
+    "differences": 0,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
-    "check": "DIFFERENT",
-    "differences": 6,
-    "probes": 2950,
+    "check": "same",
+    "differences": 0,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 4036,
+    "check": "same",
+    "differences": 0,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D09",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 4036,
+    "check": "same",
+    "differences": 0,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 4836,
+    "check": "same",
+    "differences": 0,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 4880,
+    "check": "same",
+    "differences": 0,
+    "probes": 4797,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D12",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 4922,
+    "check": "same",
+    "differences": 0,
+    "probes": 4817,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D13",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 4080,
+    "check": "same",
+    "differences": 0,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 4036,
+    "check": "same",
+    "differences": 0,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
-    "check": "DIFFERENT",
-    "differences": 15,
-    "probes": 6403,
+    "check": "same",
+    "differences": 0,
+    "probes": 6240,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E02",
-    "check": "DIFFERENT",
-    "differences": 15,
-    "probes": 7083,
+    "check": "same",
+    "differences": 0,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
-    "check": "DIFFERENT",
-    "differences": 15,
-    "probes": 7083,
+    "check": "same",
+    "differences": 0,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E04",
-    "check": "DIFFERENT",
-    "differences": 15,
-    "probes": 8617,
-    "acceptance_tests_fail": false
-   },
-   {
-    "app": "eval:E05",
-    "check": "DIFFERENT",
-    "differences": 15,
-    "probes": 7937,
-    "acceptance_tests_fail": false
-   },
-   {
-    "app": "eval:E06",
-    "check": "DIFFERENT",
-    "differences": 7,
-    "probes": 7983,
-    "acceptance_tests_fail": false
-   },
-   {
-    "app": "eval:E07",
-    "check": "DIFFERENT",
-    "differences": 7,
+    "check": "same",
+    "differences": 0,
     "probes": 8471,
     "acceptance_tests_fail": false
    },
    {
+    "app": "eval:E05",
+    "check": "same",
+    "differences": 0,
+    "probes": 7791,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E06",
+    "check": "same",
+    "differences": 0,
+    "probes": 7833,
+    "acceptance_tests_fail": false
+   },
+   {
+    "app": "eval:E07",
+    "check": "same",
+    "differences": 0,
+    "probes": 8311,
+    "acceptance_tests_fail": false
+   },
+   {
     "app": "eval:E08",
-    "check": "DIFFERENT",
-    "differences": 8,
-    "probes": 3667,
+    "check": "same",
+    "differences": 0,
+    "probes": 3560,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E09",
-    "check": "DIFFERENT",
-    "differences": 6,
-    "probes": 2974,
+    "check": "same",
+    "differences": 0,
+    "probes": 2875,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E10",
-    "check": "DIFFERENT",
-    "differences": 6,
-    "probes": 2950,
+    "check": "same",
+    "differences": 0,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
-    "check": "DIFFERENT",
-    "differences": 4,
-    "probes": 4382,
+    "check": "same",
+    "differences": 0,
+    "probes": 4261,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E12",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 4276,
+    "check": "same",
+    "differences": 0,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
-    "check": "DIFFERENT",
-    "differences": 2,
-    "probes": 5316,
+    "check": "same",
+    "differences": 0,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
-    "check": "DIFFERENT",
-    "differences": 8,
-    "probes": 4720,
+    "check": "same",
+    "differences": 0,
+    "probes": 4613,
     "acceptance_tests_fail": false
    }
   ]
@@ -1819,225 +1819,225 @@
   "mutant": "write-if-ignored",
   "description": "field-level write permissions ignored",
   "apps": 31,
-  "detected_in_apps": 12,
+  "detected_in_apps": 0,
   "tests_fail_in_apps": 3,
-  "observable_by_tests_but_missed": 0,
+  "observable_by_tests_but_missed": 3,
   "per_app": [
    {
     "app": "base:library",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 2950,
+    "check": "same",
+    "differences": 0,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:maintenance",
     "check": "same",
     "differences": 0,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D01",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 3186,
+    "check": "same",
+    "differences": 0,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 3508,
+    "check": "same",
+    "differences": 0,
+    "probes": 3420,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D03",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 4028,
+    "check": "same",
+    "differences": 0,
+    "probes": 3940,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D04",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 4548,
+    "check": "same",
+    "differences": 0,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 2950,
+    "check": "same",
+    "differences": 0,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D06",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 3106,
+    "check": "same",
+    "differences": 0,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 2950,
+    "check": "same",
+    "differences": 0,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D09",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
     "check": "same",
     "differences": 0,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "same",
     "differences": 0,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D12",
     "check": "same",
     "differences": 0,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D13",
     "check": "same",
     "differences": 0,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "same",
     "differences": 0,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E02",
     "check": "same",
     "differences": 0,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
     "check": "same",
     "differences": 0,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E04",
     "check": "same",
     "differences": 0,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E05",
     "check": "same",
     "differences": 0,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E06",
     "check": "same",
     "differences": 0,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E07",
     "check": "same",
     "differences": 0,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E08",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 3667,
+    "check": "same",
+    "differences": 0,
+    "probes": 3560,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E09",
-    "check": "DIFFERENT",
-    "differences": 40,
-    "probes": 2974,
+    "check": "same",
+    "differences": 0,
+    "probes": 2875,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E10",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 2950,
+    "check": "same",
+    "differences": 0,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "same",
     "differences": 0,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E12",
     "check": "same",
     "differences": 0,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
     "check": "same",
     "differences": 0,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
-    "check": "DIFFERENT",
-    "differences": 30,
-    "probes": 4720,
+    "check": "same",
+    "differences": 0,
+    "probes": 4613,
     "acceptance_tests_fail": false
    }
   ]
@@ -2054,217 +2054,217 @@
     "app": "base:library",
     "check": "same",
     "differences": 0,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:expenses",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:maintenance",
     "check": "same",
     "differences": 0,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D01",
     "check": "same",
     "differences": 0,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
     "check": "same",
     "differences": 0,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D03",
     "check": "same",
     "differences": 0,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D04",
     "check": "same",
     "differences": 0,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
     "check": "same",
     "differences": 0,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D06",
     "check": "same",
     "differences": 0,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
     "check": "same",
     "differences": 0,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D09",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
     "check": "same",
     "differences": 0,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "same",
     "differences": 0,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D12",
     "check": "DIFFERENT",
     "differences": 33,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D13",
     "check": "same",
     "differences": 0,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "same",
     "differences": 0,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E02",
     "check": "same",
     "differences": 0,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
     "check": "same",
     "differences": 0,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E04",
     "check": "same",
     "differences": 0,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E05",
     "check": "same",
     "differences": 0,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E06",
     "check": "same",
     "differences": 0,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E07",
     "check": "same",
     "differences": 0,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E08",
     "check": "same",
     "differences": 0,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E09",
     "check": "same",
     "differences": 0,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E10",
     "check": "same",
     "differences": 0,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "same",
     "differences": 0,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E12",
     "check": "same",
     "differences": 0,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
     "check": "same",
     "differences": 0,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
     "check": "same",
     "differences": 0,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": false
    }
   ]
@@ -2281,217 +2281,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 21,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:expenses",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "base:maintenance",
     "check": "DIFFERENT",
     "differences": 10,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 21,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 37,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 44,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 44,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 21,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 23,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
     "check": "DIFFERENT",
     "differences": 29,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D09",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D12",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D13",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "DIFFERENT",
     "differences": 10,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E02",
     "check": "DIFFERENT",
     "differences": 12,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E03",
     "check": "DIFFERENT",
     "differences": 11,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E04",
     "check": "DIFFERENT",
     "differences": 11,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E05",
     "check": "DIFFERENT",
     "differences": 10,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E06",
     "check": "DIFFERENT",
     "differences": 9,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E07",
     "check": "DIFFERENT",
     "differences": 11,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 17,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 22,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 21,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E12",
     "check": "DIFFERENT",
     "differences": 11,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E13",
     "check": "DIFFERENT",
     "differences": 8,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 29,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": true
    }
   ]
@@ -2508,217 +2508,217 @@
     "app": "base:library",
     "check": "same",
     "differences": 0,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:expenses",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:maintenance",
     "check": "same",
     "differences": 0,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D01",
     "check": "same",
     "differences": 0,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
     "check": "same",
     "differences": 0,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D03",
     "check": "same",
     "differences": 0,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D04",
     "check": "same",
     "differences": 0,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
     "check": "same",
     "differences": 0,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D06",
     "check": "same",
     "differences": 0,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
     "check": "same",
     "differences": 0,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D09",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
     "check": "same",
     "differences": 0,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "same",
     "differences": 0,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D12",
     "check": "same",
     "differences": 0,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D13",
     "check": "same",
     "differences": 0,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "same",
     "differences": 0,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E02",
     "check": "same",
     "differences": 0,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
     "check": "same",
     "differences": 0,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E04",
     "check": "same",
     "differences": 0,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E05",
     "check": "same",
     "differences": 0,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E06",
     "check": "same",
     "differences": 0,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E07",
     "check": "same",
     "differences": 0,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E08",
     "check": "same",
     "differences": 0,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E09",
     "check": "same",
     "differences": 0,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E10",
     "check": "same",
     "differences": 0,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "same",
     "differences": 0,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E12",
     "check": "same",
     "differences": 0,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
     "check": "same",
     "differences": 0,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
     "check": "same",
     "differences": 0,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": false
    }
   ]
@@ -2735,217 +2735,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 36,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:expenses",
     "check": "DIFFERENT",
     "differences": 30,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:maintenance",
     "check": "DIFFERENT",
     "differences": 48,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": true
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 48,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 48,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 48,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 48,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 36,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 36,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
     "check": "DIFFERENT",
     "differences": 36,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
     "check": "DIFFERENT",
     "differences": 30,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D09",
     "check": "DIFFERENT",
     "differences": 30,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
     "check": "DIFFERENT",
     "differences": 45,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "DIFFERENT",
     "differences": 60,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D12",
     "check": "DIFFERENT",
     "differences": 45,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D13",
     "check": "DIFFERENT",
     "differences": 45,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "DIFFERENT",
     "differences": 30,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "DIFFERENT",
     "differences": 80,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E02",
     "check": "DIFFERENT",
     "differences": 80,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
     "check": "DIFFERENT",
     "differences": 80,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E04",
     "check": "DIFFERENT",
     "differences": 96,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E05",
     "check": "DIFFERENT",
     "differences": 96,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E06",
     "check": "DIFFERENT",
     "differences": 96,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E07",
     "check": "DIFFERENT",
     "differences": 112,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 48,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 36,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 36,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "DIFFERENT",
     "differences": 45,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E12",
     "check": "DIFFERENT",
     "differences": 30,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
     "check": "DIFFERENT",
     "differences": 30,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 48,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": false
    }
   ]
@@ -2962,217 +2962,217 @@
     "app": "base:library",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:expenses",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "base:maintenance",
     "check": "same",
     "differences": 0,
-    "probes": 5182,
+    "probes": 5045,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D01",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 3186,
+    "probes": 3079,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D02",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 3508,
+    "probes": 3420,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D03",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 4028,
+    "probes": 3940,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D04",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 4548,
+    "probes": 4460,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D05",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D06",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 3106,
+    "probes": 3018,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D07",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D08",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D09",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D10",
     "check": "same",
     "differences": 0,
-    "probes": 4836,
+    "probes": 4753,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D11",
     "check": "same",
     "differences": 0,
-    "probes": 4880,
+    "probes": 4797,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D12",
     "check": "same",
     "differences": 0,
-    "probes": 4922,
+    "probes": 4817,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D13",
     "check": "same",
     "differences": 0,
-    "probes": 4080,
+    "probes": 3981,
     "acceptance_tests_fail": false
    },
    {
     "app": "dev:D14",
     "check": "same",
     "differences": 0,
-    "probes": 4036,
+    "probes": 3937,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E01",
     "check": "same",
     "differences": 0,
-    "probes": 6403,
+    "probes": 6240,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E02",
     "check": "same",
     "differences": 0,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E03",
     "check": "same",
     "differences": 0,
-    "probes": 7083,
+    "probes": 6920,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E04",
     "check": "same",
     "differences": 0,
-    "probes": 8617,
+    "probes": 8471,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E05",
     "check": "same",
     "differences": 0,
-    "probes": 7937,
+    "probes": 7791,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E06",
     "check": "same",
     "differences": 0,
-    "probes": 7983,
+    "probes": 7833,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E07",
     "check": "same",
     "differences": 0,
-    "probes": 8471,
+    "probes": 8311,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E08",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 3667,
+    "probes": 3560,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E09",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 2974,
+    "probes": 2875,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E10",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 2950,
+    "probes": 2862,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E11",
     "check": "DIFFERENT",
     "differences": 10,
-    "probes": 4382,
+    "probes": 4261,
     "acceptance_tests_fail": true
    },
    {
     "app": "eval:E12",
     "check": "same",
     "differences": 0,
-    "probes": 4276,
+    "probes": 4177,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E13",
     "check": "same",
     "differences": 0,
-    "probes": 5316,
+    "probes": 5217,
     "acceptance_tests_fail": false
    },
    {
     "app": "eval:E14",
     "check": "DIFFERENT",
     "differences": 2,
-    "probes": 4720,
+    "probes": 4613,
     "acceptance_tests_fail": false
    }
   ]
