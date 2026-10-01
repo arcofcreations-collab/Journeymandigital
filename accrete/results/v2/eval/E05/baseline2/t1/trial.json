@@ -1,0 +1,18 @@
+{
+ "id": "E05",
+ "set": "eval",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "maintenance",
+ "categories": [
+  "reversal",
+  "data_migration",
+  "sequence",
+  "interaction",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "version": "01a8c34",
+ "attempts": [],
+ "extra": []
+}
