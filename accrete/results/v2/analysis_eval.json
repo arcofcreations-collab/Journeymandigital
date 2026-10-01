@@ -1,7 +1,7 @@
 {
  "set": "eval",
  "challenges": 14,
- "median_ratio": 1.68,
+ "median_ratio": 1.78,
  "ratios": [
   1.22,
   2.01,
@@ -9,6 +9,7 @@
   1.52,
   2.36,
   2.32,
+  2.04,
   1.41,
   2.13,
   0.92,
@@ -18,7 +19,7 @@
   1.89
  ],
  "per_trial_median_ratio": {
-  "1": 1.68
+  "1": 1.79
  },
  "systems": {
   "accrete2": {
@@ -38,18 +39,18 @@
   },
   "baseline2": {
    "runs": 14,
-   "finished": 13,
-   "correct": 13,
-   "correct_first_attempt": 13,
+   "finished": 14,
+   "correct": 14,
+   "correct_first_attempt": 14,
    "repairs": 0,
    "extra_s": 0.0,
-   "unfinished": 1,
-   "cost_s_median": 270.8,
-   "cost_s_total": 3488.5,
-   "tokens_median": 126958,
-   "tokens_total": 1608655,
-   "tool_uses_median": 25,
-   "tool_uses_total": 339
+   "unfinished": 0,
+   "cost_s_median": 271.8,
+   "cost_s_total": 3928.1,
+   "tokens_median": 127904.5,
+   "tokens_total": 1787843,
+   "tool_uses_median": 27.5,
+   "tool_uses_total": 376
   }
  },
  "table": [
@@ -209,7 +210,17 @@
    ],
    "accrete2_median_cost_s": 215.9,
    "accrete2_all_correct": true,
-   "baseline2": []
+   "baseline2": [
+    {
+     "trial": 1,
+     "correct": true,
+     "attempts": 1,
+     "cost_s": 439.6
+    }
+   ],
+   "baseline2_median_cost_s": 439.6,
+   "baseline2_all_correct": true,
+   "ratio": 2.04
   },
   {
    "id": "E08",
