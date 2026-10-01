@@ -9,7 +9,29 @@
   "rule_change"
  ],
  "expect_rejection": false,
- "version": "cd89e8b",
- "attempts": [],
- "extra": []
+ "version": "f019a27",
+ "attempts": [
+  {
+   "attempt": 1,
+   "duration_ms": 57315,
+   "tool_uses": 13,
+   "tokens": 64010,
+   "hidden_passed": 4,
+   "hidden_total": 4,
+   "hidden_failures": [],
+   "regressions": [],
+   "clarification_written": false,
+   "success": true,
+   "t_start": 1790855039.9049358,
+   "t_end": 1790855085.5225997,
+   "verify_s": 1.4
+  }
+ ],
+ "extra": [],
+ "finished": true,
+ "correct": true,
+ "correct_at_attempt": 1,
+ "cost_s": 58.7,
+ "tokens": 64010,
+ "tool_uses": 13
 }

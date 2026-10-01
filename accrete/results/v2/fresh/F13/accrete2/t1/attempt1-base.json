@@ -1,9 +1,9 @@
 {
  "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/fresh/F13/accrete2/t1/app",
  "tests": "/home/user/Journeymandigital/accrete/challenges/base/test_expenses_base.py",
- "passed": 47,
+ "passed": 45,
  "total": 47,
- "seconds": 0.77,
+ "seconds": 1.03,
  "results": [
   {
    "test": "challenges.base.test_expenses_base::test_missing_and_unknown_user_are_401",
@@ -87,8 +87,8 @@
   },
   {
    "test": "challenges.base.test_expenses_base::test_create_claim_required_fields_and_category",
-   "passed": true,
-   "message": ""
+   "passed": false,
+   "message": "AssertionError: <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"category\": \"must be one of travel, meals, equipment, miscellaneous\"}}'>\nassert 400 == 201\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"category\": \"must be "
   },
   {
    "test": "challenges.base.test_expenses_base::test_create_claim_with_protected_field_is_400",
@@ -97,8 +97,8 @@
   },
   {
    "test": "challenges.base.test_expenses_base::test_employee_patches_own_draft",
-   "passed": true,
-   "message": ""
+   "passed": false,
+   "message": "AssertionError: <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"category\": \"must be one of travel, meals, equipment, miscellaneous\"}}'>\nassert 400 == 200\n +  where 400 = <Response 400 '{\"error\": \"validation\", \"message\": \"invalid input\", \"fields\": {\"category\": \"must be "
   },
   {
    "test": "challenges.base.test_expenses_base::test_patch_non_draft_is_409",

@@ -19,7 +19,12 @@ import re
 
 from . import dates as D
 
-RULE_VERSION = "abs-1"
+RULE_VERSION = "abs-2"
+
+# Work vs personal context. Decided per finding from evidence, never silently: the contact's job label is the
+# strongest signal; otherwise vocabulary in the message and its conversation.
+WORK_WORDS = r"\b(work|shift|job|client|clean(?:ing)?|rota|boss|manager|office|site|booking|appointment with|session|pay|invoice|hours|cover|start time)\b"
+PERSONAL_WORDS = r"\b(gym|dinner|lunch|drinks?|party|movie|film|cinema|date night|game|match|birthday|coffee|pub|bbq|hang ?out|catch up|wedding|concert|brunch)\b"
 
 NEG_AVAIL = [r"\bcan'?t\b|\bcannot\b|\bcan not\b|\bwon'?t be able\b|\bwon'?t make it\b|\bnot able to\b|\bunable to\b",
              r"\bnot (?:going to|gonna) (?:make it|be (?:in|there|able))\b", r"\bwon'?t be (?:in|there|coming|around)\b"]
@@ -63,10 +68,27 @@ def _dt(ms):
     return dt.datetime.fromtimestamp(ms / 1000)
 
 
-def analyse_conversation(msgs, day_first=True, reply_window_h=72, revision_days=21):
+def work_context(body, convo_text, has_job):
+    """-> (context, reason). context in work|personal|unknown."""
+    b, c = body.lower(), convo_text.lower()
+    if has_job:
+        if _has(PERSONAL_WORDS, b) and not _has(WORK_WORDS, b):
+            return "unknown", "contact has a job label, but this message mentions a personal activity"
+        return "work", "contact has a job label"
+    if _has(PERSONAL_WORDS, b) and not _has(WORK_WORDS, b):
+        return "personal", "personal activity mentioned and no job label on the contact"
+    if _has(WORK_WORDS, b):
+        return "work", "work wording in the message (no job label on the contact yet)"
+    if len(re.findall(WORK_WORDS, c)) >= 2:
+        return "work", "work wording elsewhere in this conversation (no job label on the contact yet)"
+    return "unknown", "no job label and no clear work wording"
+
+
+def analyse_conversation(msgs, day_first=True, reply_window_h=72, revision_days=21, has_job=False):
     """msgs: list of dicts (id, key, date_ms, direction, body) of ONE contact, any order.
     Returns findings (dicts) with evidence and revisions."""
     msgs = sorted(msgs, key=lambda m: (m["date_ms"], m["id"]))
+    convo_text = " ".join((m["body"] or "") for m in msgs)
     findings = []
     for i, m in enumerate(msgs):
         body = m["body"] or ""
@@ -105,6 +127,7 @@ def analyse_conversation(msgs, day_first=True, reply_window_h=72, revision_days=
              "work_start": start.isoformat(), "work_end": end.isoformat(), "kind": kind, "date_basis": date_basis,
              "notes": notes, "evidence": [_ev(m, "statement" if kind != "their_cancellation" else "their message")],
              "revisions": [], "status": None, "actually_taken": "not established by these messages"}
+        f["context"], f["context_reason"] = work_context(body, convo_text, has_job)
         if inline_resched:
             f["status_override"] = "rescheduled"
             f["rescheduled_to"] = [inline_resched[0].isoformat(), inline_resched[1].isoformat()]

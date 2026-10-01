@@ -77,3 +77,11 @@ def test_context_and_delete(tmp_path):
     ctx = A.context(db, mid, 1, 1)
     assert [m["id"] for m in ctx][1] == mid and len(ctx) == 3
     p = str(tmp_path / "a.db"); db.close(); S.delete_all(p); assert not os.path.exists(p)
+
+def test_personal_cancellation_kept_apart(tmp_path):
+    db, *_ = setup(tmp_path)
+    assert not by_date(db, "2026-03-05")                     # Sam's gym message hidden from the default (work) view
+    hidden = [f for f in A.absences(db, contexts=None) if f["work_start"] == "2026-03-05"]
+    assert hidden and hidden[0]["context"] == "personal" and "personal" in hidden[0]["context_reason"]
+    A.set_job(db, "Mr Okafor", "cleaning"); A.recompute_absences(db)
+    assert by_date(db, "2026-03-25")[0]["context"] == "work"

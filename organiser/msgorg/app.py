@@ -82,16 +82,17 @@ def recompute_absences(db, day_first=True):
         db.execute("delete from absence_findings")
         for c in db.execute("select id from contacts").fetchall():
             msgs = [dict(r) for r in db.execute("select id, key, date_ms, direction, body from messages where contact_id=?", (c["id"],))]
-            for f in A.analyse_conversation(msgs, day_first=day_first):
+            has_job = db.execute("select 1 from contact_jobs where contact_id=?", (c["id"],)).fetchone() is not None
+            for f in A.analyse_conversation(msgs, day_first=day_first, has_job=has_job):
                 db.execute("insert into absence_findings(contact_id, first_msg, work_start, work_end, status, kind, summary,"
                            " evidence, revisions, rule_version) values(?,?,?,?,?,?,?,?,?,?)",
                            (c["id"], f["first_msg"], f["work_start"], f["work_end"], f["status"], f["kind"],
                             json.dumps({k: f[k] for k in ("sent_at", "date_basis", "notes", "actually_taken", "msg_key",
-                                                          "rescheduled_to") if k in f}),
+                                                          "rescheduled_to", "context", "context_reason") if k in f}),
                             json.dumps(f["evidence"]), json.dumps(f["revisions"]), A.RULE_VERSION))
 
 
-def absences(db, contact=None, job=None, start=None, end=None, statuses=None, include_rejected=False):
+def absences(db, contact=None, job=None, start=None, end=None, statuses=None, include_rejected=False, contexts=("work", "unknown")):
     rows = db.execute("select a.*, c.display, (select group_concat(j.name) from contact_jobs cj join jobs j on j.id=cj.job_id"
                       " where cj.contact_id=a.contact_id) jobs from absence_findings a join contacts c on c.id=a.contact_id"
                       " order by a.work_start").fetchall()
@@ -113,6 +114,8 @@ def absences(db, contact=None, job=None, start=None, end=None, statuses=None, in
                 f["jobs"] = c["value"]
             elif c["field"] == "not_absence":
                 f["rejected"] = True
+            elif c["field"] == "context":
+                f["context"], f["context_reason"] = c["value"], "corrected by you"
         f["corrected"] = bool(f["corrections"])
         if f.get("rejected") and not include_rejected:
             continue
@@ -121,6 +124,8 @@ def absences(db, contact=None, job=None, start=None, end=None, statuses=None, in
         if job and job not in (f["jobs"] or "").split(","):
             continue
         if start and f["work_end"] < start or end and f["work_start"] > end:
+            continue
+        if contexts and f.get("context") not in contexts:
             continue
         if statuses and f["status"] not in statuses:
             continue
@@ -134,8 +139,10 @@ def correct(db, finding_id, field, value, note=""):
         raise SystemExit(f"no finding {finding_id}")
     key = json.loads(f["summary"])["msg_key"]
     statuses = {"requested", "proposed", "stated", "confirmed", "declined", "cancelled", "rescheduled", "uncertain", "taken"}
-    if field not in ("status", "work_date", "job", "not_absence"):
-        raise SystemExit("field must be one of status, work_date, job, not_absence")
+    if field not in ("status", "work_date", "job", "not_absence", "context"):
+        raise SystemExit("field must be one of status, work_date, job, not_absence, context")
+    if field == "context" and value not in ("work", "personal", "unknown"):
+        raise SystemExit("context must be work, personal or unknown")
     if field == "status" and value not in statuses:
         raise SystemExit(f"status must be one of {sorted(statuses)}")
     with db:
@@ -147,10 +154,10 @@ def export(findings, fmt="md"):
     if fmt == "csv":
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["work_start", "work_end", "contact", "job", "status", "sent_at", "date_basis", "evidence", "revisions",
+        w.writerow(["work_start", "work_end", "contact", "job", "context", "status", "sent_at", "date_basis", "evidence", "revisions",
                     "corrected", "actually_taken"])
         for f in findings:
-            w.writerow([f["work_start"], f["work_end"], f["display"], f.get("jobs") or "", f["status"], f["sent_at"],
+            w.writerow([f["work_start"], f["work_end"], f["display"], f.get("jobs") or "", f.get("context"), f["status"], f["sent_at"],
                         f["date_basis"], " | ".join(f"[{e['at']} {e['direction']}] {e['excerpt']}" for e in f["evidence"]),
                         " | ".join(f"[{e['at']} {e['role']}] {e['excerpt']}" for e in f["revisions"]), f["corrected"],
                         f["actually_taken"]])
@@ -162,6 +169,7 @@ def export(findings, fmt="md"):
         lines.append(f"## {rng} - {f['display']}{' (' + f['jobs'] + ')' if f.get('jobs') else ''}: **{f['status']}**"
                      + (" (corrected by you)" if f["corrected"] else ""))
         lines.append(f"- Message sent {f['sent_at']}; date basis: {f['date_basis']}")
+        lines.append(f"- Context: {f.get('context')} ({f.get('context_reason')})")
         for n in f.get("notes") or []:
             lines.append(f"- Note: {n}")
         for e in f["evidence"]:

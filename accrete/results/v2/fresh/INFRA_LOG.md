@@ -5,3 +5,6 @@
   system. Per docs/TARGET_V2.md these runs are discarded (workspaces re-prepared from clean state; partial work
   deleted) and rerun after the reset. The discarded transcripts are kept in the session task directory; their
   partial durations are not counted anywhere.
+- 2026-10-01 11:25 UTC: the 15 rerun agents were stopped by a user interrupt of the session (credit-saving
+  instruction). None had finished. Discarded again; workspaces re-prepared clean. The evaluation is reduced to
+  ONE trial per (challenge, system) and labelled PRELIMINARY (docs/TARGET_V2.md declared 3).

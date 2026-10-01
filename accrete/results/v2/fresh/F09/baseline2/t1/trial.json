@@ -10,7 +10,29 @@
   "permissions"
  ],
  "expect_rejection": true,
- "version": "cd89e8b",
- "attempts": [],
- "extra": []
+ "version": "f019a27",
+ "attempts": [
+  {
+   "attempt": 1,
+   "duration_ms": 29354,
+   "tool_uses": 5,
+   "tokens": 61566,
+   "hidden_passed": 5,
+   "hidden_total": 5,
+   "hidden_failures": [],
+   "regressions": [],
+   "clarification_written": true,
+   "success": true,
+   "t_start": 1790855039.7694457,
+   "t_end": 1790855058.5724614,
+   "verify_s": 5.0
+  }
+ ],
+ "extra": [],
+ "finished": true,
+ "correct": true,
+ "correct_at_attempt": 1,
+ "cost_s": 34.4,
+ "tokens": 61566,
+ "tool_uses": 5
 }
