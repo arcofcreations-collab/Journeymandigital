@@ -1,0 +1,22 @@
+{
+  "id": "F03",
+  "app": "expenses",
+  "categories": [
+    "rule_change",
+    "data_migration",
+    "interaction",
+    "sequence",
+    "conflict_or_ambiguity"
+  ],
+  "depends_on": "F02",
+  "expect_rejection": false,
+  "brief": "Managers want to approve less than the claimed amount, with an explanation, and finance should pay only what was approved. (This builds on the previous changes: `incurred_on`, and category policies with the `lodging` category.)\n\n1. Two new claim fields: `approved_amount` (number or `null`) and `approval_note` (text or `null`). Clients can never set them: sending either in a claim create or PATCH body is `400`. Both are part of every claim record and are shown as data-fields on `/ui/claims/{id}`; new claims start with both `null`.\n2. `POST /api/claims/{id}/approve` accepts two optional parameters, `amount` and `note`. Checks keep the contract order: caller is not the employee's manager -> `403`; status is not `submitted` -> `409`; then parameter validation -> `400`. Rules:\n   - Without `amount`, the full claim `amount` is approved. If `amount` is sent it must be a JSON number (not a string, boolean or `null`) greater than 0 and not greater than the claim's `amount`.\n   - `note`, if sent, must be text or `null`; an empty or whitespace-only note counts as no note. When the approved amount is less than the claim's `amount`, a non-empty `note` is required (`400` otherwise). With a full approval the note is optional (stored if given).\n   - A successful approve sets, besides the existing effects, `approved_amount` = the approved amount and `approval_note` = the note (or `null`). The claim's own `amount` never changes.\n3. `reject` leaves `approved_amount` and `approval_note` `null`.\n4. `pay`: the `payment` outbox payload keeps its keys `{\"claim\", \"employee\", \"amount\"}`, but `amount` is now the claim's `approved_amount`.\n5. Existing data: claims with status `paid` get `approved_amount` = their `amount`. Claims with status `approved` get `approved_amount` = their `amount`, EXCEPT approved claims whose `amount` is greater than the current `max_amount` of their category's policy: they were approved under the old rules and are capped, i.e. they get `approved_amount` = that `max_amount` and `approval_note` = `\"Capped at policy maximum\"`. All other claims get `null` for both fields, and `approval_note` is `null` on every non-capped claim. Nothing else changes (status, decision fields and amounts stay).\n6. Unchanged: everything else, including `incurred_on`, category policies and lodging.",
+  "superseded_base_tests": [
+    "test_submit_own_draft",
+    "test_full_claim_lifecycle",
+    "test_ui_claim_detail_draft_owner",
+    "test_claim_fields_match_seed",
+    "test_create_claim_amount_bounds",
+    "test_finance_pays_approved_claim_and_emits_payment"
+  ]
+}

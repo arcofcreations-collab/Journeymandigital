@@ -1,0 +1,15 @@
+{
+  "id": "F13",
+  "app": "expenses",
+  "categories": [
+    "data_migration",
+    "rule_change"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Finance renames the claim category `other` to `miscellaneous`.\n\n1. The allowed claim categories are now `travel`, `meals`, `equipment` and `miscellaneous`. `other` is no longer accepted: creating or PATCHing a claim with `category` = `other` is `400`.\n2. Existing data: every existing claim with category `other` (any status) gets `miscellaneous`. No other field of any claim changes.\n3. Filters: `GET /api/claims?category=miscellaneous` returns them; `?category=other` simply returns an empty list.\n4. Unchanged: everything else in spec/apps/expenses.md, including the workflow and the `payment` payload.",
+  "superseded_base_tests": [
+    "test_create_claim_required_fields_and_category",
+    "test_employee_patches_own_draft"
+  ]
+}

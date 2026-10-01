@@ -1,0 +1,28 @@
+{
+  "id": "F06",
+  "app": "expenses",
+  "categories": [
+    "permissions",
+    "rule_change",
+    "interaction",
+    "sequence"
+  ],
+  "depends_on": "F05",
+  "expect_rejection": false,
+  "brief": "Audit requires segregation of duties for finance users.\n\n1. A finance user may not pay a claim of which they are the `employee`: `403` (this `403` comes before the `409` state check). Another finance user can pay it.\n2. A finance user may not create an advance for themselves (`employee` = the caller's own id): `403`, and this `403` wins over any `400` in the same body. Advances for other employees are unchanged.\n3. A finance user may not `PATCH` or `DELETE` their own employee record: `403`, before any `400`. Another finance user can.\n4. Role changes take effect immediately: when finance changes an employee's `role` to `finance`, that employee has finance rights (and these restrictions) from the next request on.\n5. UI: the `pay` form on `/ui/claims/{id}` is not shown to a finance user on their own claim.\n6. A refused payment changes nothing (claim, advances, outbox).\n7. Unchanged: everything else, including all earlier changes (incurred_on, category policies, cash advances and full-amount approval).",
+  "superseded_base_tests": [
+    "test_submit_own_draft",
+    "test_full_claim_lifecycle",
+    "test_ui_claim_detail_draft_owner",
+    "test_claim_fields_match_seed",
+    "test_create_claim_amount_bounds",
+    "test_finance_pays_approved_claim_and_emits_payment",
+    "test_claim_list_filters",
+    "test_delete_rules",
+    "test_approve_wrong_state_is_409",
+    "test_reject_permission_and_state_precedence",
+    "test_pay_permissions_and_state",
+    "test_outbox_readable_by_any_user",
+    "test_ui_claim_detail_manager_and_finance_actions"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "F01",
+  "app": "expenses",
+  "categories": [
+    "rule_change",
+    "data_migration",
+    "sequence"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Expense claims must record the date on which the expense was incurred.\n\n1. New claim field `incurred_on`: a date `\"YYYY-MM-DD\"` or `null`. It is part of every claim record returned by the API, is shown as a `data-field` on `/ui/claims/{id}`, and works as a list filter like any other field (`GET /api/claims?incurred_on=2026-01-25`, exact match; read permissions still apply).\n2. Clients may send `incurred_on` when creating a claim (optional; default `null`) and may change it with `PATCH /api/claims/{id}` under the existing PATCH rules (only the claim's employee, only while the claim is `draft`; those 403/409 checks come before validation). A value must be either `null` (clears it) or a string of the form `YYYY-MM-DD` that is a real calendar date and is not later than today (the date part of `X-Now`). Anything else is `400`: wrong format (e.g. `\"01/03/2026\"`, `\"2026-3-1\"`), impossible dates (`\"2026-02-30\"`), future dates, numbers, booleans, the empty string. Today itself is allowed.\n3. `POST /api/claims/{id}/submit` now also requires `incurred_on` to be set. Checks in this order: caller is not the claim's employee -> `403`; status is not `draft` -> `409`; `incurred_on` is `null` -> `409`. A failed submit changes nothing.\n4. UI: `/ui/claims/new` contains an input named `incurred_on`. On `/ui/claims/{id}` the `submit` form is shown only when the caller could submit the claim successfully right now (their own draft with `incurred_on` set).\n5. Existing data: every existing claim that has a `submitted_at` gets `incurred_on` = the date part of its `submitted_at` (e.g. claim 2, submitted `2026-01-25T12:00:00`, gets `\"2026-01-25\"`). Existing claims without `submitted_at` (the drafts) get `null`. No other field of any claim changes.\n6. Unchanged: everything else in spec/apps/expenses.md, including approve, reject and pay, read permissions, the protected fields, amount/category validation, and the `payment` outbox payload `{\"claim\", \"employee\", \"amount\"}`.",
+  "superseded_base_tests": [
+    "test_submit_own_draft",
+    "test_full_claim_lifecycle",
+    "test_ui_claim_detail_draft_owner"
+  ]
+}

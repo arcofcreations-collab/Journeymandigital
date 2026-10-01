@@ -1,0 +1,15 @@
+{
+  "id": "F11",
+  "app": "library",
+  "categories": [
+    "new_concept",
+    "rule_change",
+    "data_migration",
+    "permissions",
+    "conflict_or_ambiguity"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "The library introduces annual memberships.\n\n1. New member field `member_until`: a date `\"YYYY-MM-DD\"` or `null` (`null` = no expiry). It is the last day on which the member may borrow (inclusive). Librarians may set it when creating a member (optional, default `null`) and change it with PATCH; a value that is not `null` and not a real date in `YYYY-MM-DD` form is `400`. Members may still only change their own `name`: a member's PATCH whose body contains `member_until` is `403`.\n2. Borrowing: if the borrowing member's `member_until` is not `null` and today (the date part of `X-Now`) is after it, borrow is `409` (also when a librarian lends to that member). Expired members can still authenticate, read their own member record and loans, change their name and return loans.\n3. New action `POST /api/members/{id}/extend` (body `{}`): librarians only (`403` otherwise). `409` if the member's `member_until` is `null` or the member is inactive. Otherwise sets `member_until` = (the later of today and the current `member_until`) + 365 days, and emits an outbox message on channel `membership_extended` with payload `{\"member\": id, \"member_until\": new date}`. Returns the member.\n4. Existing data: every existing member with role `member` who has at least one loan gets `member_until` = the date part of their earliest `borrowed_at` + 365 days (for example dara's first loan was borrowed on 2025-09-02, so her membership runs until 2026-09-02). Librarians and members without any loan get `null`.\n5. UI: `/ui/members/{id}` shows `member_until` as a data-field; the `extend` form is shown to librarians when extend is allowed for that member right now; `/ui/members/new` has an input named `member_until`.\n6. Unchanged: everything else (loan rules and limits, inactive members, filters such as `GET /api/members?member_until=2026-09-02` or `?member_until=null`).",
+  "superseded_base_tests": []
+}

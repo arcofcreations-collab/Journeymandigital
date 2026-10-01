@@ -1,0 +1,15 @@
+{
+  "id": "F07",
+  "app": "maintenance",
+  "categories": [
+    "new_concept",
+    "failure_atomicity",
+    "cross_cutting",
+    "permissions",
+    "rule_change"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Equipment is sometimes moved between sites. Supervisors need a way to move an asset that keeps its work orders consistent.\n\n1. New action `POST /api/assets/{id}/transfer` with body `{\"site\": text}`. It returns the asset after the transfer (including `open_orders`).\n2. Checks in the contract order: caller is not a supervisor -> `403`; the asset is retired, or any of its work orders is `in_progress` -> `409`; then validation -> `400`: `site` is required, must be non-empty text, must differ from the asset's current `site`, and must be the `site` of at least one existing staff record (currently `North`, `South` and `East`); any field other than `site` in the body is also `400`.\n3. Effects: the asset's `site` becomes the new site. Every `assigned` work order of the asset goes back to `open` with `assignee` = `null` (`started_at` stays `null`). Open orders stay open; completed and cancelled orders are not changed. Exactly one outbox message is emitted, on channel `asset_transferred`, with payload `{\"asset\": id, \"from_site\": old site, \"to_site\": new site, \"unassigned\": [ids of the orders that were un-assigned, ascending]}` (an empty list if none). No `assignment` messages are emitted.\n4. Atomicity: a refused transfer (403/404/409/400) changes nothing and emits nothing.\n5. Consequences follow the existing rules, which use current values: technicians of the new site can read the asset's orders and can be assigned to them; technicians of the old site no longer can (unless they are the order's `requested_by` or `assignee`); requesters and technicians of the new site may create orders for the asset, those of the old site get `403`.\n6. An asset's `site` can no longer be changed by `PATCH /api/assets/{id}`: a PATCH body containing `site` is `400` (after the existing `403` and retire-`409` rules). Creating assets with a `site` is unchanged.\n7. UI: on `/ui/assets/{id}` a `<form data-action=\"transfer\">` is shown to supervisors when the asset is not retired and has no `in_progress` order.\n8. Unchanged: everything else in spec/apps/maintenance.md. Only `transfer` emits `asset_transferred`.",
+  "superseded_base_tests": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "F05",
+  "app": "expenses",
+  "categories": [
+    "reversal",
+    "data_migration",
+    "interaction",
+    "sequence"
+  ],
+  "depends_on": "F04",
+  "expect_rejection": false,
+  "brief": "Partial approval (the change that introduced `approved_amount` and `approval_note` on claims) is withdrawn: managers found it confusing, and finance wants every claim decided on its full amount.\n\n1. `POST /api/claims/{id}/approve` again approves the whole claim. It no longer accepts parameters: sending `amount` or `note` is `400` (after the usual `403` and `409` checks).\n2. The claim fields `approved_amount` and `approval_note` are removed: they no longer appear in claim records or as data-fields in the UI.\n3. Payments: advances are recovered from the claim's full `amount`; `paid_amount` = `amount` - `advance_recovered`. The `payment` payload keeps the keys `{\"claim\", \"employee\", \"amount\": paid_amount, \"advance_recovered\"}`. Recovery order, rounding and atomicity are unchanged.\n4. Existing data: every claim that is currently `approved` and has an `approved_amount` lower than its `amount` (these are the approvals that were capped at a policy maximum) goes back to its manager for a fresh decision: `status` = `submitted`, `decided_at` = `null`, `decided_by` = `null`; `submitted_at` and every other field stay. Claims that are already `paid` are not changed (their `paid_amount` and `advance_recovered` remain the record of what was paid). All other claims keep their status and decision.\n5. Unchanged: everything else, including `incurred_on`, category policies and lodging, and cash advances.",
+  "superseded_base_tests": [
+    "test_submit_own_draft",
+    "test_full_claim_lifecycle",
+    "test_ui_claim_detail_draft_owner",
+    "test_claim_fields_match_seed",
+    "test_create_claim_amount_bounds",
+    "test_finance_pays_approved_claim_and_emits_payment",
+    "test_claim_list_filters",
+    "test_delete_rules",
+    "test_approve_wrong_state_is_409",
+    "test_reject_permission_and_state_precedence",
+    "test_pay_permissions_and_state",
+    "test_outbox_readable_by_any_user",
+    "test_ui_claim_detail_manager_and_finance_actions"
+  ]
+}

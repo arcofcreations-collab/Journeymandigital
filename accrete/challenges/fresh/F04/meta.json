@@ -1,0 +1,25 @@
+{
+  "id": "F04",
+  "app": "expenses",
+  "categories": [
+    "new_concept",
+    "new_relationship",
+    "cross_cutting",
+    "failure_atomicity",
+    "permissions",
+    "data_migration",
+    "interaction",
+    "sequence"
+  ],
+  "depends_on": "F03",
+  "expect_rejection": false,
+  "brief": "Finance sometimes pays employees a cash advance before a trip. Outstanding advances must be recovered automatically from the employee's next reimbursements. (This builds on the previous changes: `incurred_on`, category policies, and partial approval with `approved_amount`.)\n\n1. New collection `advances` with fields: `employee` (reference to employees, required), `amount` (JSON number, required, > 0 and <= 2000), `purpose` (text, required, non-empty), `issued_at` (datetime, set to now on create), `issued_by` (reference to employees, set to the creating user), `recovered` (number, starts at 0, changed only by payments) and `outstanding` (derived: `amount` - `recovered`). Only `employee`, `amount` and `purpose` may be sent when creating; any other field is `400`. `employee` must be the id of an existing employee (`400` otherwise).\n2. Permissions: only finance users may create advances (`403` for everyone else, before any `400`). Nobody may PATCH or DELETE an advance (`403`; an unknown id is still `404`). An advance is readable by finance users, by its `employee`, and by that employee's direct manager; anyone else gets `403` on direct access and does not see it in lists.\n3. Creating an advance emits an outbox message on channel `advance_issued` with payload `{\"advance\": id, \"employee\": id, \"amount\": amount}`.\n4. Recovery on payment: when finance pays a claim, the amount being paid (the claim's `approved_amount`) is first used to recover the employee's outstanding advances, oldest first (ascending advance `id`): from each advance of that employee with `outstanding` > 0, recover min(its outstanding, what is left of the payment), until the payment is used up or nothing is outstanding; each such advance's `recovered` grows accordingly. The claim gets two new fields: `advance_recovered` (total recovered by this payment) and `paid_amount` (= approved amount - `advance_recovered`; may be 0). Both are `null` until the claim is paid, cannot be set by clients (`400` in claim create/PATCH bodies), are part of every claim record and are shown as data-fields in the UI. The `payment` message is emitted once per payment (also when `paid_amount` is 0) with payload `{\"claim\": id, \"employee\": id, \"amount\": paid_amount, \"advance_recovered\": total recovered}`. All money values are rounded to 2 decimal places.\n5. Atomicity: a payment either completes entirely (claim, every affected advance, the one `payment` message) or, if refused for any reason (403/409), changes nothing at all.\n6. Existing data: these three advances already exist (paid out before this change, nothing recovered yet), with exactly these ids, all `issued_by` 1 (fiona):\n   1: employee 11 (victor), amount 300.00, purpose \"Conference travel float\", issued_at 2026-02-01T09:00:00;\n   2: employee 11 (victor), amount 250.00, purpose \"Client visit float\", issued_at 2026-02-20T09:00:00;\n   3: employee 7 (rosa), amount 500.00, purpose \"Trade fair float\", issued_at 2026-02-10T09:00:00.\n   Existing paid claims get `advance_recovered` = 0 and `paid_amount` = their `approved_amount`; all other existing claims get `null` for both.\n7. UI: `/ui/advances` lists the advances the caller may read; `/ui/advances/{id}` shows its fields as data-fields; `/ui/advances/new` is a create form with inputs `employee`, `amount` and `purpose` for finance users and `403` for everyone else.\n8. Unchanged: everything else, including `incurred_on`, category policies and lodging, and partial approval.",
+  "superseded_base_tests": [
+    "test_submit_own_draft",
+    "test_full_claim_lifecycle",
+    "test_ui_claim_detail_draft_owner",
+    "test_claim_fields_match_seed",
+    "test_create_claim_amount_bounds",
+    "test_finance_pays_approved_claim_and_emits_payment"
+  ]
+}

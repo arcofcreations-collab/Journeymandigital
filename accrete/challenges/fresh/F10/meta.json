@@ -1,0 +1,12 @@
+{
+  "id": "F10",
+  "app": "library",
+  "categories": [
+    "rule_change",
+    "data_migration"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "The library is setting up a reference collection: some books may be read in the library but not borrowed.\n\n1. New book field `reference_only`: a JSON boolean, default `false`. Librarians may set it when creating a book and change it with PATCH (members still get `403` for any book write). Any value that is not a JSON boolean (including `null`, strings and numbers) is `400`.\n2. Borrowing (`POST /api/books/{id}/borrow`) a book whose `reference_only` is `true` is `409`, both for members and for librarians lending to a member. The existing `403` (a member borrowing for someone else) still comes first. A refused borrow creates no loan and emits nothing.\n3. A book may be marked reference-only while it is on loan: the current loan continues and can be returned normally; afterwards the book cannot be borrowed. The derived `status` stays `on_loan` / `available` exactly as before.\n4. Existing data: books 9, 33, 36 and 40 form the reference collection and get `reference_only` = `true` (book 9 is currently on loan to fatima; that loan continues). All other existing books get `false`.\n5. UI: `/ui/books/{id}` shows `reference_only` as a data-field and does not show the `borrow` form for a reference-only book; `/ui/books/new` has an input named `reference_only`.\n6. `GET /api/books?reference_only=true` filters like any boolean field. Everything else is unchanged.",
+  "superseded_base_tests": []
+}

@@ -1,0 +1,13 @@
+{
+  "id": "F14",
+  "app": "expenses",
+  "categories": [
+    "rule_change",
+    "permissions",
+    "conflict_or_ambiguity"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Finance sometimes needs more information about an approved claim before paying it, and wants to send it back to the approving manager with a question.\n\n1. New action `POST /api/claims/{id}/query` with `{\"question\": text}`. Checks in the contract order: caller is not a finance user -> `403`; the claim's status is not `approved`, or the claim has already been queried once (`query_count` >= 1) -> `409`; `question` missing or not non-empty text -> `400`.\n2. Effects: `status` = `submitted`, `decided_at` = `null`, `decided_by` = `null`, `finance_query` = the question, `query_count` = `query_count` + 1. `submitted_at`, `amount` and all other fields stay. Emits an outbox message on channel `claim_queried` with payload `{\"claim\": id, \"manager\": id of the claim employee's current manager (or null), \"question\": text}`. Returns the claim.\n3. The claim then follows the normal flow: the employee's manager approves or rejects it again, and finance cannot pay it until it is approved again (`409`). A successful approve or reject sets `finance_query` back to `null`; `query_count` stays. A claim can be queried at most once.\n4. New claim fields `finance_query` (text or `null`) and `query_count` (integer), part of every claim record, shown as data-fields in the UI and filterable like other fields. They cannot be set by clients (`400` in create/PATCH bodies). New claims and all existing claims start with `null` / `0`.\n5. A refused query changes nothing and emits nothing.\n6. UI: on `/ui/claims/{id}` the `query` form is shown to finance users when query is allowed right now.\n7. Unchanged: everything else in spec/apps/expenses.md.",
+  "superseded_base_tests": []
+}

@@ -1,0 +1,22 @@
+{
+  "id": "F02",
+  "app": "expenses",
+  "categories": [
+    "new_concept",
+    "permissions",
+    "rule_change",
+    "data_migration",
+    "interaction",
+    "sequence"
+  ],
+  "depends_on": "F01",
+  "expect_rejection": false,
+  "brief": "Finance wants to manage expense categories itself, with a maximum amount and a submission deadline per category, and to separate hotel costs into their own category. (This builds on the previous change that introduced `incurred_on`.)\n\n1. New collection `category_policies` with fields `category` (text, required, non-empty, unique), `max_amount` (JSON number, required, > 0) and `submit_within_days` (JSON integer, required, >= 1). Booleans and strings are not numbers. It starts with exactly these records (id: category, max_amount, submit_within_days):\n   1: `travel`, 2500, 60 | 2: `meals`, 400, 30 | 3: `equipment`, 2000, 90 | 4: `other`, 1000, 60 | 5: `lodging`, 1800, 60.\n2. Permissions: every authenticated user may list and read policies (API and UI). Only finance users may create (`POST`), change (`PATCH`) or delete them; anyone else gets `403`, and this `403` comes before any `400` or `409`. On create only `category`, `max_amount` and `submit_within_days` may be sent; on PATCH only `max_amount` and `submit_within_days`. Any other field (including `category` in a PATCH: a policy's category cannot be renamed), invalid values, a duplicate `category` or missing required fields are `400`. Deleting a policy whose `category` is used by any claim (any status) is `409`; otherwise `204`.\n3. Claim categories now come from the policies: a claim's `category` must equal the `category` of an existing policy (exact, case-sensitive), otherwise `400`. The previous fixed list and the global limit of 5000 no longer apply. Instead the claim's `amount` must be > 0 and <= the `max_amount` of its category's policy, otherwise `400`. This maximum is checked when a claim is created, and on PATCH only when the PATCH body contains `amount` or `category` (it is then checked against the claim's resulting amount and category). A PATCH that sends neither (e.g. only `description` or `incurred_on`) does not re-check the maximum.\n4. `submit` gets two more state rules, each `409`, checked after the existing 403 / draft / missing-`incurred_on` checks: (a) the claim's `amount` is greater than the current `max_amount` of its category; (b) the claim is late: the number of days from `incurred_on` to today (date part of `X-Now`) is greater than the category's `submit_within_days` (exactly `submit_within_days` days is still allowed). Policies are read at the moment of each request, so changing a policy affects later submissions of existing drafts. Approve, reject and pay do not check policies.\n5. Existing data: every existing claim whose `description` starts with `Hotel night` gets `category` = `lodging`, whatever its status. No other claim field changes; existing amounts above the new maximums are kept as they are.\n6. UI: `/ui/category_policies` lists all policies; `/ui/category_policies/{id}` shows `category`, `max_amount` and `submit_within_days` as data-fields; `/ui/category_policies/new` is a create form with inputs `category`, `max_amount`, `submit_within_days` for finance users and `403` for everyone else. The `submit` form on `/ui/claims/{id}` is shown only when submit would succeed right now (this now includes rules 4a and 4b).\n7. Unchanged: everything else, including `incurred_on` and the `payment` outbox payload.",
+  "superseded_base_tests": [
+    "test_submit_own_draft",
+    "test_full_claim_lifecycle",
+    "test_ui_claim_detail_draft_owner",
+    "test_claim_fields_match_seed",
+    "test_create_claim_amount_bounds"
+  ]
+}

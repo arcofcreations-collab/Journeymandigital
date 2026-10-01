@@ -1,0 +1,16 @@
+{
+  "id": "F08",
+  "app": "maintenance",
+  "categories": [
+    "permissions",
+    "rule_change",
+    "conflict_or_ambiguity"
+  ],
+  "depends_on": null,
+  "expect_rejection": false,
+  "brief": "Requesters want to withdraw an order they raised even after it has been assigned, and technicians want to be told when assigned work is cancelled.\n\n1. `cancel` rule change: the order's `requested_by` staff member (when not a supervisor) may now cancel it while its status is `open` or `assigned` (previously only `open`); `in_progress`, `completed` and `cancelled` remain `409` for them. Supervisors' rights and everyone else's `403` are unchanged; `reason` is still required non-empty text (`400`), checked after 403 and 409.\n2. When an order in status `assigned` or `in_progress` is cancelled (by anyone allowed), emit one outbox message on the new channel `assignment_cancelled` with payload `{\"work_order\": id, \"technician\": the order's assignee id, \"reason\": the cancel reason}`. Cancelling an `open` order emits nothing. Failed cancels emit nothing.\n3. Cancel still keeps `assignee` and `started_at` as they were.\n4. The spec sentence \"No other operation emits outbox messages\" now also allows `assignment_cancelled`; create, PATCH, start and staff/asset writes still emit nothing.\n5. UI: the `cancel` form on `/ui/work_orders/{id}` follows the new rule (it is shown to the requester on their `assigned` order).\n6. Ambiguity policy: a requester who is also the order's assignee (a technician who raised an order that was assigned to themselves) is covered by rule 1, and the message is emitted with their own id as `technician`.",
+  "superseded_base_tests": [
+    "test_cancel_permissions_and_states",
+    "test_ui_actions_per_role_and_state"
+  ]
+}
