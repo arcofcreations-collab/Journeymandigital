@@ -1,0 +1,427 @@
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # Lending library
+ 
+-A small community library: members, books, loans and holds (queueing for books that are out). Flask 3 + SQLite (stdlib `sqlite3`) +
++A small community library: members, books, loans (with renewals) and holds (queueing for books that are out). Flask 3 + SQLite (stdlib `sqlite3`) +
+ Jinja2. External behaviour follows `spec/CONTRACT.md` and `spec/apps/library.md`.
+ 
+ ## Layout
+@@ -19,7 +19,7 @@
+   validation.py           request-body checks (shape, types, required fields, enums)
+   repository.py           all SQL; returns API-shaped dicts (book_id column -> "book" field)
+   permissions.py          who may do what (pure functions of user + record)
+-  services.py             business rules and actions (borrow, return, hold, cancel); one function per operation
++  services.py             business rules and actions (borrow, return, renew, hold, cancel); one function per operation
+   filters.py              ?field=value list filtering (works on derived fields too)
+   routes_api.py           /api/... JSON endpoints (thin: parse, call service, respond)
+   routes_ui.py            /ui/... HTML pages and their form handlers
+@@ -53,6 +53,7 @@
+ | 14-day loan period, max 3 open loans | `services.LOAN_PERIOD`, `services.MAX_OPEN_LOANS` |
+ | borrow / return | `services.borrow_book`, `services.return_loan` |
+ | outbox message `loan_created` | `services.borrow_book` → `repository.add_outbox_message` |
++| renew a loan (+14 days from `due_at`, max 2, not overdue, nobody waiting) + `loan_renewed` message | `services.renew_loan`, `services._renewal_refusal`, `services.RENEWAL_PERIOD`, `services.MAX_RENEWALS` |
+ | place / cancel a hold, borrowing a reserved book | `services.place_hold`, `services.cancel_hold`, `services.borrow_book` |
+ | hold queue order (placed_at, then id) | `repository.first_waiting_hold` |
+ | next hold becomes ready + `hold_ready` message | `services._serve_next_hold` (after return / cancelling a ready hold) |
+@@ -115,4 +116,7 @@
+   caller active, no open hold on it, not borrowing it); librarians get a member picker. On a reserved
+   book the borrow form is offered to librarians (picker limited to the hold's member) and to the
+   ready hold's member when they could borrow (active, under 3 open loans).
++* Renewals: `POST /api/loans/{id}/renew` checks 404, then 403 (not the borrower or a librarian), then 409
++  (returned, overdue, already renewed twice, or a `waiting` hold on the book), then 400 (non-empty body).
++  The loan detail page offers the `renew` form exactly when that call would succeed for the caller.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/library_app/migrations/0003_loan_renewals.sql
++++ b/library_app/migrations/0003_loan_renewals.sql
+@@ -0,0 +1,3 @@
++-- Loan renewals: each loan counts how often its due date was extended. Existing loans start at 0.
++
++ALTER TABLE loans ADD COLUMN renewals INTEGER NOT NULL DEFAULT 0 CHECK (renewals >= 0);
+--- a/library_app/permissions.py
++++ b/library_app/permissions.py
+@@ -57,6 +57,9 @@
+     return is_librarian(user) or loan["member"] == user["id"]
+ 
+ 
++def can_renew_loan(user, loan):
++    return is_librarian(user) or loan["member"] == user["id"]
++
+ 
+ # --- holds ----------------------------------------------------------------------------
+ 
+--- a/library_app/repository.py
++++ b/library_app/repository.py
+@@ -142,7 +142,7 @@
+ # --- loans ----------------------------------------------------------------------------
+ # ``overdue`` depends on the request's clock, so services add it (see services.present_loan).
+ 
+-_LOAN_SELECT = "SELECT id, book_id, member_id, borrowed_at, due_at, returned_at FROM loans"
++_LOAN_SELECT = "SELECT id, book_id, member_id, borrowed_at, due_at, returned_at, renewals FROM loans"
+ 
+ 
+ def _loan(row):
+@@ -155,6 +155,7 @@
+         "borrowed_at": row["borrowed_at"],
+         "due_at": row["due_at"],
+         "returned_at": row["returned_at"],
++        "renewals": row["renewals"],
+     }
+ 
+ 
+@@ -176,6 +177,11 @@
+ 
+ def mark_loan_returned(loan_id, returned_at):
+     get_db().execute("UPDATE loans SET returned_at = ? WHERE id = ?", (returned_at, loan_id))
++
++
++def renew_loan(loan_id, due_at):
++    """Move the loan's due date to ``due_at`` and count the renewal."""
++    get_db().execute("UPDATE loans SET due_at = ?, renewals = renewals + 1 WHERE id = ?", (due_at, loan_id))
+ 
+ 
+ def member_has_book_on_loan(member_id, book_id):
+@@ -224,6 +230,12 @@
+         f"{_HOLD_SELECT} WHERE book_id = ? AND status = 'waiting' {_QUEUE_ORDER} LIMIT 1", (book_id,)
+     ).fetchone()
+     return _hold(row)
++
++
++def book_has_waiting_hold(book_id):
++    """Is anyone queueing (a ``waiting`` hold) for the book?"""
++    row = get_db().execute("SELECT 1 FROM holds WHERE book_id = ? AND status = 'waiting'", (book_id,)).fetchone()
++    return row is not None
+ 
+ 
+ def member_has_open_hold(member_id, book_id):
+--- a/library_app/routes_api.py
++++ b/library_app/routes_api.py
+@@ -128,6 +128,11 @@
+     return services.return_loan(current_context(), loan_id, _body())
+ 
+ 
++@bp.post("/loans/<int:loan_id>/renew")
++def renew_loan(loan_id):
++    return services.renew_loan(current_context(), loan_id, _body())
++
++
+ # --- holds ----------------------------------------------------------------------------
+ 
+ @bp.get("/holds")
+--- a/library_app/routes_ui.py
++++ b/library_app/routes_ui.py
+@@ -153,6 +153,12 @@
+     return redirect(url_for("ui.show_loan", loan_id=loan_id), 303)
+ 
+ 
++@bp.post("/loans/<int:loan_id>/renew")
++def renew_loan(loan_id):
++    services.renew_loan(current_context(), loan_id, {})
++    return redirect(url_for("ui.show_loan", loan_id=loan_id), 303)
++
++
+ # --- holds ----------------------------------------------------------------------------
+ 
+ @bp.get("/holds")
+--- a/library_app/services.py
++++ b/library_app/services.py
+@@ -4,7 +4,7 @@
+ records. Checks run in the contract's precedence order: the record exists (404), the
+ caller is allowed (403), the record's state allows it (409), the input is valid (400).
+ """
+-from datetime import timedelta
++from datetime import date, timedelta
+ 
+ from . import permissions, repository, validation
+ from .db import transaction
+@@ -13,12 +13,14 @@
+ 
+ LOAN_PERIOD = timedelta(days=14)
+ MAX_OPEN_LOANS = 3
++RENEWAL_PERIOD = timedelta(days=14)  # added to the loan's current due date
++MAX_RENEWALS = 2
+ HOLDABLE_STATUSES = ("on_loan", "reserved")
+ OPEN_HOLD_STATUSES = ("waiting", "ready")
+ 
+ MEMBER_FIELDS = ("id", "username", "name", "role", "active")
+ BOOK_FIELDS = ("id", "title", "author", "isbn", "year", "status")
+-LOAN_FIELDS = ("id", "book", "member", "borrowed_at", "due_at", "returned_at", "overdue")
++LOAN_FIELDS = ("id", "book", "member", "borrowed_at", "due_at", "returned_at", "renewals", "overdue")
+ HOLD_FIELDS = ("id", "book", "member", "placed_at", "status", "ready_at")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+@@ -265,8 +267,11 @@
+ 
+ def present_loan(ctx, loan):
+     """Add the derived ``overdue`` field, which depends on the request's clock."""
+-    overdue = loan["returned_at"] is None and ctx.today.isoformat() > loan["due_at"]
+-    return {**loan, "overdue": overdue}
++    return {**loan, "overdue": _is_overdue(ctx, loan)}
++
++
++def _is_overdue(ctx, loan):
++    return loan["returned_at"] is None and ctx.today.isoformat() > loan["due_at"]
+ 
+ 
+ def list_loans(ctx, filters=None):
+@@ -281,8 +286,8 @@
+     return present_loan(ctx, loan)
+ 
+ 
+-# Loans are created only by borrowing a book and changed only by returning it: nobody may
+-# create, update or delete them directly (an unknown loan id is still a 404 first).
++# Loans are created only by borrowing a book and changed only by returning or renewing it:
++# nobody may create, update or delete them directly (an unknown loan id is still a 404 first).
+ 
+ def ensure_can_create_loan(ctx):
+     """Always refuses (403): loans are created by ``borrow_book``."""
+@@ -296,7 +301,7 @@
+ 
+ def update_loan(ctx, loan_id, data):
+     _load_loan(loan_id)
+-    raise Forbidden("Loans change only through the return action.")
++    raise Forbidden("Loans change only through the return and renew actions.")
+ 
+ 
+ def delete_loan(ctx, loan_id):
+@@ -317,10 +322,42 @@
+     return present_loan(ctx, repository.get_loan(loan_id))
+ 
+ 
++def renew_loan(ctx, loan_id, params):
++    """Extend an open loan's due date by ``RENEWAL_PERIOD`` (from the current due date)."""
++    with transaction():
++        loan = _load_loan(loan_id)
++        if not permissions.can_renew_loan(ctx.user, loan):
++            raise Forbidden("Only the borrower or a librarian can renew a loan.")
++        refusal = _renewal_refusal(ctx, loan)
++        if refusal:
++            raise Conflict(refusal)
++        validation.clean_no_params(params)
++        due_at = (date.fromisoformat(loan["due_at"]) + RENEWAL_PERIOD).isoformat()
++        repository.renew_loan(loan_id, due_at)
++        repository.add_outbox_message("loan_renewed", {"loan": loan_id, "due_at": due_at}, ctx.now_text)
++    return present_loan(ctx, repository.get_loan(loan_id))
++
++
+ def loan_actions(ctx, loan):
++    actions = []
+     if loan["returned_at"] is None and permissions.can_return_loan(ctx.user, loan):
+-        return ["return"]
+-    return []
++        actions.append("return")
++    if permissions.can_renew_loan(ctx.user, loan) and _renewal_refusal(ctx, loan) is None:
++        actions.append("renew")
++    return actions
++
++
++def _renewal_refusal(ctx, loan):
++    """Why ``loan`` may not be renewed right now (a 409 message), or None if it may."""
++    if loan["returned_at"] is not None:
++        return "The loan has already been returned."
++    if _is_overdue(ctx, loan):
++        return "Overdue loans cannot be renewed."
++    if loan["renewals"] >= MAX_RENEWALS:
++        return f"A loan can be renewed at most {MAX_RENEWALS} times."
++    if repository.book_has_waiting_hold(loan["book"]):
++        return "Another member is waiting for this book."
++    return None
+ 
+ 
+ def _load_loan(loan_id):
+--- a/library_app/templates/loans/detail.html
++++ b/library_app/templates/loans/detail.html
+@@ -9,6 +9,7 @@
+   {{ field("borrowed_at", loan.borrowed_at) }}
+   {{ field("due_at", loan.due_at) }}
+   {{ field("returned_at", loan.returned_at) }}
++  {{ field("renewals", loan.renewals) }}
+   {{ field("overdue", loan.overdue) }}
+ </dl>
+ 
+@@ -17,4 +18,9 @@
+   <button type="submit">Return</button>
+ </form>
+ {% endif %}
++{% if "renew" in actions %}
++<form data-action="renew" method="post" action="{{ url_for('ui.renew_loan', loan_id=loan.id) }}">
++  <button type="submit">Renew</button>
++</form>
++{% endif %}
+ {% endblock %}
+--- a/library_app/templates/loans/list.html
++++ b/library_app/templates/loans/list.html
+@@ -3,7 +3,7 @@
+ {% block content %}
+ <h1>Loans</h1>
+ <table>
+-  <thead><tr><th>Loan</th><th>Book</th><th>Member</th><th>Borrowed</th><th>Due</th><th>Returned</th><th>Overdue</th></tr></thead>
++  <thead><tr><th>Loan</th><th>Book</th><th>Member</th><th>Borrowed</th><th>Due</th><th>Returned</th><th>Renewals</th><th>Overdue</th></tr></thead>
+   <tbody>
+   {% for loan in loans %}
+     <tr data-id="{{ loan.id }}">
+@@ -13,6 +13,7 @@
+       <td>{{ loan.borrowed_at }}</td>
+       <td>{{ loan.due_at }}</td>
+       <td>{{ loan.returned_at|display }}</td>
++      <td>{{ loan.renewals }}</td>
+       <td>{{ loan.overdue|display }}</td>
+     </tr>
+   {% endfor %}
+--- a/tests/test_library_basics.py
++++ b/tests/test_library_basics.py
+@@ -43,7 +43,8 @@
+     books = app.get("/api/books", user="ada").json["items"]
+     assert [{k: v for k, v in b.items() if k != "status"} for b in books] == seed["books"]
+     loans = app.get("/api/loans", user="ada").json["items"]
+-    assert [{k: v for k, v in l.items() if k != "overdue"} for l in loans] == seed["loans"]
++    assert [{k: v for k, v in l.items() if k not in ("overdue", "renewals")} for l in loans] == seed["loans"]
++    assert all(l["renewals"] == 0 for l in loans)  # migrated loans have never been renewed
+ 
+ 
+ def test_database_is_fully_migrated(app):
+--- a/tests/test_library_loans.py
++++ b/tests/test_library_loans.py
+@@ -8,7 +8,7 @@
+     assert r.status == 200 and r.json["id"] == 3 and r.json["status"] == "on_loan"
+     loan = app.get("/api/loans?book=3&returned_at=null", user="chen").json["items"][0]
+     assert loan == {"id": 61, "book": 3, "member": 3, "borrowed_at": NOW, "due_at": "2026-03-15",
+-                    "returned_at": None, "overdue": False}
++                    "returned_at": None, "renewals": 0, "overdue": False}
+     outbox = app.get("/api/_outbox", user="dara").json["items"]
+     assert outbox == [{"id": 1, "channel": "loan_created", "payload": {"loan": 61, "book": 3, "member": 3},
+                        "created_at": NOW}]
+--- a/tests/test_library_renewals.py
++++ b/tests/test_library_renewals.py
+@@ -0,0 +1,119 @@
++"""Loan renewals: +14 days from the current due date, at most twice, never overdue or with someone waiting."""
++from accept_client import parse_ui
++
++# Loan 52: chen (member 3) has book 22, due 2026-03-04. Loan 46: jo has book 4, overdue since 2026-02-15.
++# Loan 1 is dara's, already returned.
++T1, DUE, AFTER = "2026-03-01T10:00:00", "2026-03-04T23:59:59", "2026-03-05T00:00:00"
++
++
++def _outbox(app, channel=None):
++    items = app.get("/api/_outbox", user="ada").json["items"]
++    return [m for m in items if channel is None or m["channel"] == channel]
++
++
++def test_borrower_renews_loan(app):
++    r = app.post("/api/loans/52/renew", {}, user="chen", now=T1)
++    assert r.status == 200
++    assert r.json == {"id": 52, "book": 22, "member": 3, "borrowed_at": "2026-02-18T16:00:00",
++                      "due_at": "2026-03-18", "returned_at": None, "renewals": 1, "overdue": False}
++    assert _outbox(app) == [{"id": 1, "channel": "loan_renewed", "payload": {"loan": 52, "due_at": "2026-03-18"},
++                             "created_at": T1}]
++
++
++def test_new_loans_start_with_no_renewals(app):
++    app.post("/api/books/3/borrow", {}, user="chen", now=T1)
++    assert app.get("/api/loans/61", user="chen").json["renewals"] == 0
++    assert [l["id"] for l in app.get("/api/loans?renewals=0&member=3", user="ada").json["items"]][-1] == 61
++
++
++def test_renewal_extends_from_due_date_and_is_limited_to_two(app):
++    assert app.post("/api/loans/52/renew", {}, user="chen", now=T1).json["due_at"] == "2026-03-18"
++    r = app.post("/api/loans/52/renew", {}, user="ada", now=T1)  # a librarian may renew too
++    assert r.status == 200 and r.json["due_at"] == "2026-04-01" and r.json["renewals"] == 2
++    assert app.post("/api/loans/52/renew", {}, user="chen", now=T1).status == 409
++    assert app.get("/api/loans/52", user="chen").json["due_at"] == "2026-04-01"
++    assert [m["payload"]["due_at"] for m in _outbox(app)] == ["2026-03-18", "2026-04-01"]
++    assert app.get("/api/loans?renewals=2", user="ada").json["items"][0]["id"] == 52
++
++
++def test_renewing_on_the_due_date_is_allowed_but_not_after(app):
++    assert app.post("/api/loans/52/renew", {}, user="chen", now=AFTER).status == 409
++    assert app.post("/api/loans/52/renew", {}, user="chen", now=DUE).status == 200
++    assert app.post("/api/loans/46/renew", {}, user="jo", now=T1).status == 409  # overdue
++    assert len(_outbox(app)) == 1
++
++
++def test_overdue_uses_the_extended_due_date(app):
++    app.post("/api/loans/52/renew", {}, user="chen", now=T1)
++    assert app.get("/api/loans/52", user="chen", now="2026-03-10T00:00:00").json["overdue"] is False
++    assert app.get("/api/loans/52", user="chen", now="2026-03-18T23:59:59").json["overdue"] is False
++    assert app.get("/api/loans/52", user="chen", now="2026-03-19T00:00:00").json["overdue"] is True
++    assert app.post("/api/loans/52/renew", {}, user="chen", now="2026-03-10T00:00:00").status == 200
++    assert app.get("/api/loans/52", user="chen", now="2026-03-19T00:00:00").json["overdue"] is False
++
++
++def test_returned_loan_cannot_be_renewed(app):
++    assert app.post("/api/loans/1/renew", {}, user="dara").status == 409
++    app.post("/api/loans/52/return", {}, user="chen", now=T1)
++    assert app.post("/api/loans/52/renew", {}, user="chen", now=T1).status == 409
++
++
++def test_waiting_hold_blocks_renewal_and_is_untouched(app):
++    app.post("/api/books/22/hold", {}, user="dara", now=T1)
++    assert app.post("/api/loans/52/renew", {}, user="chen", now=T1).status == 409
++    assert app.post("/api/loans/52/renew", {}, user="ada", now=T1).status == 409
++    assert app.get("/api/loans/52", user="chen").json["due_at"] == "2026-03-04"
++    assert _outbox(app) == []
++    app.post("/api/holds/1/cancel", {}, user="dara")
++    assert app.post("/api/loans/52/renew", {}, user="chen", now=T1).status == 200
++    assert app.get("/api/holds/1", user="dara").json["status"] == "cancelled"
++
++
++def test_renewal_does_not_change_holds(app):
++    app.post("/api/books/4/hold", {}, user="chen", now=T1)  # a hold on another book
++    assert app.post("/api/loans/52/renew", {}, user="chen", now=T1).status == 200
++    assert app.get("/api/holds", user="ada").json["items"] == [
++        {"id": 1, "book": 4, "member": 3, "placed_at": T1, "status": "waiting", "ready_at": None}]
++
++
++def test_renew_permissions_and_precedence(app):
++    assert app.post("/api/loans/52/renew", {}, user="dara", now=T1).status == 403
++    assert app.post("/api/loans/46/renew", {}, user="dara", now=T1).status == 403  # 403 beats 409
++    assert app.post("/api/loans/999/renew", {}, user="dara", now=T1).status == 404
++    assert app.post("/api/loans/46/renew", {"days": 7}, user="ada", now=T1).status == 409  # 409 beats 400
++    assert app.post("/api/loans/52/renew", {"days": 7}, user="chen", now=T1).status == 400
++    assert app.post("/api/loans/52/renew", None, user=None, now=T1).status == 401
++    assert app.get("/api/loans/52", user="chen").json["renewals"] == 0
++    assert _outbox(app) == []
++
++
++def test_loans_still_cannot_be_patched(app):
++    assert app.patch("/api/loans/52", {"renewals": 2}, user="ada").status == 403
++    assert app.patch("/api/loans/52", {"due_at": "2030-01-01"}, user="chen").status == 403
++
++
++def test_loan_page_shows_renew_form_only_when_allowed(app):
++    page = parse_ui(app.get("/ui/loans/52", user="chen", now=T1).text)
++    assert page.fields["renewals"] == "0" and page.actions == ["return", "renew"]
++    assert parse_ui(app.get("/ui/loans/52", user="ada", now=T1).text).actions == ["return", "renew"]
++    assert parse_ui(app.get("/ui/loans/52", user="chen", now=AFTER).text).actions == ["return"]  # overdue
++    assert parse_ui(app.get("/ui/loans/46", user="jo", now=T1).text).actions == ["return"]  # overdue
++    assert parse_ui(app.get("/ui/loans/1", user="ada", now=T1).text).actions == []  # returned
++    app.post("/api/books/22/hold", {}, user="dara", now=T1)
++    assert parse_ui(app.get("/ui/loans/52", user="chen", now=T1).text).actions == ["return"]  # someone waiting
++    app.post("/api/holds/1/cancel", {}, user="dara")
++    app.post("/api/loans/52/renew", {}, user="chen", now=T1)
++    app.post("/api/loans/52/renew", {}, user="chen", now=T1)
++    page = parse_ui(app.get("/ui/loans/52", user="chen", now=T1).text)
++    assert page.fields["renewals"] == "2" and page.fields["due_at"] == "2026-04-01"
++    assert page.actions == ["return"]  # renewed twice
++
++
++def test_renew_form_posts_through_service(app):
++    from test_library_ui import _post_form
++
++    code, headers, _ = _post_form(app, "/ui/loans/52/renew", {}, "chen")
++    assert code == 303 and headers["Location"].endswith("/ui/loans/52")
++    assert app.get("/api/loans/52", user="chen").json["due_at"] == "2026-03-18"
++    assert _post_form(app, "/ui/loans/52/renew", {}, "dara")[0] == 403
++    assert _post_form(app, "/ui/loans/1/renew", {}, "dara")[0] == 409
+--- a/tests/test_library_ui.py
++++ b/tests/test_library_ui.py
+@@ -36,7 +36,7 @@
+ def test_loan_detail_shows_return_only_when_allowed(app):
+     page = parse_ui(app.get("/ui/loans/52", user="chen").text)
+     assert page.fields["member"] == "3" and page.fields["returned_at"] == "" and page.fields["overdue"] == "false"
+-    assert page.actions == ["return"]
++    assert page.actions == ["return", "renew"]  # not overdue, nobody waiting (see test_library_renewals)
+     assert parse_ui(app.get("/ui/loans/1", user="ada").text).actions == []  # already returned
+     assert app.get("/ui/loans/46", user="chen").status == 403
+     assert app.get("/ui/loans/999", user="chen").status == 404

@@ -1,0 +1,218 @@
+request: "Claim history: new read-only collection claim_events recording every successful submit/approve/reject/pay (claim, action, actor, at, from_status, to_status), readable by exactly those who can read the claim, never creatable/editable/deletable; backfill history of existing claims."
+interpretation: "Add entity claim_events (claim ref claims required, action enum submit|approve|reject|pay required, actor ref employees, at datetime, from_status/to_status enum of claim statuses required). Read rule mirrors the claims read rule via record.claim; create/update/delete rules are False (403 for everyone). Each of the four claim actions gets a prepended create effect (from_status = record.status before the set, to_status = the action's target status, actor = user, at = now); effects are atomic, so a failed action records nothing. Backfill: one event per existing claim fact, inserted grouped by claim id in order submit, decision, pay (pay with actor/at null), so backfilled ids precede all later events. No emit is added."
+ops:
+  - add_entity:
+      name: claim_events
+      fields:
+        claim: {type: ref, ref: claims, required: true, system: true}
+        action: {type: enum, values: [submit, approve, reject, pay], required: true, system: true}
+        actor: {type: ref, ref: employees, system: true}
+        at: {type: datetime, system: true}
+        from_status: {type: enum, values: [draft, submitted, approved, rejected, paid], required: true, system: true}
+        to_status: {type: enum, values: [draft, submitted, approved, rejected, paid], required: true, system: true}
+      rules:
+        read: "record.claim.employee == user or record.claim.employee.manager == user or user.role == 'finance'"
+        create: "False"
+        update: "False"
+        delete: "False"
+  - change_action:
+      entity: claims
+      name: submit
+      prepend_effects:
+        - create: claim_events
+          values: {claim: record, action: "'submit'", actor: user, at: now, from_status: record.status, to_status: "'submitted'"}
+  - change_action:
+      entity: claims
+      name: approve
+      prepend_effects:
+        - create: claim_events
+          values: {claim: record, action: "'approve'", actor: user, at: now, from_status: record.status, to_status: "'approved'"}
+  - change_action:
+      entity: claims
+      name: reject
+      prepend_effects:
+        - create: claim_events
+          values: {claim: record, action: "'reject'", actor: user, at: now, from_status: record.status, to_status: "'rejected'"}
+  - change_action:
+      entity: claims
+      name: pay
+      prepend_effects:
+        - create: claim_events
+          values: {claim: record, action: "'pay'", actor: user, at: now, from_status: record.status, to_status: "'paid'"}
+  - add_records:
+      entity: claim_events
+      records:
+        - {"claim": 2, "action": "submit", "actor": 11, "at": "2026-01-25T12:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 3, "action": "submit", "actor": 6, "at": "2026-02-24T14:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 4, "action": "submit", "actor": 10, "at": "2026-02-01T10:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 4, "action": "approve", "actor": 3, "at": "2026-02-03T08:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 5, "action": "submit", "actor": 14, "at": "2026-02-02T15:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 6, "action": "submit", "actor": 11, "at": "2026-02-09T13:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 6, "action": "approve", "actor": 4, "at": "2026-02-11T11:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 6, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 7, "action": "submit", "actor": 14, "at": "2026-01-28T11:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 7, "action": "reject", "actor": 4, "at": "2026-01-30T09:00:00", "from_status": "submitted", "to_status": "rejected"}
+        - {"claim": 10, "action": "submit", "actor": 9, "at": "2026-01-17T20:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 10, "action": "reject", "actor": 2, "at": "2026-01-19T18:00:00", "from_status": "submitted", "to_status": "rejected"}
+        - {"claim": 11, "action": "submit", "actor": 15, "at": "2026-01-14T10:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 11, "action": "approve", "actor": 2, "at": "2026-01-16T08:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 11, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 12, "action": "submit", "actor": 9, "at": "2026-02-24T19:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 12, "action": "approve", "actor": 2, "at": "2026-02-26T17:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 13, "action": "submit", "actor": 13, "at": "2026-01-05T14:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 13, "action": "approve", "actor": 3, "at": "2026-01-07T12:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 14, "action": "submit", "actor": 5, "at": "2026-02-11T13:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 14, "action": "reject", "actor": 4, "at": "2026-02-13T11:00:00", "from_status": "submitted", "to_status": "rejected"}
+        - {"claim": 15, "action": "submit", "actor": 14, "at": "2026-01-22T13:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 16, "action": "submit", "actor": 13, "at": "2026-01-22T14:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 16, "action": "approve", "actor": 3, "at": "2026-01-24T12:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 16, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 17, "action": "submit", "actor": 11, "at": "2026-01-18T19:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 17, "action": "approve", "actor": 4, "at": "2026-01-20T17:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 17, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 18, "action": "submit", "actor": 4, "at": "2026-02-18T15:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 18, "action": "approve", "actor": 2, "at": "2026-02-20T13:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 21, "action": "submit", "actor": 11, "at": "2026-01-26T10:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 21, "action": "approve", "actor": 4, "at": "2026-01-28T08:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 22, "action": "submit", "actor": 8, "at": "2026-01-09T15:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 22, "action": "approve", "actor": 4, "at": "2026-01-11T13:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 23, "action": "submit", "actor": 11, "at": "2026-02-21T11:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 23, "action": "reject", "actor": 4, "at": "2026-02-23T09:00:00", "from_status": "submitted", "to_status": "rejected"}
+        - {"claim": 24, "action": "submit", "actor": 12, "at": "2026-01-19T19:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 24, "action": "approve", "actor": 2, "at": "2026-01-21T17:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 24, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 25, "action": "submit", "actor": 15, "at": "2026-02-13T15:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 26, "action": "submit", "actor": 7, "at": "2026-01-28T11:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 26, "action": "approve", "actor": 3, "at": "2026-01-30T09:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 26, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 27, "action": "submit", "actor": 13, "at": "2026-01-23T19:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 27, "action": "approve", "actor": 3, "at": "2026-01-25T17:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 28, "action": "submit", "actor": 11, "at": "2026-01-11T19:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 30, "action": "submit", "actor": 10, "at": "2026-02-08T11:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 31, "action": "submit", "actor": 14, "at": "2026-01-10T16:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 31, "action": "approve", "actor": 4, "at": "2026-01-12T14:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 31, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 32, "action": "submit", "actor": 10, "at": "2026-02-05T14:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 32, "action": "approve", "actor": 3, "at": "2026-02-07T12:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 32, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 33, "action": "submit", "actor": 5, "at": "2026-01-07T15:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 33, "action": "approve", "actor": 4, "at": "2026-01-09T13:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 34, "action": "submit", "actor": 9, "at": "2026-01-16T16:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 34, "action": "approve", "actor": 2, "at": "2026-01-18T14:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 35, "action": "submit", "actor": 12, "at": "2026-01-30T12:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 35, "action": "reject", "actor": 2, "at": "2026-02-01T10:00:00", "from_status": "submitted", "to_status": "rejected"}
+        - {"claim": 36, "action": "submit", "actor": 11, "at": "2026-01-24T17:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 37, "action": "submit", "actor": 13, "at": "2026-02-02T17:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 37, "action": "approve", "actor": 3, "at": "2026-02-04T15:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 38, "action": "submit", "actor": 10, "at": "2026-01-23T11:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 38, "action": "approve", "actor": 3, "at": "2026-01-25T09:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 40, "action": "submit", "actor": 14, "at": "2026-01-12T12:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 41, "action": "submit", "actor": 11, "at": "2026-01-29T20:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 41, "action": "approve", "actor": 4, "at": "2026-01-31T18:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 42, "action": "submit", "actor": 8, "at": "2026-02-15T12:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 42, "action": "approve", "actor": 4, "at": "2026-02-17T10:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 42, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 43, "action": "submit", "actor": 4, "at": "2026-02-19T14:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 44, "action": "submit", "actor": 5, "at": "2026-01-17T16:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 44, "action": "approve", "actor": 4, "at": "2026-01-19T14:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 45, "action": "submit", "actor": 5, "at": "2026-01-14T17:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 45, "action": "approve", "actor": 4, "at": "2026-01-16T15:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 45, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 47, "action": "submit", "actor": 10, "at": "2026-02-21T20:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 47, "action": "approve", "actor": 3, "at": "2026-02-23T18:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 47, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 48, "action": "submit", "actor": 8, "at": "2026-01-06T19:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 48, "action": "approve", "actor": 4, "at": "2026-01-08T17:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 48, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 49, "action": "submit", "actor": 11, "at": "2026-01-28T10:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 49, "action": "approve", "actor": 4, "at": "2026-01-30T08:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 49, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 50, "action": "submit", "actor": 4, "at": "2026-02-07T12:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 50, "action": "approve", "actor": 2, "at": "2026-02-09T10:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 51, "action": "submit", "actor": 5, "at": "2026-01-31T16:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 51, "action": "approve", "actor": 4, "at": "2026-02-02T14:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 51, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 52, "action": "submit", "actor": 4, "at": "2026-02-03T19:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 53, "action": "submit", "actor": 15, "at": "2026-01-08T15:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 55, "action": "submit", "actor": 9, "at": "2026-01-22T10:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 55, "action": "approve", "actor": 2, "at": "2026-01-24T08:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 55, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 56, "action": "submit", "actor": 12, "at": "2026-01-08T18:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 56, "action": "approve", "actor": 2, "at": "2026-01-10T16:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 56, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 57, "action": "submit", "actor": 7, "at": "2026-01-24T19:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 57, "action": "approve", "actor": 3, "at": "2026-01-26T17:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 57, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 58, "action": "submit", "actor": 7, "at": "2026-02-07T13:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 59, "action": "submit", "actor": 4, "at": "2026-01-28T12:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 59, "action": "approve", "actor": 2, "at": "2026-01-30T10:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 60, "action": "submit", "actor": 11, "at": "2026-01-08T10:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 60, "action": "reject", "actor": 4, "at": "2026-01-10T08:00:00", "from_status": "submitted", "to_status": "rejected"}
+        - {"claim": 61, "action": "submit", "actor": 8, "at": "2026-02-11T14:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 61, "action": "approve", "actor": 4, "at": "2026-02-13T12:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 62, "action": "submit", "actor": 13, "at": "2026-02-23T16:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 63, "action": "submit", "actor": 10, "at": "2026-02-12T13:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 64, "action": "submit", "actor": 11, "at": "2026-01-17T15:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 64, "action": "approve", "actor": 4, "at": "2026-01-19T13:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 64, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 65, "action": "submit", "actor": 10, "at": "2026-02-21T17:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 65, "action": "approve", "actor": 3, "at": "2026-02-23T15:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 66, "action": "submit", "actor": 6, "at": "2026-01-24T19:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 66, "action": "approve", "actor": 2, "at": "2026-01-26T17:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 67, "action": "submit", "actor": 10, "at": "2026-02-24T11:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 68, "action": "submit", "actor": 12, "at": "2026-02-15T14:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 68, "action": "approve", "actor": 2, "at": "2026-02-17T12:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 69, "action": "submit", "actor": 10, "at": "2026-02-18T14:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 69, "action": "approve", "actor": 3, "at": "2026-02-20T12:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 70, "action": "submit", "actor": 13, "at": "2026-01-09T13:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 70, "action": "approve", "actor": 3, "at": "2026-01-11T11:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 70, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 71, "action": "submit", "actor": 9, "at": "2026-01-10T15:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 71, "action": "approve", "actor": 2, "at": "2026-01-12T13:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 71, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 72, "action": "submit", "actor": 7, "at": "2026-02-14T10:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 74, "action": "submit", "actor": 15, "at": "2026-02-20T10:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 74, "action": "approve", "actor": 2, "at": "2026-02-22T08:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 76, "action": "submit", "actor": 13, "at": "2026-02-08T10:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 76, "action": "approve", "actor": 3, "at": "2026-02-10T08:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 77, "action": "submit", "actor": 7, "at": "2026-01-15T15:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 77, "action": "approve", "actor": 3, "at": "2026-01-17T13:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 77, "action": "pay", "actor": null, "at": null, "from_status": "approved", "to_status": "paid"}
+        - {"claim": 78, "action": "submit", "actor": 13, "at": "2026-01-19T17:00:00", "from_status": "draft", "to_status": "submitted"}
+        - {"claim": 78, "action": "approve", "actor": 3, "at": "2026-01-21T15:00:00", "from_status": "submitted", "to_status": "approved"}
+        - {"claim": 80, "action": "submit", "actor": 11, "at": "2026-02-07T12:00:00", "from_status": "draft", "to_status": "submitted"}
+expect:
+  - name: "backfilled history count and order"
+    steps:
+      - {as: fiona, do: "GET /api/claim_events", count: 139}
+      - {as: fiona, do: "GET /api/claim_events?claim=6", count: 3}
+      - {as: fiona, do: "GET /api/claim_events/8", status: 200, json: {claim: 6, action: pay, actor: null, at: null, from_status: approved, to_status: paid}}
+      - {as: fiona, do: "GET /api/claim_events/7", status: 200, json: {claim: 6, action: approve, actor: 4, at: "2026-02-11T11:00:00"}}
+  - name: "events readable exactly like their claim"
+    steps:
+      - {as: nadia, do: "GET /api/claim_events/3", status: 200}
+      - {as: uma, do: "GET /api/claim_events/3", status: 200}
+      - {as: priya, do: "GET /api/claim_events/3", status: 403}
+      - {as: priya, do: "GET /api/claim_events?claim=4", count: 0}
+  - name: "approve, pay, reject record events; failed reject records nothing"
+    steps:
+      - {as: nadia, do: "POST /api/claims/4/approve", body: {}, status: 409}
+      - {as: fiona, do: "POST /api/claims/4/pay", body: {}, now: "2026-10-01T11:00:00", status: 200}
+      - {as: fiona, do: "GET /api/claim_events/140", status: 200, json: {claim: 4, action: pay, actor: 1, at: "2026-10-01T11:00:00", from_status: approved, to_status: paid}}
+      - {as: fiona, do: "GET /api/_outbox", count: 1}
+      - {as: omar, do: "POST /api/claims/2/reject", body: {}, status: 400}
+      - {as: omar, do: "POST /api/claims/2/reject", body: {reason: "no"}, now: "2026-10-01T12:00:00", status: 200}
+      - {as: fiona, do: "GET /api/claim_events/141", status: 200, json: {claim: 2, action: reject, actor: 4, from_status: submitted, to_status: rejected}}
+      - {as: fiona, do: "GET /api/claim_events", count: 141}
+  - {as: fiona, do: "POST /api/claim_events", body: {}, status: 403}
+  - {as: fiona, do: "PATCH /api/claim_events/1", body: {}, status: 403}
+  - {as: fiona, do: "DELETE /api/claim_events/1", status: 403}
+  - name: "submit records one event"
+    steps:
+      - {as: wen, do: "POST /api/claims/1/submit", body: {}, now: "2026-10-01T10:00:00", status: 200}
+      - {as: wen, do: "GET /api/claim_events?claim=1", count: 1}
+      - {as: fiona, do: "GET /api/claim_events/140", status: 200, json: {id: 140, claim: 1, action: submit, actor: 12, at: "2026-10-01T10:00:00", from_status: draft, to_status: submitted}}
+  - name: "failed action records nothing"
+    steps:
+      - {as: wen, do: "POST /api/claims/2/submit", body: {}, status: 403}
+      - {as: fiona, do: "GET /api/claim_events?claim=2", count: 1}

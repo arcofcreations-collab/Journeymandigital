@@ -1,0 +1,56 @@
+--- a/changes/0002-borrowing-restrictions.yaml
++++ b/changes/0002-borrowing-restrictions.yaml
+@@ -0,0 +1,53 @@
++request: "Borrowing restrictions: (1) a member who has an overdue loan (unreturned loan whose due_at is before today) cannot borrow: POST /api/books/{id}/borrow -> 409; returning the overdue loan(s) lifts the block. (2) New releases have a shorter loan period: a book whose year is the current year or the previous year is lent for 7 days (due_at = today + 7 days); all other books, including books without a year, keep 14 days. Today/current year come from the request time (X-Now, UTC). A loan due today is not overdue. The block applies equally when a librarian lends to the member; no override. Returns are never blocked. Existing loans keep their due dates. 3-loan limit, inactive members and the loan_created message are unchanged."
++interpretation: "Extend the borrow guard so the borrowing member (params.member or user) must have no unreturned loan with due_at < today (same definition as the overdue field), giving 409 for members and librarian lending alike. The loan's due_at becomes today + 7 days when the book's year equals today.year or today.year - 1, otherwise today + 14 days (null year -> 14). Return action untouched; no existing loan data is modified."
++ops:
++  - change_action:
++      entity: books
++      name: borrow
++      guard: "record.status == 'available' and (params.member or user).active and count(loans, member=(params.member or user), returned_at=None) < 3 and not any(l.member == (params.member or user) and l.returned_at is None and l.due_at < today for l in loans)"
++      effects:
++        - {create: loans, as: loan, values: {book: record, member: "params.member or user", borrowed_at: now, due_at: "today + days(7) if record.year is not None and (record.year == today.year or record.year == today.year - 1) else today + days(14)"}}
++        - {emit: loan_created, payload: {loan: loan, book: record, member: "params.member or user"}}
++expect:
++  # overdue member is blocked (jo has loans 46,50 due 2026-02-15)
++  - {as: jo, do: "POST /api/books/2/borrow", body: {}, now: "2026-03-01T10:00:00", status: 409}
++  # librarian lending to an overdue member is blocked too
++  - {as: ada, do: "POST /api/books/2/borrow", body: {member: 10}, now: "2026-03-01T10:00:00", status: 409}
++  # a loan due today is not overdue: chen's loan 52 is due 2026-03-04
++  - {as: chen, do: "POST /api/books/2/borrow", body: {}, now: "2026-03-04T23:00:00", status: 200}
++  - {as: chen, do: "POST /api/books/2/borrow", body: {}, now: "2026-03-05T00:00:00", status: 409}
++  # returns are never blocked, and returning all overdue loans lifts the block
++  - name: "returning overdue loans lifts the block"
++    steps:
++      - {as: jo, do: "POST /api/loans/46/return", body: {}, now: "2026-03-01T10:00:00", status: 200}
++      - {as: jo, do: "POST /api/books/2/borrow", body: {}, now: "2026-03-01T10:00:00", status: 409}
++      - {as: jo, do: "POST /api/loans/50/return", body: {}, now: "2026-03-01T10:00:00", status: 200}
++      - {as: jo, do: "POST /api/books/2/borrow", body: {}, now: "2026-03-01T10:00:00", status: 200, json: {status: on_loan}}
++      - {as: ada, do: "GET /api/loans/61", now: "2026-03-01T10:00:00", status: 200, json: {book: 2, member: 10, due_at: "2026-03-15", returned_at: null, overdue: false}}
++  # non-new book keeps 14 days
++  - name: "old book is lent for 14 days"
++    steps:
++      - {as: chen, do: "POST /api/books/2/borrow", body: {}, now: "2026-03-01T10:00:00", status: 200}
++      - {as: ada, do: "GET /api/loans?book=2&member=3", count: 1, json: {items: [{due_at: "2026-03-15", borrowed_at: "2026-03-01T10:00:00"}]}}
++  # book without year keeps 14 days
++  - name: "book without year is lent for 14 days"
++    steps:
++      - {as: chen, do: "POST /api/books/19/borrow", body: {}, now: "2026-03-01T10:00:00", status: 200}
++      - {as: ada, do: "GET /api/loans/61", now: "2026-03-01T10:00:00", status: 200, json: {book: 19, member: 3, due_at: "2026-03-15"}}
++  # 2024 book is a new release in 2025 (previous year)
++  - name: "previous-year book is lent for 7 days"
++    steps:
++      - {as: chen, do: "POST /api/books/32/borrow", body: {}, now: "2025-06-01T10:00:00", status: 200}
++      - {as: ada, do: "GET /api/loans?book=32&member=3", count: 1, json: {items: [{due_at: "2025-06-08"}]}}
++  # 2024 book is no longer a new release in 2026
++  - name: "two-year-old book is lent for 14 days"
++    steps:
++      - {as: chen, do: "POST /api/books/32/borrow", body: {}, now: "2026-03-01T10:00:00", status: 200}
++      - {as: ada, do: "GET /api/loans?book=32&member=3", count: 1, json: {items: [{due_at: "2026-03-15"}]}}
++  # current-year book, librarian lending, outbox unchanged
++  - name: "current-year book lent by librarian for 7 days"
++    steps:
++      - {as: ada, do: "POST /api/books", body: {title: "New", author: "A", isbn: "NEW-1", year: 2026}, now: "2026-03-01T10:00:00", status: 201}
++      - {as: ada, do: "POST /api/books/41/borrow", body: {member: 3}, now: "2026-03-01T10:00:00", status: 200}
++      - {as: ada, do: "GET /api/loans?book=41", count: 1, json: {items: [{due_at: "2026-03-08", member: 3}]}}
++      - {as: ada, do: "GET /api/_outbox?channel=loan_created&payload=", status: 200}

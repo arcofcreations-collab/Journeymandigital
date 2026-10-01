@@ -1,0 +1,203 @@
+--- a/README.md
++++ b/README.md
+@@ -50,7 +50,8 @@
+ |---|---|
+ | book `status` (on_loan/available) | `repository._BOOK_SELECT` (SQL `EXISTS`) |
+ | loan `overdue` (depends on X-Now) | `services.present_loan` |
+-| 14-day loan period, max 3 open loans | `services.LOAN_PERIOD`, `services.MAX_OPEN_LOANS` |
++| loan period: 14 days, 7 for new releases (`year` = current or previous year of X-Now) | `services.loan_period` (`LOAN_PERIOD`, `NEW_RELEASE_LOAN_PERIOD`) |
++| who may borrow: active, no overdue loan, max 3 open loans | `services._ensure_may_borrow` (`MAX_OPEN_LOANS`, `repository.has_overdue_loans`) |
+ | borrow / return | `services.borrow_book`, `services.return_loan` |
+ | outbox message `loan_created` | `services.borrow_book` → `repository.add_outbox_message` |
+ | who can read/edit what | `permissions.py` |
+@@ -104,5 +105,8 @@
+ * Deleting a member who has loans → 409 (mirrors the book rule; loans keep their history).
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the
+   heading. The borrow form is shown when the book is available and (for members) the caller
+-  is active with fewer than 3 open loans; librarians get a member picker.
++  is active, has no overdue loan and has fewer than 3 open loans; librarians get a member picker.
++* A member with an overdue loan (unreturned, `due_at` before X-Now's date) cannot borrow (409),
++  also when a librarian lends to them; returning the overdue loans lifts the block. A loan due
++  today is not overdue. Books whose `year` is after the current year are not new releases (14 days).
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/library_app/repository.py
++++ b/library_app/repository.py
+@@ -69,6 +69,13 @@
+     return get_db().execute(
+         "SELECT COUNT(*) FROM loans WHERE member_id = ? AND returned_at IS NULL", (member_id,)
+     ).fetchone()[0]
++
++
++def has_overdue_loans(member_id, today):
++    """True if the member has an unreturned loan due before ``today`` (ISO date); see services.present_loan."""
++    return get_db().execute(
++        "SELECT 1 FROM loans WHERE member_id = ? AND returned_at IS NULL AND due_at < ?", (member_id, today)
++    ).fetchone() is not None
+ 
+ 
+ # --- books ----------------------------------------------------------------------------
+--- a/library_app/services.py
++++ b/library_app/services.py
+@@ -12,6 +12,7 @@
+ from .filters import apply_filters
+ 
+ LOAN_PERIOD = timedelta(days=14)
++NEW_RELEASE_LOAN_PERIOD = timedelta(days=7)  # books from the current or previous year
+ MAX_OPEN_LOANS = 3
+ 
+ MEMBER_FIELDS = ("id", "username", "name", "role", "active")
+@@ -146,10 +147,9 @@
+         borrower = ctx.user if member_id is None else repository.get_member(member_id)
+         if borrower is None:
+             raise ValidationError("No such member.", {"member": "no such member"})
+-        _ensure_may_borrow(borrower)
+-        loan_id = repository.insert_loan(
+-            book_id, borrower["id"], borrowed_at=ctx.now_text, due_at=(ctx.today + LOAN_PERIOD).isoformat()
+-        )
++        _ensure_may_borrow(borrower, ctx.today)
++        due_at = ctx.today + loan_period(book, ctx.today)
++        loan_id = repository.insert_loan(book_id, borrower["id"], borrowed_at=ctx.now_text, due_at=due_at.isoformat())
+         repository.add_outbox_message(
+             "loan_created", {"loan": loan_id, "book": book_id, "member": borrower["id"]}, ctx.now_text
+         )
+@@ -162,7 +162,7 @@
+         return []
+     if permissions.is_librarian(ctx.user):
+         return ["borrow"]  # librarians can lend to any eligible member
+-    return ["borrow"] if _may_borrow(ctx.user) else []
++    return ["borrow"] if _may_borrow(ctx.user, ctx.today) else []
+ 
+ 
+ def _load_book(book_id):
+@@ -177,13 +177,27 @@
+         raise ValidationError("ISBN already in use.", {"isbn": "already in use"})
+ 
+ 
+-def _may_borrow(member):
+-    return member["active"] and repository.count_open_loans(member["id"]) < MAX_OPEN_LOANS
+-
+-
+-def _ensure_may_borrow(member):
++def loan_period(book, today):
++    """New releases (published this year or last year) are lent for 7 days, all others for 14."""
++    year = book["year"]
++    if year is not None and today.year - 1 <= year <= today.year:
++        return NEW_RELEASE_LOAN_PERIOD
++    return LOAN_PERIOD
++
++
++def _may_borrow(member, today):
++    try:
++        _ensure_may_borrow(member, today)
++    except Conflict:
++        return False
++    return True
++
++
++def _ensure_may_borrow(member, today):
+     if not member["active"]:
+         raise Conflict("Inactive members cannot borrow.")
++    if repository.has_overdue_loans(member["id"], today.isoformat()):
++        raise Conflict("Members with overdue loans cannot borrow until they are returned.")
+     if repository.count_open_loans(member["id"]) >= MAX_OPEN_LOANS:
+         raise Conflict(f"Members may have at most {MAX_OPEN_LOANS} unreturned loans.")
+ 
+--- a/tests/test_library_loans.py
++++ b/tests/test_library_loans.py
+@@ -23,9 +23,82 @@
+ 
+ 
+ def test_member_with_three_open_loans_cannot_borrow(app):
+-    assert app.post("/api/books/3/borrow", {}, user="jo").status == 409
+-    assert app.post("/api/books/3/borrow", {}, user="ivan").status == 200  # ivan has 2
+-    assert app.post("/api/books/2/borrow", {}, user="ivan").status == 409
++    assert app.post("/api/books/3/borrow", {}, user="jo", now=NOW).status == 409
++    assert app.post("/api/books/2/borrow", {}, user="chen", now=NOW).status == 200  # chen had 1
++    assert app.post("/api/books/3/borrow", {}, user="chen", now=NOW).status == 200
++    assert app.post("/api/books/6/borrow", {}, user="chen", now=NOW).status == 409
++
++
++# --- borrowing restrictions: overdue loans block borrowing; new releases lend for 7 days ---
++
++def _open_loan(app, book, now=NOW):
++    return app.get(f"/api/loans?book={book}&returned_at=null", user="ada", now=now).json["items"][0]
++
++
++def test_member_with_overdue_loan_cannot_borrow(app):
++    # gus has one open loan (47), due 2026-02-15: overdue on 2026-03-01.
++    r = app.post("/api/books/3/borrow", {}, user="gus", now=NOW)
++    assert r.status == 409 and r.json["error"] == "conflict"
++    assert app.get("/api/_outbox", user="gus").json["items"] == []
++    assert app.get("/api/books/3", user="gus").json["status"] == "available"
++
++
++def test_loan_due_today_does_not_block(app):
++    # chen's loan 52 is due 2026-03-04: not overdue that day, overdue the next.
++    assert app.post("/api/books/3/borrow", {}, user="chen", now="2026-03-04T23:59:59").status == 200
++    assert app.post("/api/books/2/borrow", {}, user="chen", now="2026-03-05T00:00:00").status == 409
++
++
++def test_returning_overdue_loans_lifts_the_block(app):
++    # ivan has loan 48 (overdue) and 55 (due 2026-03-04, not yet overdue).
++    assert app.post("/api/books/3/borrow", {}, user="ivan", now=NOW).status == 409
++    assert app.post("/api/loans/48/return", {}, user="ivan", now=NOW).status == 200  # returns never blocked
++    assert app.post("/api/books/3/borrow", {}, user="ivan", now=NOW).status == 200
++
++
++def test_returning_one_of_several_overdue_loans_keeps_the_block(app):
++    # jo has loans 46 and 50 (both overdue) and 57.
++    assert app.post("/api/loans/46/return", {}, user="jo", now=NOW).status == 200
++    assert app.post("/api/books/3/borrow", {}, user="jo", now=NOW).status == 409
++    assert app.post("/api/loans/50/return", {}, user="ada", now=NOW).status == 200
++    assert app.post("/api/books/3/borrow", {}, user="jo", now=NOW).status == 200
++
++
++def test_librarian_cannot_lend_to_member_with_overdue_loan(app):
++    assert app.post("/api/books/3/borrow", {"member": 7}, user="ada", now=NOW).status == 409
++    assert app.post("/api/books/4/borrow", {"member": 7}, user="ada", now=NOW).status == 409  # also on loan
++    assert app.post("/api/books/3/borrow", {"member": 3}, user="ada", now=NOW).status == 200
++    assert app.post("/api/books/2/borrow", {"member": 7}, user="eli", now=NOW).status == 403  # 403 beats 409
++
++
++def test_new_releases_are_lent_for_seven_days(app):
++    for year, isbn in ((2026, "978-9-0000-001-1"), (2025, "978-9-0000-002-2"), (2024, "978-9-0000-003-3")):
++        r = app.post("/api/books", {"title": f"Fresh {year}", "author": "N. Ew", "isbn": isbn, "year": year},
++                     user="ada")
++        assert r.status == 201
++    assert app.post("/api/books/41/borrow", {}, user="chen", now=NOW).status == 200  # 2026
++    assert app.post("/api/books/42/borrow", {"member": 4}, user="ada", now=NOW).status == 200  # 2025
++    assert app.post("/api/books/43/borrow", {}, user="eli", now=NOW).status == 200  # 2024: not new
++    assert _open_loan(app, 41)["due_at"] == "2026-03-08"
++    assert _open_loan(app, 42)["due_at"] == "2026-03-08"
++    assert _open_loan(app, 43)["due_at"] == "2026-03-15"
++    assert app.get("/api/_outbox", user="ada").json["items"][0]["payload"] == {"loan": 61, "book": 41, "member": 3}
++
++
++def test_new_release_window_follows_x_now_year(app):
++    # On 2025-12-31 books from 2024 and 2025 are new releases; book 32 is from 2024.
++    assert app.post("/api/books/32/borrow", {}, user="chen", now="2025-12-31T23:00:00").status == 200
++    assert _open_loan(app, 32, "2025-12-31T23:00:00")["due_at"] == "2026-01-07"
++    # On 2026-03-01 a 2024 book (33) is not new; books without a year (25) keep 14 days too.
++    assert app.post("/api/books/33/borrow", {}, user="dara", now=NOW).status == 200
++    assert app.post("/api/books/25/borrow", {}, user="eli", now=NOW).status == 200
++    assert _open_loan(app, 33)["due_at"] == "2026-03-15"
++    assert _open_loan(app, 25)["due_at"] == "2026-03-15"
++
++
++def test_existing_loans_keep_their_due_dates(app, seed):
++    loans = app.get("/api/loans", user="ada", now=NOW).json["items"]
++    assert {l["id"]: l["due_at"] for l in loans} == {l["id"]: l["due_at"] for l in seed["loans"]}
+ 
+ 
+ def test_librarian_lends_to_member(app):
+--- a/tests/test_library_ui.py
++++ b/tests/test_library_ui.py
+@@ -25,6 +25,8 @@
+     assert parse_ui(app.get("/ui/books/4", user="chen").text).actions == []  # on loan
+     assert parse_ui(app.get("/ui/books/2", user="jo").text).actions == []  # 3 open loans
+     assert parse_ui(app.get("/ui/books/2", user="lena").text).actions == []  # inactive
++    assert parse_ui(app.get("/ui/books/2", user="gus", now="2026-03-01T12:00:00").text).actions == []  # overdue
++    assert parse_ui(app.get("/ui/books/2", user="gus", now="2026-02-15T12:00:00").text).actions == ["borrow"]
+     assert parse_ui(app.get("/ui/books/4", user="chen").text).fields["year"] == ""
+ 
+ 

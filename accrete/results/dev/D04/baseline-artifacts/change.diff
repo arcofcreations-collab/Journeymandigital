@@ -1,0 +1,729 @@
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # Lending library
+ 
+-A small community library: members, books, loans (with renewals) and holds (queueing for books that are out). Flask 3 + SQLite (stdlib `sqlite3`) +
++A small community library: members, books, loans (with renewals and late-return fines) and holds (queueing for books that are out). Flask 3 + SQLite (stdlib `sqlite3`) +
+ Jinja2. External behaviour follows `spec/CONTRACT.md` and `spec/apps/library.md`.
+ 
+ ## Layout
+@@ -19,7 +19,7 @@
+   validation.py           request-body checks (shape, types, required fields, enums)
+   repository.py           all SQL; returns API-shaped dicts (book_id column -> "book" field)
+   permissions.py          who may do what (pure functions of user + record)
+-  services.py             business rules and actions (borrow, return, renew, hold, cancel); one function per operation
++  services.py             business rules and actions (borrow, return, renew, pay_fine, hold, cancel); one function per operation
+   filters.py              ?field=value list filtering (works on derived fields too)
+   routes_api.py           /api/... JSON endpoints (thin: parse, call service, respond)
+   routes_ui.py            /ui/... HTML pages and their form handlers
+@@ -50,6 +50,11 @@
+ |---|---|
+ | book `status` (on_loan/reserved/available) | `repository._BOOK_SELECT` (SQL `EXISTS`), `repository._book_status` |
+ | loan `overdue` (depends on X-Now) | `services.present_loan` |
++| loan `fine` (0.50/day late from the current `due_at`, max 5.00; open loans grow with X-Now) | `services.loan_fine`, `services.FINE_PER_DAY_LATE`, `services.MAX_FINE` |
++| member `fines_due` (unpaid fines of returned loans only) | `services.present_member`, `services.member_fines_due`, `repository.returned_unpaid_loans` |
++| fines due > 0 blocks borrow / renew / hold (409) | `services._owes_fines` (used by `_ensure_may_borrow`, `_may_borrow`, `_renewal_refusal`, `_hold_refusal`) |
++| `fine_charged` message on a late return | `services.return_loan` |
++| pay a fine (librarians) + `fine_paid` message | `services.pay_fine`, `services._fine_payment_refusal`, `permissions.can_pay_fine` |
+ | 14-day loan period, max 3 open loans | `services.LOAN_PERIOD`, `services.MAX_OPEN_LOANS` |
+ | borrow / return | `services.borrow_book`, `services.return_loan` |
+ | outbox message `loan_created` | `services.borrow_book` → `repository.add_outbox_message` |
+@@ -108,15 +113,24 @@
+ * Deleting a member who has loans → 409 (mirrors the book rule; loans keep their history).
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the
+   heading. The borrow form is shown when the book is available and (for members) the caller
+-  is active with fewer than 3 open loans; librarians get a member picker.
++  is active with fewer than 3 open loans and no fines due; librarians get a member picker.
+ * Holds: a librarian placing a hold for an unknown or non-integer `member` → 400; if the book is
+   `available`, 409 wins. Borrowing a `reserved` book for anyone other than the ready hold's member
+   → 409 (also when that `member` value is unknown or malformed). Deleting a member who has holds → 409.
+ * The hold form is shown when the caller could place a hold for themselves (book on loan or reserved,
+-  caller active, no open hold on it, not borrowing it); librarians get a member picker. On a reserved
++  caller active, no fines due, no open hold on it, not borrowing it); librarians get a member picker. On a reserved
+   book the borrow form is offered to librarians (picker limited to the hold's member) and to the
+-  ready hold's member when they could borrow (active, under 3 open loans).
++  ready hold's member when they could borrow (active, under 3 open loans, no fines due).
+ * Renewals: `POST /api/loans/{id}/renew` checks 404, then 403 (not the borrower or a librarian), then 409
+-  (returned, overdue, already renewed twice, or a `waiting` hold on the book), then 400 (non-empty body).
++  (returned, overdue, already renewed twice, a `waiting` hold on the book, or the borrower owes fines), then 400 (non-empty body).
+   The loan detail page offers the `renew` form exactly when that call would succeed for the caller.
++* Fines: `fine` and `fines_due` are JSON numbers (floats, e.g. `0.0`, `2.5`) and read-only (in a member
++  create/PATCH body → 400; loans can't be PATCHed at all). `fine_paid` is stored; migration 0004 marks loans
++  that were already returned late as paid, so nobody owes anything when fines ship (`seed.py` does the same).
++  A member who owes fines gets 409 when borrowing, renewing or placing a hold (also via a librarian); the
++  check runs with the other 409 rules, after 404/403 and, for a librarian's `member` parameter, after the
++  400 for an unknown member. A `ready` hold stays ready. On a late return `fine_charged` is emitted before
++  any `hold_ready`. `POST /api/loans/{id}/pay_fine`: 404, then 403 (not a librarian, even for one's own
++  loan), then 409 (not returned, no fine, already paid), then 400 (non-empty body); the loan page offers
++  `pay_fine` exactly when that call would succeed.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/library_app/migrations/0004_loan_fines.sql
++++ b/library_app/migrations/0004_loan_fines.sql
+@@ -0,0 +1,7 @@
++-- Late-return fines: the fine itself is derived from due_at/returned_at; only whether it was
++-- paid is stored. Loans already returned late are treated as settled, so nobody owes anything
++-- when fines are introduced; every other existing loan starts unpaid.
++
++ALTER TABLE loans ADD COLUMN fine_paid INTEGER NOT NULL DEFAULT 0 CHECK (fine_paid IN (0, 1));
++
++UPDATE loans SET fine_paid = 1 WHERE returned_at IS NOT NULL AND date(returned_at) > due_at;
+--- a/library_app/permissions.py
++++ b/library_app/permissions.py
+@@ -61,6 +61,11 @@
+     return is_librarian(user) or loan["member"] == user["id"]
+ 
+ 
++def can_pay_fine(user, loan):
++    """Recording a fine payment is a desk job: librarians only, even for a member's own loan."""
++    return is_librarian(user)
++
++
+ # --- holds ----------------------------------------------------------------------------
+ 
+ def can_read_hold(user, hold):
+--- a/library_app/repository.py
++++ b/library_app/repository.py
+@@ -140,9 +140,9 @@
+ 
+ 
+ # --- loans ----------------------------------------------------------------------------
+-# ``overdue`` depends on the request's clock, so services add it (see services.present_loan).
+-
+-_LOAN_SELECT = "SELECT id, book_id, member_id, borrowed_at, due_at, returned_at, renewals FROM loans"
++# ``overdue`` and ``fine`` depend on the request's clock, so services add them (see services.present_loan).
++
++_LOAN_SELECT = "SELECT id, book_id, member_id, borrowed_at, due_at, returned_at, renewals, fine_paid FROM loans"
+ 
+ 
+ def _loan(row):
+@@ -156,6 +156,7 @@
+         "due_at": row["due_at"],
+         "returned_at": row["returned_at"],
+         "renewals": row["renewals"],
++        "fine_paid": bool(row["fine_paid"]),
+     }
+ 
+ 
+@@ -182,6 +183,18 @@
+ def renew_loan(loan_id, due_at):
+     """Move the loan's due date to ``due_at`` and count the renewal."""
+     get_db().execute("UPDATE loans SET due_at = ?, renewals = renewals + 1 WHERE id = ?", (due_at, loan_id))
++
++
++def mark_fine_paid(loan_id):
++    get_db().execute("UPDATE loans SET fine_paid = 1 WHERE id = ?", (loan_id,))
++
++
++def returned_unpaid_loans(member_id=None):
++    """Returned loans whose fine is not marked paid (of one member, or of everyone)."""
++    sql = f"{_LOAN_SELECT} WHERE returned_at IS NOT NULL AND fine_paid = 0"
++    if member_id is None:
++        return [_loan(row) for row in get_db().execute(f"{sql} ORDER BY id")]
++    return [_loan(row) for row in get_db().execute(f"{sql} AND member_id = ? ORDER BY id", (member_id,))]
+ 
+ 
+ def member_has_book_on_loan(member_id, book_id):
+--- a/library_app/routes_api.py
++++ b/library_app/routes_api.py
+@@ -133,6 +133,11 @@
+     return services.renew_loan(current_context(), loan_id, _body())
+ 
+ 
++@bp.post("/loans/<int:loan_id>/pay_fine")
++def pay_fine(loan_id):
++    return services.pay_fine(current_context(), loan_id, _body())
++
++
+ # --- holds ----------------------------------------------------------------------------
+ 
+ @bp.get("/holds")
+--- a/library_app/routes_ui.py
++++ b/library_app/routes_ui.py
+@@ -159,6 +159,12 @@
+     return redirect(url_for("ui.show_loan", loan_id=loan_id), 303)
+ 
+ 
++@bp.post("/loans/<int:loan_id>/pay_fine")
++def pay_fine(loan_id):
++    services.pay_fine(current_context(), loan_id, {})
++    return redirect(url_for("ui.show_loan", loan_id=loan_id), 303)
++
++
+ # --- holds ----------------------------------------------------------------------------
+ 
+ @bp.get("/holds")
+--- a/library_app/services.py
++++ b/library_app/services.py
+@@ -4,6 +4,7 @@
+ records. Checks run in the contract's precedence order: the record exists (404), the
+ caller is allowed (403), the record's state allows it (409), the input is valid (400).
+ """
++from collections import defaultdict
+ from datetime import date, timedelta
+ 
+ from . import permissions, repository, validation
+@@ -15,20 +16,39 @@
+ MAX_OPEN_LOANS = 3
+ RENEWAL_PERIOD = timedelta(days=14)  # added to the loan's current due date
+ MAX_RENEWALS = 2
++FINE_PER_DAY_LATE = 0.50
++MAX_FINE = 5.00
+ HOLDABLE_STATUSES = ("on_loan", "reserved")
+ OPEN_HOLD_STATUSES = ("waiting", "ready")
+ 
+-MEMBER_FIELDS = ("id", "username", "name", "role", "active")
++MEMBER_FIELDS = ("id", "username", "name", "role", "active", "fines_due")
+ BOOK_FIELDS = ("id", "title", "author", "isbn", "year", "status")
+-LOAN_FIELDS = ("id", "book", "member", "borrowed_at", "due_at", "returned_at", "renewals", "overdue")
++LOAN_FIELDS = ("id", "book", "member", "borrowed_at", "due_at", "returned_at", "renewals", "overdue", "fine", "fine_paid")
+ HOLD_FIELDS = ("id", "book", "member", "placed_at", "status", "ready_at")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+ # --- members --------------------------------------------------------------------------
+ 
++def present_member(member, fines_due=None):
++    """Add the derived ``fines_due`` field (computed unless the caller already knows it)."""
++    return {**member, "fines_due": member_fines_due(member["id"]) if fines_due is None else fines_due}
++
++
++def member_fines_due(member_id):
++    """Unpaid fines on the member's returned loans; fines on loans still out do not count yet."""
++    return sum((loan_fine(loan) for loan in repository.returned_unpaid_loans(member_id)), 0.0)
++
++
+ def list_members(ctx, filters=None):
+-    members = [m for m in repository.list_members() if permissions.can_read_member(ctx.user, m)]
++    fines_due = defaultdict(float)
++    for loan in repository.returned_unpaid_loans():
++        fines_due[loan["member"]] += loan_fine(loan)
++    members = [
++        present_member(m, fines_due[m["id"]])
++        for m in repository.list_members()
++        if permissions.can_read_member(ctx.user, m)
++    ]
+     return apply_filters(members, filters or {}, MEMBER_FIELDS)
+ 
+ 
+@@ -36,7 +56,7 @@
+     member = _load_member(member_id)
+     if not permissions.can_read_member(ctx.user, member):
+         raise Forbidden()
+-    return member
++    return present_member(member)
+ 
+ 
+ def ensure_can_create_member(ctx):
+@@ -50,7 +70,7 @@
+         values = validation.clean_member(data, partial=False)
+         _ensure_username_free(values["username"])
+         member_id = repository.insert_member(values)
+-    return repository.get_member(member_id)
++    return present_member(repository.get_member(member_id))
+ 
+ 
+ def update_member(ctx, member_id, data):
+@@ -63,7 +83,7 @@
+         if "username" in values:
+             _ensure_username_free(values["username"], exclude_id=member_id)
+         repository.update_member(member_id, values)
+-    return repository.get_member(member_id)
++    return present_member(repository.get_member(member_id))
+ 
+ 
+ def delete_member(ctx, member_id):
+@@ -240,7 +260,16 @@
+ 
+ 
+ def _may_borrow(member):
+-    return member["active"] and repository.count_open_loans(member["id"]) < MAX_OPEN_LOANS
++    return (
++        member["active"]
++        and repository.count_open_loans(member["id"]) < MAX_OPEN_LOANS
++        and not _owes_fines(member["id"])
++    )
++
++
++def _owes_fines(member_id):
++    """Members with unpaid fines may not borrow, renew or place holds."""
++    return member_fines_due(member_id) > 0
+ 
+ 
+ def _hold_refusal(member, book):
+@@ -249,6 +278,8 @@
+         return "Holds can only be placed on books that are on loan or reserved."
+     if not member["active"]:
+         return "Inactive members cannot place holds."
++    if _owes_fines(member["id"]):
++        return "Members with unpaid fines cannot place holds."
+     if repository.member_has_open_hold(member["id"], book["id"]):
+         return "The member already has a hold on this book."
+     if repository.member_has_book_on_loan(member["id"], book["id"]):
+@@ -261,13 +292,26 @@
+         raise Conflict("Inactive members cannot borrow.")
+     if repository.count_open_loans(member["id"]) >= MAX_OPEN_LOANS:
+         raise Conflict(f"Members may have at most {MAX_OPEN_LOANS} unreturned loans.")
++    if _owes_fines(member["id"]):
++        raise Conflict("Members with unpaid fines cannot borrow.")
+ 
+ 
+ # --- loans ----------------------------------------------------------------------------
+ 
+ def present_loan(ctx, loan):
+-    """Add the derived ``overdue`` field, which depends on the request's clock."""
+-    return {**loan, "overdue": _is_overdue(ctx, loan)}
++    """Add the derived ``overdue`` and ``fine`` fields, which depend on the request's clock."""
++    return {**loan, "overdue": _is_overdue(ctx, loan), "fine": loan_fine(loan, ctx.today)}
++
++
++def loan_fine(loan, today=None):
++    """``FINE_PER_DAY_LATE`` per day late (capped at ``MAX_FINE``), from the loan's current due date.
++
++    A returned loan is late by the days between ``due_at`` and the date it came back; an open
++    loan by the days between ``due_at`` and ``today`` (required for open loans).
++    """
++    end = date.fromisoformat(loan["returned_at"][:10]) if loan["returned_at"] is not None else today
++    days_late = (end - date.fromisoformat(loan["due_at"])).days
++    return min(max(days_late, 0) * FINE_PER_DAY_LATE, MAX_FINE)
+ 
+ 
+ def _is_overdue(ctx, loan):
+@@ -318,6 +362,11 @@
+             raise Conflict("The loan has already been returned.")
+         validation.clean_no_params(params)
+         repository.mark_loan_returned(loan_id, ctx.now_text)
++        fine = loan_fine(repository.get_loan(loan_id))
++        if fine > 0:
++            repository.add_outbox_message(
++                "fine_charged", {"loan": loan_id, "member": loan["member"], "amount": fine}, ctx.now_text
++            )
+         _serve_next_hold(ctx, loan["book"])
+     return present_loan(ctx, repository.get_loan(loan_id))
+ 
+@@ -338,13 +387,43 @@
+     return present_loan(ctx, repository.get_loan(loan_id))
+ 
+ 
++def pay_fine(ctx, loan_id, params):
++    """Record that a returned loan's fine has been paid (librarians only)."""
++    with transaction():
++        loan = _load_loan(loan_id)
++        if not permissions.can_pay_fine(ctx.user, loan):
++            raise Forbidden("Only librarians can record fine payments.")
++        refusal = _fine_payment_refusal(loan)
++        if refusal:
++            raise Conflict(refusal)
++        validation.clean_no_params(params)
++        repository.mark_fine_paid(loan_id)
++        repository.add_outbox_message(
++            "fine_paid", {"loan": loan_id, "member": loan["member"], "amount": loan_fine(loan)}, ctx.now_text
++        )
++    return present_loan(ctx, repository.get_loan(loan_id))
++
++
+ def loan_actions(ctx, loan):
+     actions = []
+     if loan["returned_at"] is None and permissions.can_return_loan(ctx.user, loan):
+         actions.append("return")
+     if permissions.can_renew_loan(ctx.user, loan) and _renewal_refusal(ctx, loan) is None:
+         actions.append("renew")
++    if permissions.can_pay_fine(ctx.user, loan) and _fine_payment_refusal(loan) is None:
++        actions.append("pay_fine")
+     return actions
++
++
++def _fine_payment_refusal(loan):
++    """Why the loan's fine cannot be paid right now (a 409 message), or None if it can."""
++    if loan["returned_at"] is None:
++        return "Fines are paid once the loan has been returned."
++    if loan["fine_paid"]:
++        return "The fine has already been paid."
++    if loan_fine(loan) == 0:
++        return "The loan has no fine."
++    return None
+ 
+ 
+ def _renewal_refusal(ctx, loan):
+@@ -357,6 +436,8 @@
+         return f"A loan can be renewed at most {MAX_RENEWALS} times."
+     if repository.book_has_waiting_hold(loan["book"]):
+         return "Another member is waiting for this book."
++    if _owes_fines(loan["member"]):
++        return "Members with unpaid fines cannot renew loans."
+     return None
+ 
+ 
+--- a/library_app/templates/loans/detail.html
++++ b/library_app/templates/loans/detail.html
+@@ -11,6 +11,8 @@
+   {{ field("returned_at", loan.returned_at) }}
+   {{ field("renewals", loan.renewals) }}
+   {{ field("overdue", loan.overdue) }}
++  {{ field("fine", loan.fine) }}
++  {{ field("fine_paid", loan.fine_paid) }}
+ </dl>
+ 
+ {% if "return" in actions %}
+@@ -23,4 +25,9 @@
+   <button type="submit">Renew</button>
+ </form>
+ {% endif %}
++{% if "pay_fine" in actions %}
++<form data-action="pay_fine" method="post" action="{{ url_for('ui.pay_fine', loan_id=loan.id) }}">
++  <button type="submit">Record fine payment</button>
++</form>
++{% endif %}
+ {% endblock %}
+--- a/library_app/templates/loans/list.html
++++ b/library_app/templates/loans/list.html
+@@ -3,7 +3,7 @@
+ {% block content %}
+ <h1>Loans</h1>
+ <table>
+-  <thead><tr><th>Loan</th><th>Book</th><th>Member</th><th>Borrowed</th><th>Due</th><th>Returned</th><th>Renewals</th><th>Overdue</th></tr></thead>
++  <thead><tr><th>Loan</th><th>Book</th><th>Member</th><th>Borrowed</th><th>Due</th><th>Returned</th><th>Renewals</th><th>Overdue</th><th>Fine</th><th>Fine paid</th></tr></thead>
+   <tbody>
+   {% for loan in loans %}
+     <tr data-id="{{ loan.id }}">
+@@ -15,6 +15,8 @@
+       <td>{{ loan.returned_at|display }}</td>
+       <td>{{ loan.renewals }}</td>
+       <td>{{ loan.overdue|display }}</td>
++      <td>{{ loan.fine|display }}</td>
++      <td>{{ loan.fine_paid|display }}</td>
+     </tr>
+   {% endfor %}
+   </tbody>
+--- a/library_app/templates/members/detail.html
++++ b/library_app/templates/members/detail.html
+@@ -8,5 +8,6 @@
+   {{ field("name", member.name) }}
+   {{ field("role", member.role) }}
+   {{ field("active", member.active) }}
++  {{ field("fines_due", member.fines_due) }}
+ </dl>
+ {% endblock %}
+--- a/library_app/templates/members/list.html
++++ b/library_app/templates/members/list.html
+@@ -4,7 +4,7 @@
+ <h1>Members</h1>
+ {% if ctx.is_librarian %}<p><a href="{{ url_for('ui.new_member') }}">New member</a></p>{% endif %}
+ <table>
+-  <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th></tr></thead>
++  <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th><th>Fines due</th></tr></thead>
+   <tbody>
+   {% for member in members %}
+     <tr data-id="{{ member.id }}">
+@@ -12,6 +12,7 @@
+       <td>{{ member.name }}</td>
+       <td>{{ member.role }}</td>
+       <td>{{ member.active|display }}</td>
++      <td>{{ member.fines_due|display }}</td>
+     </tr>
+   {% endfor %}
+   </tbody>
+--- a/seed.py
++++ b/seed.py
+@@ -26,9 +26,11 @@
+         "INSERT INTO books (id, title, author, isbn, year) VALUES (:id, :title, :author, :isbn, :year)",
+         [{**b, "year": b.get("year")} for b in seed["books"]],
+     )
++    # Seed loans predate fines: like migration 0004, a late return counts as already settled.
+     conn.executemany(
+-        "INSERT INTO loans (id, book_id, member_id, borrowed_at, due_at, returned_at)"
+-        " VALUES (:id, :book, :member, :borrowed_at, :due_at, :returned_at)",
++        "INSERT INTO loans (id, book_id, member_id, borrowed_at, due_at, returned_at, fine_paid)"
++        " VALUES (:id, :book, :member, :borrowed_at, :due_at, :returned_at,"
++        " :returned_at IS NOT NULL AND date(:returned_at) > :due_at)",
+         seed["loans"],
+     )
+ 
+--- a/tests/test_library_basics.py
++++ b/tests/test_library_basics.py
+@@ -39,11 +39,13 @@
+ 
+ def test_seed_data_is_loaded_with_same_ids(app, seed):
+     members = app.get("/api/members", user="ada").json["items"]
+-    assert members == seed["members"]
++    assert [{k: v for k, v in m.items() if k != "fines_due"} for m in members] == seed["members"]
++    assert all(m["fines_due"] == 0 for m in members)  # late returns before fines existed count as settled
+     books = app.get("/api/books", user="ada").json["items"]
+     assert [{k: v for k, v in b.items() if k != "status"} for b in books] == seed["books"]
+     loans = app.get("/api/loans", user="ada").json["items"]
+-    assert [{k: v for k, v in l.items() if k not in ("overdue", "renewals")} for l in loans] == seed["loans"]
++    assert [{k: v for k, v in l.items() if k not in ("overdue", "renewals", "fine", "fine_paid")}
++            for l in loans] == seed["loans"]
+     assert all(l["renewals"] == 0 for l in loans)  # migrated loans have never been renewed
+ 
+ 
+--- a/tests/test_library_fines.py
++++ b/tests/test_library_fines.py
+@@ -0,0 +1,179 @@
++"""Late-return fines: 0.50 per day late (max 5.00), unpaid fines block borrowing, renewing and holds."""
++import os
++import sqlite3
++
++from accept_client import parse_ui
++
++# Loan 52: chen (member 3) has book 22, due 2026-03-04. Loan 46: jo (member 10) has book 4, due 2026-02-15.
++# Loan 60: eli (member 5) has book 39, due 2026-03-05. Book 3 is available.
++# Seed loan 2 (jo) was returned 4 days late; seed loan 1 (dara) was returned on time.
++T1 = "2026-03-01T10:00:00"
++LATE = "2026-03-06T09:00:00"  # loan 52 is 2 days late, loan 60 one day
++
++
++def _outbox(app, channel=None):
++    items = app.get("/api/_outbox", user="ada").json["items"]
++    return [m for m in items if channel is None or m["channel"] == channel]
++
++
++def _fines_due(app, member_id):
++    return app.get(f"/api/members/{member_id}", user="ada").json["fines_due"]
++
++
++def test_open_loan_fine_grows_daily_up_to_the_cap(app):
++    def fine(now):
++        return app.get("/api/loans/52", user="chen", now=now).json["fine"]
++
++    assert fine("2026-03-04T23:59:59") == 0  # due today
++    assert fine("2026-03-05T00:00:00") == 0.5
++    assert fine("2026-03-07T12:00:00") == 1.5
++    assert fine("2026-03-14T00:00:00") == 5.0
++    assert fine("2026-04-30T00:00:00") == 5.0  # capped
++    assert app.get("/api/loans/46", user="jo", now=T1).json["fine"] == 5.0
++    # Fines on loans still out do not count yet.
++    assert app.get("/api/members/3", user="chen", now="2026-04-30T00:00:00").json["fines_due"] == 0
++
++
++def test_existing_late_returns_are_settled(app):
++    loan = app.get("/api/loans/2", user="ada").json
++    assert loan["fine"] == 2.0 and loan["fine_paid"] is True
++    loan = app.get("/api/loans/1", user="ada").json
++    assert loan["fine"] == 0 and loan["fine_paid"] is False
++    assert all(m["fines_due"] == 0 for m in app.get("/api/members", user="ada").json["items"])
++    paid = app.get("/api/loans?fine_paid=true", user="ada").json["items"]
++    assert [l["id"] for l in paid] == [2, 4, 14, 17, 19, 26, 28, 29, 35, 36, 41, 44]
++    assert all(l["fine"] > 0 and l["returned_at"] for l in paid)
++    assert all(l["fine"] == 0 for l in app.get("/api/loans?fine_paid=false&overdue=false", user="ada").json["items"])
++
++
++def test_migration_marks_only_late_returns_paid(app):
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    rows = conn.execute("SELECT id, fine_paid, returned_at IS NOT NULL AND date(returned_at) > due_at FROM loans")
++    assert all(paid == late for _, paid, late in rows)
++    conn.close()
++
++
++def test_late_return_charges_fine(app):
++    r = app.post("/api/loans/52/return", {}, user="chen", now=LATE)
++    assert r.status == 200 and r.json["fine"] == 1.0 and r.json["fine_paid"] is False
++    assert app.get("/api/loans/52", user="chen", now="2026-04-30T00:00:00").json["fine"] == 1.0  # fixed once returned
++    assert _outbox(app) == [{"id": 1, "channel": "fine_charged", "payload": {"loan": 52, "member": 3, "amount": 1.0},
++                             "created_at": LATE}]
++    assert _fines_due(app, 3) == 1.0
++    assert app.get("/api/members/3", user="chen").json["fines_due"] == 1.0
++    assert [m["id"] for m in app.get("/api/members?fines_due=1", user="ada").json["items"]] == [3]
++
++
++def test_fines_due_adds_up_returned_unpaid_loans(app):
++    app.post("/api/loans/46/return", {}, user="jo", now=T1)  # 14 days late -> capped at 5.00
++    app.post("/api/loans/50/return", {}, user="jo", now="2026-02-17T08:00:00")  # 2 days late -> 1.00
++    assert _fines_due(app, 10) == 6.0
++    app.post("/api/loans/46/pay_fine", {}, user="ada")
++    assert _fines_due(app, 10) == 1.0
++
++
++def test_return_on_time_or_after_renewal_charges_nothing(app):
++    app.post("/api/loans/52/renew", {}, user="chen", now=T1)  # due 2026-03-18
++    r = app.post("/api/loans/52/return", {}, user="chen", now="2026-03-10T00:00:00")
++    assert r.json["fine"] == 0
++    assert app.post("/api/loans/59/return", {}, user="dara", now="2026-03-04T23:00:00").json["fine"] == 0
++    assert _outbox(app, "fine_charged") == []
++    assert _fines_due(app, 3) == 0
++
++
++def test_unpaid_fines_block_borrowing_renewing_and_holds(app):
++    app.post("/api/books/3/borrow", {}, user="chen", now=T1)  # loan 61, due 2026-03-15
++    app.post("/api/loans/52/return", {}, user="chen", now=LATE)
++    outbox = len(_outbox(app))
++    assert app.post("/api/books/2/borrow", {}, user="chen", now=LATE).status == 409
++    assert app.post("/api/books/2/borrow", {"member": 3}, user="ada", now=LATE).status == 409
++    assert app.post("/api/loans/61/renew", {}, user="chen", now=LATE).status == 409
++    assert app.post("/api/loans/61/renew", {}, user="ada", now=LATE).status == 409
++    assert app.post("/api/books/4/hold", {}, user="chen", now=LATE).status == 409
++    assert app.post("/api/books/4/hold", {"member": 3}, user="ada", now=LATE).status == 409
++    assert app.post("/api/books/2/borrow", {"member": 3, "x": 1}, user="ada", now=LATE).status == 400  # bad input
++    assert len(_outbox(app)) == outbox and app.get("/api/holds", user="ada").json["items"] == []
++    assert app.get("/api/loans/61", user="chen").json["renewals"] == 0
++
++    assert app.post("/api/loans/52/pay_fine", {}, user="ada", now=LATE).status == 200
++    assert app.post("/api/loans/61/renew", {}, user="chen", now=LATE).status == 200
++    assert app.post("/api/books/2/borrow", {}, user="chen", now=LATE).status == 200
++    assert app.post("/api/books/4/hold", {}, user="chen", now=LATE).status == 200
++
++
++def test_ready_hold_stays_ready_while_member_owes_fines(app):
++    app.post("/api/books/22/hold", {}, user="eli", now=T1)
++    app.post("/api/loans/60/return", {}, user="eli", now=LATE)  # one day late
++    app.post("/api/loans/52/return", {}, user="chen", now=LATE)  # eli's hold becomes ready
++    assert app.post("/api/books/22/borrow", {}, user="eli", now=LATE).status == 409
++    assert app.post("/api/books/22/borrow", {"member": 5}, user="ada", now=LATE).status == 409
++    assert app.get("/api/holds/1", user="eli").json["status"] == "ready"
++    assert app.get("/api/books/22", user="eli").json["status"] == "reserved"
++    app.post("/api/loans/60/pay_fine", {}, user="ada", now=LATE)
++    assert app.post("/api/books/22/borrow", {}, user="eli", now=LATE).status == 200
++    assert app.get("/api/holds/1", user="eli").json["status"] == "fulfilled"
++
++
++def test_librarian_records_fine_payment(app):
++    app.post("/api/loans/46/return", {}, user="jo", now=T1)
++    r = app.post("/api/loans/46/pay_fine", {}, user="ada", now=LATE)
++    assert r.status == 200
++    assert r.json["id"] == 46 and r.json["fine"] == 5.0 and r.json["fine_paid"] is True
++    assert _outbox(app, "fine_paid") == [{"id": 2, "channel": "fine_paid",
++                                          "payload": {"loan": 46, "member": 10, "amount": 5.0}, "created_at": LATE}]
++    assert app.post("/api/loans/46/pay_fine", {}, user="ada").status == 409  # already paid
++    assert len(_outbox(app, "fine_paid")) == 1
++    assert _fines_due(app, 10) == 0
++
++
++def test_pay_fine_permissions_conflicts_and_precedence(app):
++    app.post("/api/loans/46/return", {}, user="jo", now=T1)
++    assert app.post("/api/loans/999/pay_fine", {}, user="ada").status == 404
++    assert app.post("/api/loans/46/pay_fine", {}, user="jo").status == 403  # members cannot, even their own
++    assert app.post("/api/loans/52/pay_fine", {}, user="jo").status == 403  # 403 beats 409
++    assert app.post("/api/loans/52/pay_fine", {}, user="ada").status == 409  # not returned
++    assert app.post("/api/loans/1/pay_fine", {}, user="ada").status == 409  # no fine
++    assert app.post("/api/loans/2/pay_fine", {}, user="ada").status == 409  # settled by the migration
++    assert app.post("/api/loans/1/pay_fine", {"amount": 1}, user="ada").status == 409  # 409 beats 400
++    assert app.post("/api/loans/46/pay_fine", {"amount": 1}, user="ada").status == 400
++    assert app.post("/api/loans/46/pay_fine", {}, user=None).status == 401
++    assert app.get("/api/loans/46", user="ada").json["fine_paid"] is False
++    assert _outbox(app, "fine_paid") == []
++
++
++def test_fine_fields_are_read_only(app):
++    assert app.patch("/api/loans/46", {"fine_paid": True}, user="ada").status == 403
++    assert app.patch("/api/members/3", {"fines_due": 0}, user="ada").status == 400
++    assert app.post("/api/members", {"username": "zed", "name": "Z", "role": "member", "fines_due": 1},
++                    user="ada").status == 400
++
++
++def test_loan_page_shows_pay_fine_form_only_when_allowed(app):
++    app.post("/api/loans/46/return", {}, user="jo", now=T1)
++    page = parse_ui(app.get("/ui/loans/46", user="ada").text)
++    assert page.fields["fine"] == "5.0" and page.fields["fine_paid"] == "false"
++    assert page.actions == ["pay_fine"]
++    assert parse_ui(app.get("/ui/loans/46", user="jo").text).actions == []  # members cannot pay here
++    assert "pay_fine" not in parse_ui(app.get("/ui/loans/50", user="ada", now=T1).text).actions  # still out
++    assert parse_ui(app.get("/ui/loans/1", user="ada").text).actions == []  # no fine
++    assert parse_ui(app.get("/ui/loans/2", user="ada").text).actions == []  # already paid
++    assert parse_ui(app.get("/ui/members/10", user="jo").text).fields["fines_due"] == "5.0"
++
++
++def test_ui_hides_actions_from_members_who_owe_fines(app):
++    app.post("/api/books/3/borrow", {}, user="chen", now=T1)
++    app.post("/api/loans/52/return", {}, user="chen", now=LATE)
++    assert parse_ui(app.get("/ui/books/2", user="chen", now=LATE).text).actions == []  # no borrow
++    assert parse_ui(app.get("/ui/books/4", user="chen", now=LATE).text).actions == []  # no hold
++    assert parse_ui(app.get("/ui/loans/61", user="chen", now=LATE).text).actions == ["return"]  # no renew
++
++
++def test_pay_fine_form_posts_through_service(app):
++    from test_library_ui import _post_form
++
++    app.post("/api/loans/46/return", {}, user="jo", now=T1)
++    code, headers, _ = _post_form(app, "/ui/loans/46/pay_fine", {}, "ada")
++    assert code == 303 and headers["Location"].endswith("/ui/loans/46")
++    assert app.get("/api/loans/46", user="ada").json["fine_paid"] is True
++    assert _post_form(app, "/ui/loans/46/pay_fine", {}, "jo")[0] == 403
++    assert _post_form(app, "/ui/loans/46/pay_fine", {}, "ada")[0] == 409
+--- a/tests/test_library_holds.py
++++ b/tests/test_library_holds.py
+@@ -57,14 +57,14 @@
+     assert holds[1]["status"] == holds[3]["status"] == "waiting"
+     assert app.get("/api/books/4", user="chen").json["status"] == "reserved"
+     assert app.get("/api/books?status=reserved", user="chen").json["items"][0]["id"] == 4
+-    assert _outbox(app) == [{"id": 1, "channel": "hold_ready", "payload": {"hold": 2, "book": 4, "member": 4},
+-                             "created_at": T3}]
++    assert _outbox(app, "hold_ready") == [{"id": 2, "channel": "hold_ready",
++                                           "payload": {"hold": 2, "book": 4, "member": 4}, "created_at": T3}]
+ 
+ 
+ def test_return_without_holds_makes_book_available(app):
+     app.post("/api/loans/46/return", {}, user="jo")
+     assert app.get("/api/books/4", user="chen").json["status"] == "available"
+-    assert _outbox(app) == []
++    assert _outbox(app, "hold_ready") == []
+ 
+ 
+ def test_only_ready_member_may_borrow_reserved_book(app):
+@@ -79,7 +79,7 @@
+     assert r.status == 200 and r.json["status"] == "on_loan"
+     assert app.get("/api/holds/1", user="chen").json["status"] == "fulfilled"
+     assert app.get("/api/holds/2", user="dara").json["status"] == "waiting"
+-    assert [m["channel"] for m in _outbox(app)] == ["hold_ready", "loan_created"]
++    assert [m["channel"] for m in _outbox(app)] == ["fine_charged", "hold_ready", "loan_created"]
+ 
+ 
+ def test_ready_member_borrows_for_themselves(app):
+@@ -95,7 +95,10 @@
+     assert app.post("/api/books/22/borrow", {}, user="jo").status == 409
+     assert app.get("/api/holds/1", user="jo").json["status"] == "ready"
+     assert app.get("/api/books/22", user="jo").json["status"] == "reserved"
+-    app.post("/api/loans/46/return", {}, user="jo")
++    app.post("/api/loans/46/return", {}, user="jo")  # returned late: jo now owes a fine
++    assert app.post("/api/books/22/borrow", {}, user="jo").status == 409
++    assert app.get("/api/holds/1", user="jo").json["status"] == "ready"
++    app.post("/api/loans/46/pay_fine", {}, user="ada")
+     assert app.post("/api/books/22/borrow", {}, user="jo").status == 200
+     assert app.get("/api/holds/1", user="jo").json["status"] == "fulfilled"
+ 
+--- a/tests/test_library_loans.py
++++ b/tests/test_library_loans.py
+@@ -8,7 +8,7 @@
+     assert r.status == 200 and r.json["id"] == 3 and r.json["status"] == "on_loan"
+     loan = app.get("/api/loans?book=3&returned_at=null", user="chen").json["items"][0]
+     assert loan == {"id": 61, "book": 3, "member": 3, "borrowed_at": NOW, "due_at": "2026-03-15",
+-                    "returned_at": None, "renewals": 0, "overdue": False}
++                    "returned_at": None, "renewals": 0, "overdue": False, "fine": 0, "fine_paid": False}
+     outbox = app.get("/api/_outbox", user="dara").json["items"]
+     assert outbox == [{"id": 1, "channel": "loan_created", "payload": {"loan": 61, "book": 3, "member": 3},
+                        "created_at": NOW}]
+--- a/tests/test_library_members.py
++++ b/tests/test_library_members.py
+@@ -16,7 +16,8 @@
+ def test_librarian_creates_member_with_default_active(app):
+     r = app.post("/api/members", {"username": "zed", "name": "Zed Z", "role": "member"}, user="ada")
+     assert r.status == 201
+-    assert r.json == {"id": 13, "username": "zed", "name": "Zed Z", "role": "member", "active": True}
++    assert r.json == {"id": 13, "username": "zed", "name": "Zed Z", "role": "member", "active": True,
++                      "fines_due": 0}
+     assert app.get("/api/members/13", user="ben").json["username"] == "zed"
+     assert app.get("/api/members", user="zed").json["items"][0]["id"] == 13
+ 
+--- a/tests/test_library_renewals.py
++++ b/tests/test_library_renewals.py
+@@ -15,7 +15,8 @@
+     r = app.post("/api/loans/52/renew", {}, user="chen", now=T1)
+     assert r.status == 200
+     assert r.json == {"id": 52, "book": 22, "member": 3, "borrowed_at": "2026-02-18T16:00:00",
+-                      "due_at": "2026-03-18", "returned_at": None, "renewals": 1, "overdue": False}
++                      "due_at": "2026-03-18", "returned_at": None, "renewals": 1, "overdue": False,
++                      "fine": 0, "fine_paid": False}
+     assert _outbox(app) == [{"id": 1, "channel": "loan_renewed", "payload": {"loan": 52, "due_at": "2026-03-18"},
+                              "created_at": T1}]
+ 
+--- a/tests/test_library_ui.py
++++ b/tests/test_library_ui.py
+@@ -44,7 +44,8 @@
+ 
+ def test_member_detail(app):
+     page = parse_ui(app.get("/ui/members/12", user="ada").text)
+-    assert page.fields == {"username": "lena", "name": "Lena Okafor", "role": "member", "active": "false"}
++    assert page.fields == {"username": "lena", "name": "Lena Okafor", "role": "member", "active": "false",
++                           "fines_due": "0.0"}
+     assert page.actions == []
+     assert app.get("/ui/members/12", user="chen").status == 403
+ 

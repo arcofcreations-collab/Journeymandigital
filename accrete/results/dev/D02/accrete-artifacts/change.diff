@@ -1,0 +1,146 @@
+--- a/changes/0002-holds.yaml
++++ b/changes/0002-holds.yaml
+@@ -0,0 +1,143 @@
++request: "Holds (reservations) for books that are on loan: new holds collection (book, member, placed_at, status waiting|ready|fulfilled|cancelled, ready_at); POST /api/books/{id}/hold; queue by placed_at then id; on return the first waiting hold becomes ready and emits hold_ready; books.status gains 'reserved'; only the ready-hold member may borrow a reserved book (hold becomes fulfilled); POST /api/holds/{id}/cancel promotes the next waiting hold; members read only their own holds; no direct create/patch/delete of holds; UI forms follow the action rules."
++interpretation: >-
++  holds is a new entity readable by librarians or its member, never created/updated/deleted directly.
++  books.status is 'on_loan' if an open loan exists, else 'reserved' if a ready hold exists, else 'available'.
++  books.hold (allow like borrow) requires status on_loan/reserved, an active target member with no
++  waiting/ready hold on the book and no open loan of it. The queue head is the waiting hold with the
++  smallest (placed_at, id). loans.return and holds.cancel (of a ready hold) promote the queue head to
++  ready (ready_at = now) and emit hold_ready {hold, book, member}. borrow's guard admits a reserved book
++  when the caller is a librarian or the holder of the ready hold (so the UI form shows to exactly those),
++  and a prepended fail effect returns 409 when the effective borrower is not the ready-hold member;
++  a successful borrow marks that hold fulfilled.
++ops:
++  - add_entity:
++      name: holds
++      fields:
++        book: ref books required
++        member: ref members required
++        placed_at: {type: datetime, required: true, system: true}
++        status: {type: enum, values: [waiting, ready, fulfilled, cancelled], required: true, system: true}
++        ready_at: {type: datetime, system: true}
++      rules:
++        read: "user.role == 'librarian' or record.member == user"
++        create: "False"
++        update: "False"
++        delete: "False"
++  - change_field:
++      entity: books
++      name: status
++      computed: >-
++        'on_loan' if any(l.book == record and l.returned_at is None for l in loans)
++        else ('reserved' if any(h.book == record and h.status == 'ready' for h in holds) else 'available')
++  - add_action:
++      entity: books
++      name: hold
++      params: {member: ref members}
++      allow: "user.role == 'librarian' or params.member is None or params.member == user"
++      guard: >-
++        (record.status == 'on_loan' or record.status == 'reserved')
++        and (params.member or user).active
++        and count(holds, book=record, member=(params.member or user), status='waiting') == 0
++        and count(holds, book=record, member=(params.member or user), status='ready') == 0
++        and count(loans, book=record, member=(params.member or user), returned_at=None) == 0
++      guard_message: "'a hold cannot be placed on this book for this member now'"
++      effects:
++        - create: holds
++          values: {book: record, member: "params.member or user", placed_at: now, status: "'waiting'", ready_at: "None"}
++  - change_action:
++      entity: books
++      name: borrow
++      guard: >-
++        (record.status == 'available' or (record.status == 'reserved' and (user.role == 'librarian' or count(holds, book=record, status='ready', member=user) > 0)))
++        and (params.member or user).active
++        and count(loans, member=(params.member or user), returned_at=None) < 3
++      prepend_effects:
++        - fail: "'this book is reserved for another member'"
++          status: 409
++          when: "record.status == 'reserved' and count(holds, book=record, status='ready', member=(params.member or user)) == 0"
++      append_effects:
++        - update: "find(holds, book=record, status='ready', member=(params.member or user))"
++          set: {status: "'fulfilled'"}
++  - change_action:
++      entity: loans
++      name: return
++      append_effects:
++        - if: "count(holds, book=record.book, status='waiting') > 0"
++          then:
++            - update: >-
++                [h for h in holds if h.book == record.book and h.status == 'waiting' and not any(g.book == h.book and g.status == 'waiting' and (g.placed_at < h.placed_at or (g.placed_at == h.placed_at and g.id < h.id)) for g in holds)]
++              set: {status: "'ready'", ready_at: now}
++            - emit: hold_ready
++              payload:
++                hold: "first(holds, book=record.book, status='ready')"
++                book: record.book
++                member: "first(holds, book=record.book, status='ready').member"
++  - add_action:
++      entity: holds
++      name: cancel
++      allow: "user.role == 'librarian' or record.member == user"
++      guard: "record.status == 'waiting' or record.status == 'ready'"
++      guard_message: "'only waiting or ready holds can be cancelled'"
++      effects:
++        - if: "record.status == 'ready' and count(holds, book=record.book, status='waiting') > 0"
++          then:
++            - set: {status: "'cancelled'"}
++            - update: >-
++                [h for h in holds if h.book == record.book and h.status == 'waiting' and not any(g.book == h.book and g.status == 'waiting' and (g.placed_at < h.placed_at or (g.placed_at == h.placed_at and g.id < h.id)) for g in holds)]
++              set: {status: "'ready'", ready_at: now}
++            - emit: hold_ready
++              payload:
++                hold: "first(holds, book=record.book, status='ready')"
++                book: record.book
++                member: "first(holds, book=record.book, status='ready').member"
++          else:
++            - set: {status: "'cancelled'"}
++expect:
++  - {as: chen, do: "POST /api/books/2/hold", body: {}, status: 409}
++  - {as: chen, do: "POST /api/books/1/hold", body: {member: 4}, status: 403}
++  - {as: ada, do: "POST /api/books/1/hold", body: {member: 12}, status: 409}
++  - {as: ivan, do: "POST /api/books/1/hold", body: {}, status: 409}
++  - {as: chen, do: "POST /api/holds", body: {book: 1, member: 3}, status: 403}
++  - name: "queue, ready on return, reserved borrow, cancel promotion"
++    steps:
++      - {as: chen, do: "POST /api/books/1/hold", body: {}, now: "2026-01-10T10:00:00", status: 200, json: {id: 1, status: on_loan}}
++      - {as: chen, do: "POST /api/books/1/hold", body: {}, status: 409}
++      - {as: ada, do: "POST /api/books/1/hold", body: {member: 4}, now: "2026-01-09T10:00:00", status: 200}
++      - {as: chen, do: "GET /api/holds", count: 1}
++      - {as: ada, do: "GET /api/holds", count: 2}
++      - {as: chen, do: "GET /api/holds/2", status: 403}
++      - {as: chen, do: "PATCH /api/holds/1", body: {status: cancelled}, status: 403}
++      - {as: chen, do: "DELETE /api/holds/1", status: 403}
++      - {as: ivan, do: "POST /api/loans/55/return", body: {}, now: "2026-01-11T10:00:00", status: 200}
++      - {as: ada, do: "GET /api/holds/2", json: {status: ready, ready_at: "2026-01-11T10:00:00"}}
++      - {as: ada, do: "GET /api/holds/1", json: {status: waiting, ready_at: null}}
++      - {as: chen, do: "GET /api/books/1", json: {status: reserved}}
++      - {as: chen, do: "POST /api/books/1/borrow", body: {}, status: 409}
++      - {as: ada, do: "POST /api/books/1/borrow", body: {}, status: 409}
++      - {as: ada, do: "POST /api/books/1/borrow", body: {member: 3}, status: 409}
++      - {as: chen, do: "POST /api/holds/2/cancel", body: {}, status: 403}
++      - {as: dara, do: "POST /api/holds/2/cancel", body: {}, now: "2026-01-12T10:00:00", status: 200, json: {status: cancelled}}
++      - {as: dara, do: "POST /api/holds/2/cancel", body: {}, status: 409}
++      - {as: ada, do: "GET /api/holds/1", json: {status: ready, ready_at: "2026-01-12T10:00:00"}}
++      - {as: chen, do: "POST /api/books/1/borrow", body: {}, status: 200, json: {status: on_loan}}
++      - {as: chen, do: "GET /api/holds/1", json: {status: fulfilled}}
++  - name: "ready hold borrow by librarian for holder; ties by id; cancel last ready makes book available"
++    steps:
++      - {as: chen, do: "POST /api/books/1/hold", body: {}, now: "2026-01-10T10:00:00", status: 200}
++      - {as: dara, do: "POST /api/books/1/hold", body: {}, now: "2026-01-10T10:00:00", status: 200}
++      - {as: ivan, do: "POST /api/loans/55/return", body: {}, status: 200}
++      - {as: ada, do: "GET /api/holds/1", json: {status: ready}}
++      - {as: ada, do: "POST /api/holds/1/cancel", body: {}, status: 200}
++      - {as: ada, do: "GET /api/holds/2", json: {status: ready}}
++      - {as: eli, do: "POST /api/books/1/hold", body: {}, status: 200}
++      - {as: ada, do: "POST /api/books/1/borrow", body: {member: 4}, status: 200}
++      - {as: ada, do: "GET /api/holds/2", json: {status: fulfilled}}
++      - {as: ada, do: "GET /api/holds/3", json: {status: waiting}}
++  - name: "ready hold survives failed borrow (loan limit)"
++    steps:
++      - {as: hana, do: "POST /api/books/1/hold", body: {}, status: 200}
++      - {as: ivan, do: "POST /api/loans/55/return", body: {}, status: 200}
++      - {as: hana, do: "POST /api/books/1/borrow", body: {}, status: 409}
++      - {as: hana, do: "GET /api/holds/1", json: {status: ready}}
++      - {as: hana, do: "POST /api/holds/1/cancel", body: {}, status: 200}
++      - {as: chen, do: "GET /api/books/1", json: {status: available}}

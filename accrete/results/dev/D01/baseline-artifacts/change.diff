@@ -1,0 +1,862 @@
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # Lending library
+ 
+-A small community library: members, books and loans. Flask 3 + SQLite (stdlib `sqlite3`) +
++A small community library: members, authors, books and loans. Flask 3 + SQLite (stdlib `sqlite3`) +
+ Jinja2. External behaviour follows `spec/CONTRACT.md` and `spec/apps/library.md`.
+ 
+ ## Layout
+@@ -49,6 +49,9 @@
+ | Rule | Location |
+ |---|---|
+ | book `status` (on_loan/available) | `repository._BOOK_SELECT` (SQL `EXISTS`) |
++| book `author` (reference) / `author_name` (follows renames) | `repository._BOOK_SELECT` (join on `books.author_id`) |
++| author `book_count` | `repository._AUTHOR_SELECT` (SQL `COUNT`) |
++| book's author must exist (400); author with books can't be deleted (409) | `services._ensure_author_exists`, `services.delete_author` |
+ | loan `overdue` (depends on X-Now) | `services.present_loan` |
+ | 14-day loan period, max 3 open loans | `services.LOAN_PERIOD`, `services.MAX_OPEN_LOANS` |
+ | borrow / return | `services.borrow_book`, `services.return_loan` |
+@@ -102,6 +105,9 @@
+ * A member PATCHing their own record with any field other than `name` → 403 (the whole request).
+ * A librarian lending to an unknown or non-integer `member` → 400; if the book is on loan, 409 wins.
+ * Deleting a member who has loans → 409 (mirrors the book rule; loans keep their history).
++* Authors (migration `0002_authors`): `books.author` is the author's id; `author_name` is derived.
++  Author names are unique by exact text (case-sensitive), like the free-text values they were
++  migrated from. The book create form offers `author` as a select of existing authors.
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the
+   heading. The borrow form is shown when the book is available and (for members) the caller
+   is active with fewer than 3 open loans; librarians get a member picker.
+--- a/library_app/migrations/0002_authors.sql
++++ b/library_app/migrations/0002_authors.sql
+@@ -0,0 +1,70 @@
++-- Authors become records: books.author (free text) -> books.author_id (reference to authors).
++--
++-- Every distinct author text becomes one author whose name is that text. Author ids are
++-- 1, 2, 3, ... in order of first appearance when books are read in ascending id order.
++-- Book, loan, member and outbox data is otherwise unchanged (ids included).
++
++CREATE TABLE authors (
++    id   INTEGER PRIMARY KEY AUTOINCREMENT,
++    name TEXT    NOT NULL UNIQUE
++);
++
++INSERT INTO authors (id, name)
++SELECT ROW_NUMBER() OVER (ORDER BY MIN(id)), author
++FROM books
++GROUP BY author;
++
++-- SQLite cannot change a column's type/constraints in place, so books is rebuilt
++-- (create-copy-drop-rename). Foreign keys are enforced and cannot be switched off inside
++-- the migration's transaction, so loans (which references books) is set aside first and
++-- recreated afterwards. AUTOINCREMENT counters are preserved so ids are never reused.
++
++CREATE TEMP TABLE saved_sequence AS
++SELECT name, seq FROM sqlite_sequence WHERE name IN ('books', 'loans');
++
++CREATE TEMP TABLE saved_loans AS
++SELECT id, book_id, member_id, borrowed_at, due_at, returned_at FROM loans;
++
++DROP TABLE loans;
++
++CREATE TABLE books_new (
++    id        INTEGER PRIMARY KEY AUTOINCREMENT,
++    title     TEXT    NOT NULL,
++    author_id INTEGER NOT NULL REFERENCES authors (id),
++    isbn      TEXT    NOT NULL UNIQUE,
++    year      INTEGER
++);
++
++INSERT INTO books_new (id, title, author_id, isbn, year)
++SELECT b.id, b.title, a.id, b.isbn, b.year
++FROM books b JOIN authors a ON a.name = b.author
++ORDER BY b.id;
++
++DROP TABLE books;
++ALTER TABLE books_new RENAME TO books;
++
++CREATE INDEX books_author_id ON books (author_id);
++
++CREATE TABLE loans (
++    id          INTEGER PRIMARY KEY AUTOINCREMENT,
++    book_id     INTEGER NOT NULL REFERENCES books (id),
++    member_id   INTEGER NOT NULL REFERENCES members (id),
++    borrowed_at TEXT    NOT NULL,  -- YYYY-MM-DDTHH:MM:SS (UTC)
++    due_at      TEXT    NOT NULL,  -- YYYY-MM-DD
++    returned_at TEXT               -- YYYY-MM-DDTHH:MM:SS (UTC) or NULL while on loan
++);
++
++INSERT INTO loans (id, book_id, member_id, borrowed_at, due_at, returned_at)
++SELECT id, book_id, member_id, borrowed_at, due_at, returned_at FROM saved_loans ORDER BY id;
++
++CREATE INDEX loans_book_id ON loans (book_id);
++CREATE INDEX loans_member_id ON loans (member_id);
++-- A book can be on loan to at most one member at a time.
++CREATE UNIQUE INDEX loans_one_open_loan_per_book ON loans (book_id) WHERE returned_at IS NULL;
++
++UPDATE sqlite_sequence
++SET seq = MAX(seq, (SELECT s.seq FROM saved_sequence s WHERE s.name = sqlite_sequence.name))
++WHERE name IN (SELECT name FROM saved_sequence);
++
++DROP TABLE saved_loans;
++DROP TABLE saved_sequence;
+--- a/library_app/permissions.py
++++ b/library_app/permissions.py
+@@ -31,6 +31,17 @@
+     return is_librarian(user)
+ 
+ 
++# --- authors --------------------------------------------------------------------------
++
++def can_read_author(user, author):
++    return True
++
++
++def can_manage_authors(user):
++    """Create, update and delete authors."""
++    return is_librarian(user)
++
++
+ # --- books ----------------------------------------------------------------------------
+ 
+ def can_read_book(user, book):
+--- a/library_app/repository.py
++++ b/library_app/repository.py
+@@ -1,8 +1,8 @@
+ """Data access: all SQL lives here.
+ 
+ Functions return plain dicts shaped like API records (references as ids under the API
+-field name, booleans as ``bool``). Values passed to insert/update functions have already
+-been validated by ``services``.
++field name, e.g. ``books.author_id`` -> ``"author"``; booleans as ``bool``). Values passed
++to insert/update functions have already been validated by ``services``.
+ """
+ import json
+ 
+@@ -71,12 +71,61 @@
+     ).fetchone()[0]
+ 
+ 
++# --- authors --------------------------------------------------------------------------
++
++_AUTHOR_SELECT = """
++    SELECT a.id, a.name,
++           (SELECT COUNT(*) FROM books b WHERE b.author_id = a.id) AS book_count
++    FROM authors a
++"""
++
++
++def _author(row):
++    if row is None:
++        return None
++    return {"id": row["id"], "name": row["name"], "book_count": row["book_count"]}
++
++
++def list_authors():
++    return [_author(row) for row in get_db().execute(f"{_AUTHOR_SELECT} ORDER BY a.id")]
++
++
++def get_author(author_id):
++    return _author(get_db().execute(f"{_AUTHOR_SELECT} WHERE a.id = ?", (author_id,)).fetchone())
++
++
++def author_exists(author_id):
++    return get_db().execute("SELECT 1 FROM authors WHERE id = ?", (author_id,)).fetchone() is not None
++
++
++def author_name_taken(name, exclude_id=None):
++    row = get_db().execute("SELECT 1 FROM authors WHERE name = ? AND id IS NOT ?", (name, exclude_id)).fetchone()
++    return row is not None
++
++
++def insert_author(values):
++    return get_db().execute("INSERT INTO authors (name) VALUES (?)", (values["name"],)).lastrowid
++
++
++def update_author(author_id, values):
++    _update("authors", {"name": "name"}, author_id, values)
++
++
++def delete_author(author_id):
++    get_db().execute("DELETE FROM authors WHERE id = ?", (author_id,))
++
++
++def author_has_books(author_id):
++    return get_db().execute("SELECT 1 FROM books WHERE author_id = ?", (author_id,)).fetchone() is not None
++
++
+ # --- books ----------------------------------------------------------------------------
+ 
+ _BOOK_SELECT = """
+-    SELECT b.id, b.title, b.author, b.isbn, b.year,
++    SELECT b.id, b.title, b.author_id, a.name AS author_name, b.isbn, b.year,
+            EXISTS (SELECT 1 FROM loans l WHERE l.book_id = b.id AND l.returned_at IS NULL) AS on_loan
+     FROM books b
++    JOIN authors a ON a.id = b.author_id
+ """
+ 
+ 
+@@ -86,7 +135,8 @@
+     return {
+         "id": row["id"],
+         "title": row["title"],
+-        "author": row["author"],
++        "author": row["author_id"],
++        "author_name": row["author_name"],
+         "isbn": row["isbn"],
+         "year": row["year"],
+         "status": "on_loan" if row["on_loan"] else "available",
+@@ -108,14 +158,14 @@
+ 
+ def insert_book(values):
+     cur = get_db().execute(
+-        "INSERT INTO books (title, author, isbn, year) VALUES (?, ?, ?, ?)",
++        "INSERT INTO books (title, author_id, isbn, year) VALUES (?, ?, ?, ?)",
+         (values["title"], values["author"], values["isbn"], values["year"]),
+     )
+     return cur.lastrowid
+ 
+ 
+ def update_book(book_id, values):
+-    columns = {"title": "title", "author": "author", "isbn": "isbn", "year": "year"}
++    columns = {"title": "title", "author": "author_id", "isbn": "isbn", "year": "year"}
+     _update("books", columns, book_id, values)
+ 
+ 
+--- a/library_app/routes_api.py
++++ b/library_app/routes_api.py
+@@ -54,6 +54,34 @@
+ @bp.delete("/members/<int:member_id>")
+ def delete_member(member_id):
+     services.delete_member(current_context(), member_id)
++    return "", 204
++
++
++# --- authors --------------------------------------------------------------------------
++
++@bp.get("/authors")
++def list_authors():
++    return _items(services.list_authors(current_context(), _filters()))
++
++
++@bp.post("/authors")
++def create_author():
++    return services.create_author(current_context(), _body()), 201
++
++
++@bp.get("/authors/<int:author_id>")
++def get_author(author_id):
++    return services.get_author(current_context(), author_id)
++
++
++@bp.patch("/authors/<int:author_id>")
++def update_author(author_id):
++    return services.update_author(current_context(), author_id, _body())
++
++
++@bp.delete("/authors/<int:author_id>")
++def delete_author(author_id):
++    services.delete_author(current_context(), author_id)
+     return "", 204
+ 
+ 
+--- a/library_app/routes_ui.py
++++ b/library_app/routes_ui.py
+@@ -73,6 +73,32 @@
+     return render_template("members/detail.html", member=member)
+ 
+ 
++# --- authors --------------------------------------------------------------------------
++
++@bp.get("/authors")
++def list_authors():
++    authors = services.list_authors(current_context(), request.args.to_dict())
++    return render_template("authors/list.html", authors=authors)
++
++
++@bp.get("/authors/new")
++def new_author():
++    services.ensure_can_create_author(current_context())
++    return render_template("authors/new.html")
++
++
++@bp.post("/authors")
++def create_author():
++    author = services.create_author(current_context(), _form_values({"name": _text}))
++    return redirect(url_for("ui.show_author", author_id=author["id"]), 303)
++
++
++@bp.get("/authors/<int:author_id>")
++def show_author(author_id):
++    author = services.get_author(current_context(), author_id)
++    return render_template("authors/detail.html", author=author)
++
++
+ # --- books ----------------------------------------------------------------------------
+ 
+ @bp.get("/books")
+@@ -83,13 +109,14 @@
+ 
+ @bp.get("/books/new")
+ def new_book():
+-    services.ensure_can_create_book(current_context())
+-    return render_template("books/new.html")
++    ctx = current_context()
++    services.ensure_can_create_book(ctx)
++    return render_template("books/new.html", authors=services.list_authors(ctx))
+ 
+ 
+ @bp.post("/books")
+ def create_book():
+-    data = _form_values({"title": _text, "author": _text, "isbn": _text, "year": _optional_int})
++    data = _form_values({"title": _text, "author": _optional_int, "isbn": _text, "year": _optional_int})
+     book = services.create_book(current_context(), data)
+     return redirect(url_for("ui.show_book", book_id=book["id"]), 303)
+ 
+--- a/library_app/services.py
++++ b/library_app/services.py
+@@ -15,7 +15,8 @@
+ MAX_OPEN_LOANS = 3
+ 
+ MEMBER_FIELDS = ("id", "username", "name", "role", "active")
+-BOOK_FIELDS = ("id", "title", "author", "isbn", "year", "status")
++AUTHOR_FIELDS = ("id", "name", "book_count")
++BOOK_FIELDS = ("id", "title", "author", "author_name", "isbn", "year", "status")
+ LOAN_FIELDS = ("id", "book", "member", "borrowed_at", "due_at", "returned_at", "overdue")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+@@ -83,6 +84,68 @@
+         raise ValidationError("Username already in use.", {"username": "already in use"})
+ 
+ 
++# --- authors --------------------------------------------------------------------------
++
++def list_authors(ctx, filters=None):
++    authors = [a for a in repository.list_authors() if permissions.can_read_author(ctx.user, a)]
++    return apply_filters(authors, filters or {}, AUTHOR_FIELDS)
++
++
++def get_author(ctx, author_id):
++    author = _load_author(author_id)
++    if not permissions.can_read_author(ctx.user, author):
++        raise Forbidden()
++    return author
++
++
++def ensure_can_create_author(ctx):
++    if not permissions.can_manage_authors(ctx.user):
++        raise Forbidden("Only librarians can create authors.")
++
++
++def create_author(ctx, data):
++    ensure_can_create_author(ctx)
++    with transaction():
++        values = validation.clean_author(data, partial=False)
++        _ensure_author_name_free(values["name"])
++        author_id = repository.insert_author(values)
++    return repository.get_author(author_id)
++
++
++def update_author(ctx, author_id, data):
++    with transaction():
++        _load_author(author_id)
++        if not permissions.can_manage_authors(ctx.user):
++            raise Forbidden("Only librarians can update authors.")
++        values = validation.clean_author(data, partial=True)
++        if "name" in values:
++            _ensure_author_name_free(values["name"], exclude_id=author_id)
++        repository.update_author(author_id, values)
++    return repository.get_author(author_id)
++
++
++def delete_author(ctx, author_id):
++    with transaction():
++        _load_author(author_id)
++        if not permissions.can_manage_authors(ctx.user):
++            raise Forbidden("Only librarians can delete authors.")
++        if repository.author_has_books(author_id):
++            raise Conflict("An author with books cannot be deleted.")
++        repository.delete_author(author_id)
++
++
++def _load_author(author_id):
++    author = repository.get_author(author_id)
++    if author is None:
++        raise NotFound("No such author.")
++    return author
++
++
++def _ensure_author_name_free(name, exclude_id=None):
++    if repository.author_name_taken(name, exclude_id):
++        raise ValidationError("Author name already in use.", {"name": "already in use"})
++
++
+ # --- books ----------------------------------------------------------------------------
+ 
+ def list_books(ctx, filters=None):
+@@ -106,6 +169,7 @@
+     ensure_can_create_book(ctx)
+     with transaction():
+         values = validation.clean_book(data, partial=False)
++        _ensure_author_exists(values["author"])
+         _ensure_isbn_free(values["isbn"])
+         book_id = repository.insert_book(values)
+     return repository.get_book(book_id)
+@@ -117,6 +181,8 @@
+         if not permissions.can_manage_books(ctx.user):
+             raise Forbidden("Only librarians can update books.")
+         values = validation.clean_book(data, partial=True)
++        if "author" in values:
++            _ensure_author_exists(values["author"])
+         if "isbn" in values:
+             _ensure_isbn_free(values["isbn"], exclude_id=book_id)
+         repository.update_book(book_id, values)
+@@ -172,6 +238,11 @@
+     return book
+ 
+ 
++def _ensure_author_exists(author_id):
++    if not repository.author_exists(author_id):
++        raise ValidationError("No such author.", {"author": "no such author"})
++
++
+ def _ensure_isbn_free(isbn, exclude_id=None):
+     if repository.isbn_taken(isbn, exclude_id):
+         raise ValidationError("ISBN already in use.", {"isbn": "already in use"})
+--- a/library_app/templates/authors/detail.html
++++ b/library_app/templates/authors/detail.html
+@@ -0,0 +1,10 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}{{ author.name }}{% endblock %}
++{% block content %}
++<h1>Author #{{ author.id }}</h1>
++<dl>
++  {{ field("name", author.name) }}
++  {{ field("book_count", author.book_count, label="Books", href=url_for('ui.list_books', author=author.id)) }}
++</dl>
++{% endblock %}
+--- a/library_app/templates/authors/list.html
++++ b/library_app/templates/authors/list.html
+@@ -0,0 +1,17 @@
++{% extends "base.html" %}
++{% block title %}Authors{% endblock %}
++{% block content %}
++<h1>Authors</h1>
++{% if ctx.is_librarian %}<p><a href="{{ url_for('ui.new_author') }}">New author</a></p>{% endif %}
++<table>
++  <thead><tr><th>Name</th><th>Books</th></tr></thead>
++  <tbody>
++  {% for author in authors %}
++    <tr data-id="{{ author.id }}">
++      <td><a href="{{ url_for('ui.show_author', author_id=author.id) }}">{{ author.name }}</a></td>
++      <td><a href="{{ url_for('ui.list_books', author=author.id) }}">{{ author.book_count }}</a></td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/library_app/templates/authors/new.html
++++ b/library_app/templates/authors/new.html
+@@ -0,0 +1,9 @@
++{% extends "base.html" %}
++{% block title %}New author{% endblock %}
++{% block content %}
++<h1>New author</h1>
++<form data-create="authors" method="post" action="{{ url_for('ui.create_author') }}">
++  <label>Name <input name="name" required></label>
++  <button type="submit">Create</button>
++</form>
++{% endblock %}
+--- a/library_app/templates/base.html
++++ b/library_app/templates/base.html
+@@ -18,6 +18,7 @@
+ <body>
+   <nav>
+     <a href="{{ url_for('ui.list_books') }}">Books</a>
++    <a href="{{ url_for('ui.list_authors') }}">Authors</a>
+     <a href="{{ url_for('ui.list_loans') }}">Loans</a>
+     <a href="{{ url_for('ui.list_members') }}">Members</a>
+     {% if ctx %}<span>Signed in as {{ ctx.user.username }} ({{ ctx.user.role }})</span>{% endif %}
+--- a/library_app/templates/books/detail.html
++++ b/library_app/templates/books/detail.html
+@@ -5,7 +5,9 @@
+ <h1>Book #{{ book.id }}</h1>
+ <dl>
+   {{ field("title", book.title) }}
+-  {{ field("author", book.author) }}
++  {# author is a reference: shown as the author's name, linking to the author record #}
++  {{ field("author", book.author_name, href=url_for('ui.show_author', author_id=book.author)) }}
++  {{ field("author_name", book.author_name, label="Author name") }}
+   {{ field("isbn", book.isbn, label="ISBN") }}
+   {{ field("year", book.year) }}
+   {{ field("status", book.status) }}
+--- a/library_app/templates/books/list.html
++++ b/library_app/templates/books/list.html
+@@ -9,7 +9,7 @@
+   {% for book in books %}
+     <tr data-id="{{ book.id }}">
+       <td><a href="{{ url_for('ui.show_book', book_id=book.id) }}">{{ book.title }}</a></td>
+-      <td>{{ book.author }}</td>
++      <td><a href="{{ url_for('ui.show_author', author_id=book.author) }}">{{ book.author_name }}</a></td>
+       <td>{{ book.isbn }}</td>
+       <td>{{ book.year|display }}</td>
+       <td>{{ book.status }}</td>
+--- a/library_app/templates/books/new.html
++++ b/library_app/templates/books/new.html
+@@ -4,7 +4,12 @@
+ <h1>New book</h1>
+ <form data-create="books" method="post" action="{{ url_for('ui.create_book') }}">
+   <label>Title <input name="title" required></label>
+-  <label>Author <input name="author" required></label>
++  <label>Author
++    <select name="author" required>
++      <option value=""></option>
++      {% for author in authors %}<option value="{{ author.id }}">{{ author.name }}</option>{% endfor %}
++    </select>
++  </label>
+   <label>ISBN <input name="isbn" required></label>
+   <label>Year <input name="year" type="number" step="1"></label>
+   <button type="submit">Create</button>
+--- a/library_app/validation.py
++++ b/library_app/validation.py
+@@ -77,6 +77,7 @@
+ # --- per-collection cleaning ----------------------------------------------------------
+ 
+ MEMBER_WRITABLE = ("username", "name", "role", "active")
++AUTHOR_WRITABLE = ("name",)
+ BOOK_WRITABLE = ("title", "author", "isbn", "year")
+ 
+ 
+@@ -100,14 +101,29 @@
+     return values
+ 
+ 
++def clean_author(data, *, partial):
++    data = require_object(data)
++    errors = unknown_field_errors(data, AUTHOR_WRITABLE)
++    values = {}
++    if "name" in data or not partial:
++        with collect(errors, "name"):
++            values["name"] = required_text(data.get("name"))
++    raise_if_errors(errors)
++    return values
++
++
+ def clean_book(data, *, partial):
++    """``author`` must be an author id; whether that author exists is checked in ``services``."""
+     data = require_object(data)
+     errors = unknown_field_errors(data, BOOK_WRITABLE)
+     values = {}
+-    for name in ("title", "author", "isbn"):
++    for name in ("title", "isbn"):
+         if name in data or not partial:
+             with collect(errors, name):
+                 values[name] = required_text(data.get(name))
++    if "author" in data or not partial:
++        with collect(errors, "author"):
++            values["author"] = record_id(data.get("author"))
+     if "year" in data or not partial:
+         with collect(errors, "year"):
+             values["year"] = optional_integer(data.get("year"))
+--- a/seed.py
++++ b/seed.py
+@@ -22,8 +22,9 @@
+         "INSERT INTO members (id, username, name, role, active) VALUES (:id, :username, :name, :role, :active)",
+         [{**m, "active": int(m.get("active", True))} for m in seed["members"]],
+     )
++    conn.executemany("INSERT INTO authors (id, name) VALUES (:id, :name)", seed["authors"])
+     conn.executemany(
+-        "INSERT INTO books (id, title, author, isbn, year) VALUES (:id, :title, :author, :isbn, :year)",
++        "INSERT INTO books (id, title, author_id, isbn, year) VALUES (:id, :title, :author, :isbn, :year)",
+         [{**b, "year": b.get("year")} for b in seed["books"]],
+     )
+     conn.executemany(
+--- a/tests/test_library_authors.py
++++ b/tests/test_library_authors.py
+@@ -0,0 +1,150 @@
++"""Authors: records referenced by books, derived book_count, librarian-only management,
++and the 0002 migration that turned free-text book authors into author records."""
++import os
++import sqlite3
++
++from accept_client import fresh_app, parse_ui
++
++# Authors created from the seed books, in order of first appearance by book id.
++SEED_AUTHORS = ["M. Reyes", "T. Okoye", "S. Lindqvist", "R. Banerjee", "J. Moreau", "K. Tanaka"]
++
++
++def test_any_user_reads_authors_with_book_count(app, seed):
++    authors = app.get("/api/authors", user="lena").json["items"]
++    assert [a["name"] for a in authors] == SEED_AUTHORS
++    assert [a["id"] for a in authors] == [1, 2, 3, 4, 5, 6]
++    for author in authors:
++        assert author["book_count"] == sum(b["author"] == author["id"] for b in seed["books"])
++    assert sum(a["book_count"] for a in authors) == 40
++    assert app.get("/api/authors/2", user="chen").json == authors[1]
++    assert app.get("/api/authors/999", user="chen").status == 404
++    assert app.get("/api/authors").status == 401
++
++
++def test_author_filters(app):
++    assert [a["id"] for a in app.get("/api/authors?name=K. Tanaka", user="chen").json["items"]] == [6]
++    assert app.get("/api/authors?colour=red", user="chen").status == 400
++
++
++def test_librarian_creates_updates_and_deletes_author(app):
++    r = app.post("/api/authors", {"name": "U. Le Guin"}, user="ada")
++    assert r.status == 201 and r.json == {"id": 7, "name": "U. Le Guin", "book_count": 0}
++    r = app.patch("/api/authors/7", {"name": "Ursula K. Le Guin"}, user="ben")
++    assert r.status == 200 and r.json["name"] == "Ursula K. Le Guin"
++    assert app.delete("/api/authors/7", user="ada").status == 204
++    assert app.get("/api/authors/7", user="ada").status == 404
++
++
++def test_author_validation(app):
++    assert app.post("/api/authors", {}, user="ada").status == 400
++    assert app.post("/api/authors", {"name": ""}, user="ada").status == 400
++    assert app.post("/api/authors", {"name": None}, user="ada").status == 400
++    dup = app.post("/api/authors", {"name": "M. Reyes"}, user="ada")
++    assert dup.status == 400 and dup.json["fields"] == {"name": "already in use"}
++    assert app.patch("/api/authors/2", {"name": "M. Reyes"}, user="ada").status == 400
++    assert app.patch("/api/authors/2", {"name": None}, user="ada").status == 400
++    assert app.patch("/api/authors/2", {"book_count": 3}, user="ada").status == 400  # derived
++    assert app.post("/api/authors", {"name": "X", "id": 50}, user="ada").status == 400
++    assert app.patch("/api/authors/2", {"name": "T. Okoye"}, user="ada").status == 200  # unchanged is fine
++
++
++def test_only_librarians_manage_authors(app):
++    assert app.post("/api/authors", {"name": "X"}, user="chen").status == 403
++    assert app.post("/api/authors", {}, user="chen").status == 403  # 403 before 400
++    assert app.patch("/api/authors/1", {"name": "X"}, user="chen").status == 403
++    assert app.delete("/api/authors/1", user="chen").status == 403  # 403 before 409
++    assert app.patch("/api/authors/999", {"name": "X"}, user="chen").status == 404
++
++
++def test_author_with_books_cannot_be_deleted(app):
++    assert app.delete("/api/authors/1", user="ada").status == 409
++    assert app.delete("/api/authors/999", user="ada").status == 404
++
++
++def test_book_count_and_author_name_follow_changes(app):
++    author = app.post("/api/authors", {"name": "N. New"}, user="ada").json
++    book = app.post("/api/books", {"title": "T", "author": author["id"], "isbn": "X-1"}, user="ada").json
++    assert book["author_name"] == "N. New"
++    assert app.get(f"/api/authors/{author['id']}", user="chen").json["book_count"] == 1
++    app.patch(f"/api/authors/{author['id']}", {"name": "N. Renamed"}, user="ada")
++    assert app.get(f"/api/books/{book['id']}", user="chen").json["author_name"] == "N. Renamed"
++    assert app.get("/api/books?author_name=N. Renamed", user="chen").json["items"] == [
++        app.get(f"/api/books/{book['id']}", user="chen").json
++    ]
++    assert app.delete(f"/api/authors/{author['id']}", user="ada").status == 409
++    app.patch(f"/api/books/{book['id']}", {"author": 1}, user="ada")
++    assert app.get(f"/api/authors/{author['id']}", user="chen").json["book_count"] == 0
++    assert app.delete(f"/api/authors/{author['id']}", user="ada").status == 204
++
++
++def test_author_ui(app):
++    page = parse_ui(app.get("/ui/authors/6", user="chen").text)
++    assert page.fields == {"name": "K. Tanaka", "book_count": "6"}
++    assert page.actions == []
++    assert app.get("/ui/authors/999", user="chen").status == 404
++    book = parse_ui(app.get("/ui/books/19", user="chen").text)
++    assert book.fields["author"] == "K. Tanaka"
++    assert "author" in parse_ui(app.get("/ui/books/new", user="ada").text).inputs
++
++
++# --- migration 0002 ----------------------------------------------------------------------
++
++def _write_pre_authors_database(workdir):
++    """Replace the instance's database with one at schema version 1 (free-text authors)."""
++    path = os.path.join(workdir, "data.db")
++    os.remove(path)
++    conn = sqlite3.connect(path)
++    with open(os.path.join(workdir, "library_app", "migrations", "0001_initial.sql"), encoding="utf-8") as fh:
++        conn.executescript(fh.read())
++    conn.executescript(
++        "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);"
++        "INSERT INTO schema_version VALUES (1, 'initial', '2026-01-01T00:00:00');"
++        "INSERT INTO members (id, username, name, role, active) VALUES"
++        " (1, 'ada', 'Ada', 'librarian', 1), (2, 'bo', 'Bo', 'member', 1);"
++        # Inserted out of id order; first appearance by id is Zed (1), Abe (2), abe (5), Mia (7).
++        "INSERT INTO books (id, title, author, isbn, year) VALUES"
++        " (7, 'G', 'Mia', 'i7', NULL), (2, 'B', 'Abe', 'i2', 2001), (1, 'A', 'Zed', 'i1', 2000),"
++        " (3, 'C', 'Zed', 'i3', NULL), (5, 'E', 'abe', 'i5', 2005), (6, 'F', 'Abe', 'i6', 2006),"
++        " (9, 'X', 'Gone', 'i9', NULL);"
++        "DELETE FROM books WHERE id = 9;"  # its id must not be reused, and 'Gone' is no author
++        "INSERT INTO loans (id, book_id, member_id, borrowed_at, due_at, returned_at) VALUES"
++        " (1, 3, 2, '2026-01-02T10:00:00', '2026-01-16', '2026-01-10T10:00:00'),"
++        " (2, 3, 2, '2026-02-20T10:00:00', '2026-03-06', NULL);"
++    )
++    conn.commit()
++    conn.close()
++
++
++def test_migration_turns_author_texts_into_author_records(app):
++    _write_pre_authors_database(app.workdir)
++    migrated = fresh_app(app.workdir)
++
++    assert migrated.get("/api/authors", user="bo").json["items"] == [
++        {"id": 1, "name": "Zed", "book_count": 2},
++        {"id": 2, "name": "Abe", "book_count": 2},
++        {"id": 3, "name": "abe", "book_count": 1},
++        {"id": 4, "name": "Mia", "book_count": 1},
++    ]
++    books = migrated.get("/api/books", user="bo").json["items"]
++    assert [(b["id"], b["title"], b["author"], b["author_name"], b["isbn"], b["year"], b["status"]) for b in books] == [
++        (1, "A", 1, "Zed", "i1", 2000, "available"),
++        (2, "B", 2, "Abe", "i2", 2001, "available"),
++        (3, "C", 1, "Zed", "i3", None, "on_loan"),
++        (5, "E", 3, "abe", "i5", 2005, "available"),
++        (6, "F", 2, "Abe", "i6", 2006, "available"),
++        (7, "G", 4, "Mia", "i7", None, "available"),
++    ]
++    loans = migrated.get("/api/loans", user="ada").json["items"]
++    assert [(l["id"], l["book"], l["member"], l["returned_at"]) for l in loans] == [
++        (1, 3, 2, "2026-01-10T10:00:00"), (2, 3, 2, None),
++    ]
++    # Loan rules still hold on the rebuilt tables, and AUTOINCREMENT counters survived.
++    assert migrated.post("/api/books/3/borrow", {}, user="bo").status == 409
++    assert migrated.post("/api/books", {"title": "N", "author": 4, "isbn": "i10"}, user="ada").json["id"] == 10
++    assert migrated.post("/api/authors", {"name": "New"}, user="ada").json["id"] == 5
++    assert migrated.delete("/api/books/3", user="ada").status == 409
++
++    conn = sqlite3.connect(os.path.join(migrated.workdir, "data.db"))
++    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
++    assert [r[0] for r in conn.execute("SELECT version FROM schema_version ORDER BY version")][:2] == [1, 2]
++    conn.close()
+--- a/tests/test_library_basics.py
++++ b/tests/test_library_basics.py
+@@ -40,8 +40,11 @@
+ def test_seed_data_is_loaded_with_same_ids(app, seed):
+     members = app.get("/api/members", user="ada").json["items"]
+     assert members == seed["members"]
++    assert app.get("/api/authors", user="ada").json["items"] == [
++        {**a, "book_count": sum(b["author"] == a["id"] for b in seed["books"])} for a in seed["authors"]
++    ]
+     books = app.get("/api/books", user="ada").json["items"]
+-    assert [{k: v for k, v in b.items() if k != "status"} for b in books] == seed["books"]
++    assert [{k: v for k, v in b.items() if k not in ("status", "author_name")} for b in books] == seed["books"]
+     loans = app.get("/api/loans", user="ada").json["items"]
+     assert [{k: v for k, v in l.items() if k != "overdue"} for l in loans] == seed["loans"]
+ 
+@@ -82,10 +85,11 @@
+ 
+ 
+ def test_filters_match_exactly(app):
+-    r = app.get("/api/books?author=K. Tanaka&status=available", user="chen")
++    r = app.get("/api/books?author=6&status=available", user="chen")
+     assert r.status == 200
+     assert r.json["items"]
+-    assert all(b["author"] == "K. Tanaka" and b["status"] == "available" for b in r.json["items"])
++    assert all(b["author"] == 6 and b["author_name"] == "K. Tanaka" and b["status"] == "available"
++               for b in r.json["items"])
+     loans = app.get("/api/loans?book=4", user="ada").json["items"]
+     assert [l["id"] for l in loans] == [l["id"] for l in loans if l["book"] == 4] and loans
+     assert [m["id"] for m in app.get("/api/members?active=false", user="ada").json["items"]] == [12]
+--- a/tests/test_library_books.py
++++ b/tests/test_library_books.py
+@@ -1,6 +1,6 @@
+ """Books: readable by all, librarian-only management, derived status, validation."""
+ 
+-NEW_BOOK = {"title": "Dune", "author": "F. Herbert", "isbn": "978-0441013593", "year": 1965}
++NEW_BOOK = {"title": "Dune", "author": 6, "isbn": "978-0441013593", "year": 1965}  # author 6: K. Tanaka
+ 
+ 
+ def test_any_user_reads_books_with_status(app):
+@@ -15,7 +15,7 @@
+ def test_librarian_creates_book(app):
+     r = app.post("/api/books", NEW_BOOK, user="ada")
+     assert r.status == 201
+-    assert r.json == {"id": 41, **NEW_BOOK, "status": "available"}
++    assert r.json == {"id": 41, **NEW_BOOK, "author_name": "K. Tanaka", "status": "available"}
+ 
+ 
+ def test_year_is_optional(app):
+@@ -40,12 +40,33 @@
+     assert app.post("/api/books", dict(NEW_BOOK, status="on_loan"), user="ada").status == 400
+     assert app.patch("/api/books/2", {"isbn": "978-0-1007-001-1"}, user="ada").status == 400
+     assert app.patch("/api/books/2", {"title": None}, user="ada").status == 400
++    assert app.post("/api/books", dict(NEW_BOOK, author_name="X"), user="ada").status == 400  # derived
++
++
++def test_book_author_must_be_an_existing_author_id(app):
++    for bad in (None, "K. Tanaka", "6", 999, True, 6.5):
++        r = app.post("/api/books", dict(NEW_BOOK, author=bad), user="ada")
++        assert r.status == 400 and "author" in r.json["fields"], bad
++        assert app.patch("/api/books/2", {"author": bad}, user="ada").status == 400, bad
++    assert app.get("/api/books/2", user="ada").json["author"] == 2
++
++
++def test_librarian_changes_book_author(app):
++    r = app.patch("/api/books/2", {"author": 1}, user="ada")
++    assert r.status == 200 and r.json["author"] == 1 and r.json["author_name"] == "M. Reyes"
++
++
++def test_filter_books_by_author(app, seed):
++    books = app.get("/api/books?author=3", user="chen").json["items"]
++    assert [b["id"] for b in books] == [b["id"] for b in seed["books"] if b["author"] == 3]
++    assert all(b["author_name"] == "S. Lindqvist" for b in books)
++    assert app.get("/api/books?author=999", user="chen").json["items"] == []
+ 
+ 
+ def test_librarian_updates_book(app):
+     r = app.patch("/api/books/2", {"title": "New Title", "year": None}, user="ada")
+     assert r.status == 200 and r.json["title"] == "New Title" and r.json["year"] is None
+-    assert r.json["author"] == "T. Okoye"
++    assert r.json["author"] == 2 and r.json["author_name"] == "T. Okoye"
+ 
+ 
+ def test_delete_book(app):
+--- a/tests/test_library_ui.py
++++ b/tests/test_library_ui.py
+@@ -8,6 +8,7 @@
+ 
+ def test_list_pages_show_readable_rows(app):
+     assert parse_ui(app.get("/ui/books", user="chen").text).rows == list(range(1, 41))
++    assert parse_ui(app.get("/ui/authors", user="chen").text).rows == list(range(1, 7))
+     assert parse_ui(app.get("/ui/members", user="chen").text).rows == [3]
+     loans = parse_ui(app.get("/ui/loans", user="chen").text).rows
+     assert loans == [l["id"] for l in app.get("/api/loans", user="chen").json["items"]]
+@@ -19,8 +20,8 @@
+ 
+ def test_book_detail_fields_and_actions(app):
+     page = parse_ui(app.get("/ui/books/2", user="chen").text)
+-    assert page.fields == {"title": "The Lantern Song 2", "author": "T. Okoye", "isbn": "978-0-1014-002-2",
+-                           "year": "2005", "status": "available"}
++    assert page.fields == {"title": "The Lantern Song 2", "author": "T. Okoye", "author_name": "T. Okoye",
++                           "isbn": "978-0-1014-002-2", "year": "2005", "status": "available"}
+     assert page.actions == ["borrow"]
+     assert parse_ui(app.get("/ui/books/4", user="chen").text).actions == []  # on loan
+     assert parse_ui(app.get("/ui/books/2", user="jo").text).actions == []  # 3 open loans
+@@ -54,6 +55,9 @@
+     assert books.creates == ["books"] and sorted(books.inputs) == ["author", "isbn", "title", "year"]
+     members = parse_ui(app.get("/ui/members/new", user="ada").text)
+     assert members.creates == ["members"] and sorted(members.inputs) == ["active", "name", "role", "username"]
++    authors = parse_ui(app.get("/ui/authors/new", user="ada").text)
++    assert authors.creates == ["authors"] and authors.inputs == ["name"]
++    assert app.get("/ui/authors/new", user="chen").status == 403
+     assert app.get("/ui/books/new", user="chen").status == 403
+     assert app.get("/ui/members/new", user="chen").status == 403
+     assert app.get("/ui/loans/new", user="ada").status == 403
+@@ -80,12 +84,17 @@
+ 
+ 
+ def test_ui_forms_post_through_services(app):
+-    code, headers, _ = _post_form(app, "/ui/books", {"title": "T", "author": "A", "isbn": "X-1", "year": "2001"}, "ada")
++    code, headers, _ = _post_form(app, "/ui/books", {"title": "T", "author": "5", "isbn": "X-1", "year": "2001"}, "ada")
+     assert code == 303 and headers["Location"].endswith("/ui/books/41")
+     assert app.get("/api/books/41", user="ada").json["year"] == 2001
++    assert app.get("/api/books/41", user="ada").json["author"] == 5
++    code, _, _ = _post_form(app, "/ui/books", {"title": "T", "author": "J. Moreau", "isbn": "X-3"}, "ada")
++    assert code == 400  # author must be an author id
++    code, headers, _ = _post_form(app, "/ui/authors", {"name": "N. New"}, "ada")
++    assert code == 303 and headers["Location"].endswith("/ui/authors/7")
+     code, _, _ = _post_form(app, "/ui/books/41/borrow", {"member": "4"}, "ada")
+     assert code == 303 and app.get("/api/books/41", user="ada").json["status"] == "on_loan"
+-    code, _, _ = _post_form(app, "/ui/books", {"title": "T", "author": "A", "isbn": "X-2", "year": "soon"}, "ada")
++    code, _, _ = _post_form(app, "/ui/books", {"title": "T", "author": "1", "isbn": "X-2", "year": "soon"}, "ada")
+     assert code == 400
+     code, _, _ = _post_form(app, "/ui/members", {"username": "u1", "name": "U", "role": "member", "active": "false"}, "ada")
+     assert code == 303 and app.get("/api/members/13", user="ada").json["active"] is False

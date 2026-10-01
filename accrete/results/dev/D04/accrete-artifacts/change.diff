@@ -1,0 +1,134 @@
+--- a/changes/0004-fines.yaml
++++ b/changes/0004-fines.yaml
+@@ -0,0 +1,131 @@
++request: "Late-return fines: loans get derived fine (0.50 per day late, capped at 5.00; returned loans use the calendar date of returned_at, open loans use today; from the current due_at) and fine_paid (bool). Members get derived fines_due = sum of fine over their returned loans with fine_paid false. While fines_due > 0 the member cannot borrow (self or via a librarian), renew or place a hold (409; a ready hold stays ready). Returning a loan with fine > 0 emits fine_charged {loan, member, amount}. New POST /api/loans/{id}/pay_fine ({}), librarians only (members 403); 409 if not returned, fine 0 or already paid; sets fine_paid, emits one fine_paid {loan, member, amount}, returns the loan. UI shows pay_fine exactly when the caller may pay now. Existing late-returned loans: fine_paid = true; all other existing loans fine_paid = false."
++interpretation: >-
++  loans.fine is a computed number: min(5.0, 0.5 * max(0, days late)) where days late is
++  (returned_at.date() or today) - due_at in days. loans.fine_paid is a stored, system bool
++  (default False), backfilled to True for existing loans that are returned with fine > 0 and False
++  otherwise. members.fines_due is a computed number summing fine over the member's returned,
++  unpaid loans. The borrow and hold guards additionally require (params.member or user).fines_due <= 0
++  and the renew guard requires record.member.fines_due <= 0 (the guard fails before any effect, so a
++  ready hold is untouched). loans.return appends an emit of fine_charged when the returned loan's fine
++  is positive. New loans.pay_fine: allow librarian, guard returned and fine > 0 and not fine_paid,
++  effects set fine_paid True and emit fine_paid {loan, member, amount}. UI forms follow allow + guard.
++ops:
++  - add_field:
++      entity: loans
++      name: fine
++      type: number
++      computed: >-
++        min(5.0, 0.5 * max(0, ((record.returned_at.date() if record.returned_at is not None else today) - record.due_at).days))
++  - add_field:
++      entity: loans
++      name: fine_paid
++      type: bool
++      required: true
++      system: true
++      default: "False"
++      backfill: "record.returned_at is not None and record.fine > 0"
++  - add_field:
++      entity: members
++      name: fines_due
++      type: number
++      computed: "sum([l.fine for l in loans if l.member == record and l.returned_at is not None and not l.fine_paid])"
++  - change_action:
++      entity: books
++      name: borrow
++      guard: >-
++        (record.status == 'available' or (record.status == 'reserved' and (user.role == 'librarian' or count(holds, book=record, status='ready', member=user) > 0)))
++        and (params.member or user).active
++        and count(loans, member=(params.member or user), returned_at=None) < 3
++        and (params.member or user).fines_due <= 0
++  - change_action:
++      entity: books
++      name: hold
++      guard: >-
++        (record.status == 'on_loan' or record.status == 'reserved')
++        and (params.member or user).active
++        and count(holds, book=record, member=(params.member or user), status='waiting') == 0
++        and count(holds, book=record, member=(params.member or user), status='ready') == 0
++        and count(loans, book=record, member=(params.member or user), returned_at=None) == 0
++        and (params.member or user).fines_due <= 0
++  - change_action:
++      entity: loans
++      name: renew
++      guard: >-
++        record.returned_at is None
++        and today <= record.due_at
++        and record.renewals < 2
++        and count(holds, book=record.book, status='waiting') == 0
++        and record.member.fines_due <= 0
++  - change_action:
++      entity: loans
++      name: return
++      append_effects:
++        - if: "record.fine > 0"
++          then:
++            - emit: fine_charged
++              payload: {loan: record, member: record.member, amount: record.fine}
++  - add_action:
++      entity: loans
++      name: pay_fine
++      allow: "user.role == 'librarian'"
++      guard: "record.returned_at is not None and record.fine > 0 and not record.fine_paid"
++      guard_message: "'this loan has no unpaid fine'"
++      effects:
++        - set: {fine_paid: "True"}
++        - emit: fine_paid
++          payload: {loan: record, member: record.member, amount: record.fine}
++expect:
++  - {as: ada, do: "GET /api/loans/2", now: "2026-03-01T10:00:00", json: {fine: 2.0, fine_paid: true}}
++  - {as: ada, do: "GET /api/loans/36", now: "2026-03-01T10:00:00", json: {fine: 3.0, fine_paid: true}}
++  - {as: ada, do: "GET /api/loans/1", now: "2026-03-01T10:00:00", json: {fine: 0, fine_paid: false}}
++  - {as: ada, do: "GET /api/loans/46", now: "2026-02-18T10:00:00", json: {fine: 1.5, fine_paid: false}}
++  - {as: ada, do: "GET /api/loans/46", now: "2026-03-01T10:00:00", json: {fine: 5.0, fine_paid: false}}
++  - {as: ada, do: "GET /api/members/10", now: "2026-03-01T10:00:00", json: {fines_due: 0}}
++  - {as: ada, do: "GET /api/members/8", now: "2026-03-01T10:00:00", json: {fines_due: 0}}
++  - {as: ada, do: "PATCH /api/loans/2", body: {fine_paid: false}, status: 403}
++  - {as: ada, do: "POST /api/loans/1/pay_fine", body: {}, status: 409}
++  - {as: ada, do: "POST /api/loans/2/pay_fine", body: {}, status: 409}
++  - {as: ada, do: "POST /api/loans/46/pay_fine", body: {}, now: "2026-03-01T10:00:00", status: 409}
++  - {as: dara, do: "POST /api/loans/29/pay_fine", body: {}, status: 403}
++  - name: "late return charges a fine, blocks the member until paid"
++    steps:
++      - {as: jo, do: "POST /api/loans/46/return", body: {}, now: "2026-02-18T10:00:00", status: 200, json: {fine: 1.5, fine_paid: false}}
++      - {as: jo, do: "GET /api/_outbox", count: 1, json: {items: [{channel: fine_charged, payload: {loan: 46, member: 10, amount: 1.5}}]}}
++      - {as: jo, do: "GET /api/loans/46", now: "2026-03-30T10:00:00", json: {fine: 1.5}}
++      - {as: jo, do: "GET /api/members/10", now: "2026-02-18T10:00:00", json: {fines_due: 1.5}}
++      - {as: jo, do: "POST /api/books/2/borrow", body: {}, now: "2026-02-18T10:00:00", status: 409}
++      - {as: ada, do: "POST /api/books/2/borrow", body: {member: 10}, now: "2026-02-18T10:00:00", status: 409}
++      - {as: jo, do: "POST /api/loans/57/renew", body: {}, now: "2026-02-18T10:00:00", status: 409}
++      - {as: ada, do: "POST /api/loans/57/renew", body: {}, now: "2026-02-18T10:00:00", status: 409}
++      - {as: jo, do: "POST /api/books/1/hold", body: {}, now: "2026-02-18T10:00:00", status: 409}
++      - {as: ada, do: "POST /api/books/1/hold", body: {member: 10}, now: "2026-02-18T10:00:00", status: 409}
++      - {as: jo, do: "POST /api/loans/46/pay_fine", body: {}, status: 403}
++      - {as: ada, do: "POST /api/loans/46/pay_fine", body: {}, now: "2026-02-18T11:00:00", status: 200, json: {id: 46, fine_paid: true, fine: 1.5}}
++      - {as: ada, do: "GET /api/_outbox", count: 2, json: {items: [{channel: fine_charged}, {channel: fine_paid, payload: {loan: 46, member: 10, amount: 1.5}}]}}
++      - {as: ada, do: "POST /api/loans/46/pay_fine", body: {}, status: 409}
++      - {as: ada, do: "GET /api/_outbox", count: 2}
++      - {as: jo, do: "GET /api/members/10", now: "2026-02-18T11:00:00", json: {fines_due: 0}}
++      - {as: jo, do: "POST /api/loans/57/renew", body: {}, now: "2026-02-18T12:00:00", status: 200, json: {renewals: 1}}
++      - {as: jo, do: "POST /api/books/2/borrow", body: {}, now: "2026-02-18T12:00:00", status: 200}
++  - name: "on-time return emits no fine; partial day counts by calendar date"
++    steps:
++      - {as: chen, do: "POST /api/loans/52/return", body: {}, now: "2026-03-04T23:00:00", status: 200, json: {fine: 0}}
++      - {as: chen, do: "GET /api/_outbox", count: 0}
++      - {as: eli, do: "POST /api/loans/60/return", body: {}, now: "2026-03-06T00:30:00", status: 200, json: {fine: 0.5}}
++      - {as: eli, do: "GET /api/members/5", now: "2026-03-06T00:30:00", json: {fines_due: 0.5}}
++  - name: "ready hold stays ready while its member owes a fine"
++    steps:
++      - {as: gus, do: "POST /api/books/1/hold", body: {}, now: "2026-03-01T09:00:00", status: 200}
++      - {as: gus, do: "POST /api/loans/47/return", body: {}, now: "2026-03-01T10:00:00", status: 200, json: {fine: 5.0}}
++      - {as: ivan, do: "POST /api/loans/55/return", body: {}, now: "2026-03-01T11:00:00", status: 200}
++      - {as: gus, do: "GET /api/holds/1", json: {status: ready}}
++      - {as: gus, do: "POST /api/books/1/borrow", body: {}, now: "2026-03-01T12:00:00", status: 409}
++      - {as: ada, do: "POST /api/books/1/borrow", body: {member: 7}, now: "2026-03-01T12:00:00", status: 409}
++      - {as: gus, do: "GET /api/holds/1", json: {status: ready}}
++      - {as: ada, do: "POST /api/loans/47/pay_fine", body: {}, now: "2026-03-01T13:00:00", status: 200}
++      - {as: gus, do: "POST /api/books/1/borrow", body: {}, now: "2026-03-01T14:00:00", status: 200}
++      - {as: gus, do: "GET /api/holds/1", json: {status: fulfilled}}
++  - name: "renewal extends due date used by fine"
++    steps:
++      - {as: chen, do: "POST /api/loans/52/renew", body: {}, now: "2026-03-01T10:00:00", status: 200}
++      - {as: chen, do: "GET /api/loans/52", now: "2026-03-20T10:00:00", json: {fine: 1.0, overdue: true}}

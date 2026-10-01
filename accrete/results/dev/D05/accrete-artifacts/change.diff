@@ -1,0 +1,82 @@
+--- a/changes/0002-assistant-role.yaml
++++ b/changes/0002-assistant-role.yaml
+@@ -0,0 +1,79 @@
++request: >-
++  New staff role: assistant. members.role accepts a third value "assistant". Assistants can read
++  all books, members and loans; can lend any book to any member via borrow with {"member": id}
++  (same 409 rules) and return any loan; can PATCH only the `active` field of members whose role is
++  `member` (other fields or other staff records -> 403); on their own record only `name`; cannot
++  create/update/delete books, create/delete members, or create/patch/delete loans.
++interpretation: >-
++  Add 'assistant' to the role enum (no data migration needed: no existing record changes).
++  Reading members and loans is extended to assistants. The members update rule also admits an
++  assistant acting on a record whose role is 'member'; `active` becomes writable by an assistant
++  only on such records, and `name` is writable by an assistant only on their own record, so any
++  other field (or another staff record) gives 403. Borrow and return allow assistants like
++  librarians. Create/delete rules for books, members and loans are unchanged (librarian only /
++  nobody), so assistants get 403 there and on /ui/*/new.
++ops:
++  - change_field: {entity: members, name: role, values: [member, librarian, assistant]}
++  - set_rule: {entity: members, rule: read, expr: "user.role == 'librarian' or user.role == 'assistant' or record == user"}
++  - set_rule: {entity: members, rule: update, expr: "user.role == 'librarian' or record == user or (user.role == 'assistant' and record.role == 'member')"}
++  - change_field: {entity: members, name: active, write_if: "user.role == 'librarian' or (user.role == 'assistant' and record.role == 'member')"}
++  - change_field: {entity: members, name: name, write_if: "user.role != 'assistant' or record == user"}
++  - set_rule: {entity: loans, rule: read, expr: "user.role == 'librarian' or user.role == 'assistant' or record.member == user"}
++  - change_action: {entity: books, name: borrow, allow: "user.role == 'librarian' or user.role == 'assistant' or params.member is None or params.member == user"}
++  - change_action: {entity: loans, name: return, allow: "user.role == 'librarian' or user.role == 'assistant' or record.member == user"}
++expect:
++  - {as: ada, do: "POST /api/members", body: {username: x1, name: X, role: boss}, status: 400}
++  - {as: chen, do: "POST /api/members", body: {username: x1, name: X, role: assistant}, status: 403}
++  - {as: ada, do: "PATCH /api/members/3", body: {role: assistant}, status: 200, json: {role: assistant}}
++  - {as: chen, do: "PATCH /api/members/3", body: {role: assistant}, status: 403}
++  - {as: chen, do: "GET /api/members", count: 1}
++  - {as: chen, do: "PATCH /api/members/3", body: {name: Chen2}, status: 200, json: {name: Chen2}}
++  - {as: chen, do: "PATCH /api/members/4", body: {name: Z}, status: 403}
++  - {as: ada, do: "PATCH /api/members/3", body: {name: Z, active: false}, status: 200}
++  - name: "assistant reads everything"
++    steps:
++      - {as: ada, do: "POST /api/members", body: {username: asa, name: Asa, role: assistant}, status: 201, json: {role: assistant, active: true}}
++      - {as: asa, do: "GET /api/members", count: 13}
++      - {as: asa, do: "GET /api/loans", count: 60}
++      - {as: asa, do: "GET /api/books", count: 40}
++      - {as: asa, do: "GET /api/members/1", status: 200}
++      - {as: asa, do: "GET /api/loans/1", status: 200}
++  - name: "assistant lends and returns"
++    steps:
++      - {as: ada, do: "POST /api/members", body: {username: asa, name: Asa, role: assistant}, status: 201}
++      - {as: asa, do: "POST /api/books/2/borrow", body: {member: 3}, status: 200, json: {status: on_loan}}
++      - {as: asa, do: "GET /api/loans?book=2&member=3", count: 1}
++      - {as: asa, do: "POST /api/books/2/borrow", body: {member: 4}, status: 409}
++      - {as: asa, do: "POST /api/books/3/borrow", body: {member: 12}, status: 409}
++      - {as: asa, do: "POST /api/books/3/borrow", body: {member: 10}, status: 409}
++      - {as: asa, do: "POST /api/books/4/borrow", body: {member: 3}, status: 409}
++      - {as: asa, do: "POST /api/loans/46/return", body: {}, status: 200}
++      - {as: asa, do: "POST /api/loans/46/return", body: {}, status: 409}
++      - {as: asa, do: "GET /api/_outbox?channel=loan_created", count: 1}
++  - name: "assistant toggles active of members only"
++    steps:
++      - {as: ada, do: "POST /api/members", body: {username: asa, name: Asa, role: assistant}, status: 201}
++      - {as: ada, do: "POST /api/members", body: {username: asb, name: Asb, role: assistant}, status: 201}
++      - {as: asa, do: "PATCH /api/members/3", body: {active: false}, status: 200, json: {active: false}}
++      - {as: asa, do: "PATCH /api/members/12", body: {active: true}, status: 200, json: {active: true}}
++      - {as: asa, do: "PATCH /api/members/4", body: {active: false, name: Q}, status: 403}
++      - {as: asa, do: "GET /api/members/4", json: {active: true, name: Dara Novak}}
++      - {as: asa, do: "PATCH /api/members/4", body: {name: Q}, status: 403}
++      - {as: asa, do: "PATCH /api/members/4", body: {role: librarian}, status: 403}
++      - {as: asa, do: "PATCH /api/members/4", body: {username: qq}, status: 403}
++      - {as: asa, do: "PATCH /api/members/1", body: {active: false}, status: 403}
++      - {as: asa, do: "PATCH /api/members/14", body: {active: false}, status: 403}
++      - {as: asa, do: "PATCH /api/members/13", body: {active: false}, status: 403}
++      - {as: asa, do: "PATCH /api/members/13", body: {role: librarian}, status: 403}
++      - {as: asa, do: "PATCH /api/members/13", body: {name: Asa2}, status: 200, json: {name: Asa2}}
++  - name: "assistant cannot manage catalogue, membership or loans"
++    steps:
++      - {as: ada, do: "POST /api/members", body: {username: asa, name: Asa, role: assistant}, status: 201}
++      - {as: asa, do: "POST /api/books", body: {title: T, author: A, isbn: "999"}, status: 403}
++      - {as: asa, do: "PATCH /api/books/1", body: {title: T}, status: 403}
++      - {as: asa, do: "DELETE /api/books/2", status: 403}
++      - {as: asa, do: "POST /api/members", body: {username: z, name: Z, role: member}, status: 403}
++      - {as: asa, do: "DELETE /api/members/3", status: 403}
++      - {as: asa, do: "POST /api/loans", body: {book: 2, member: 3, borrowed_at: "2026-01-01T00:00:00", due_at: "2026-01-15"}, status: 403}
++      - {as: asa, do: "PATCH /api/loans/46", body: {due_at: "2026-01-15"}, status: 403}
++      - {as: asa, do: "DELETE /api/loans/1", status: 403}

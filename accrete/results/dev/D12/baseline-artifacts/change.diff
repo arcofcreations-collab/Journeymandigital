@@ -1,0 +1,704 @@
+--- a/README.md
++++ b/README.md
+@@ -58,6 +58,7 @@
+ | fields clients may set / never set | `validation.CLAIM_WRITABLE`, `validation.CLAIM_READ_ONLY` |
+ | amount range, categories, roles | `validation.MAX_CLAIM_AMOUNT`, `CLAIM_CATEGORIES`, `EMPLOYEE_ROLES` |
+ | actions shown on detail pages | `services.claim_actions` |
++| claim lines; claim `amount` = rounded total of its lines (max 5000) | `services.*_claim_line`, `repository._CLAIM_SELECT` |
+ 
+ ## Running the tests
+ 
+@@ -111,4 +112,10 @@
+ * Employee `manager` must be an existing employee and must not create a reporting loop → else 400.
+   Deleting an employee who has claims, decided claims or reports → 409.
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the heading.
++* Claims are itemised (`claim_lines`, migration 0002). A claim's `amount` is derived (sum of
++  its lines, rounded to 2 decimals; no stored column). Creating a claim creates its first line.
++  PATCHing a claim's `amount` sets its only line; with several lines it is a 409. Lines follow
++  their claim's read/edit permissions; only draft claims' lines change; the last line can't be
++  deleted (409). On a line PATCH, `claim` may be repeated unchanged but not changed (400).
++  An unknown `claim` on line creation is a 400 (it is a body field, not the URL's record).
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/expenses_app/migrations/0002_claim_lines.sql
++++ b/expenses_app/migrations/0002_claim_lines.sql
+@@ -0,0 +1,25 @@
++-- Itemised claims: a claim consists of one or more lines; its amount is the total of its lines.
++
++CREATE TABLE claim_lines (
++    id          INTEGER PRIMARY KEY AUTOINCREMENT,
++    claim_id    INTEGER NOT NULL REFERENCES claims (id),
++    amount      REAL    NOT NULL CHECK (amount > 0),
++    description TEXT    NOT NULL
++);
++
++CREATE INDEX claim_lines_claim_id ON claim_lines (claim_id);
++
++-- Every existing claim gets exactly one line with the same id, amount and description,
++-- so no claim's amount changes.
++INSERT INTO claim_lines (id, claim_id, amount, description)
++SELECT id, id, amount, description FROM claims ORDER BY id;
++
++-- New lines get ids above every claim id ever allocated (sqlite_sequence already holds the
++-- highest copied id; this also covers claims deleted before the migration).
++UPDATE sqlite_sequence
++SET seq = (SELECT seq FROM sqlite_sequence WHERE name = 'claims')
++WHERE name = 'claim_lines'
++  AND seq < (SELECT seq FROM sqlite_sequence WHERE name = 'claims');
++
++-- The amount is now derived from the lines (repository computes the rounded total).
++ALTER TABLE claims DROP COLUMN amount;
+--- a/expenses_app/permissions.py
++++ b/expenses_app/permissions.py
+@@ -51,3 +51,14 @@
+ 
+ def can_pay_claim(user, claim):
+     return is_finance(user)
++
++
++# --- claim lines (follow their claim) -------------------------------------------------
++
++def can_read_claim_line(user, claim, claimant):
++    return can_read_claim(user, claim, claimant)
++
++
++def can_edit_claim_lines(user, claim):
++    """Add, change and remove a claim's lines: only the claim's own employee."""
++    return can_edit_claim(user, claim)
+--- a/expenses_app/repository.py
++++ b/expenses_app/repository.py
+@@ -77,11 +77,18 @@
+ 
+ # --- claims ---------------------------------------------------------------------------
+ 
++# A claim's amount is derived: the total of its lines.
+ _CLAIM_SELECT = """
+-    SELECT id, employee_id, amount, category, description, status,
+-           submitted_at, decided_at, decided_by_id, rejection_reason
++    SELECT id, employee_id, category, description, status,
++           submitted_at, decided_at, decided_by_id, rejection_reason,
++           (SELECT SUM(amount) FROM claim_lines WHERE claim_id = claims.id) AS amount
+     FROM claims
+ """
++
++
++def round_total(total):
++    """Claim totals are rounded to 2 decimals (cents)."""
++    return None if total is None else round(total, 2)
+ 
+ 
+ def _claim(row):
+@@ -90,7 +97,7 @@
+     return {
+         "id": row["id"],
+         "employee": row["employee_id"],
+-        "amount": row["amount"],
++        "amount": round_total(row["amount"]),
+         "category": row["category"],
+         "description": row["description"],
+         "status": row["status"],
+@@ -110,20 +117,22 @@
+ 
+ 
+ def insert_claim(employee_id, values):
+-    """Insert a new claim in ``draft`` status."""
+-    cur = get_db().execute(
+-        "INSERT INTO claims (employee_id, amount, category, description, status) VALUES (?, ?, ?, ?, 'draft')",
+-        (employee_id, values["amount"], values["category"], values["description"]),
++    """Insert a new claim in ``draft`` status (without lines; its amount comes from them)."""
++    cur = get_db().execute(
++        "INSERT INTO claims (employee_id, category, description, status) VALUES (?, ?, ?, 'draft')",
++        (employee_id, values["category"], values["description"]),
+     )
+     return cur.lastrowid
+ 
+ 
+ def update_claim(claim_id, values):
+-    columns = {"amount": "amount", "category": "category", "description": "description"}
++    columns = {"category": "category", "description": "description"}
+     _update("claims", columns, claim_id, values)
+ 
+ 
+ def delete_claim(claim_id):
++    """Delete a claim together with its lines."""
++    get_db().execute("DELETE FROM claim_lines WHERE claim_id = ?", (claim_id,))
+     get_db().execute("DELETE FROM claims WHERE id = ?", (claim_id,))
+ 
+ 
+@@ -143,6 +152,45 @@
+ 
+ def mark_claim_paid(claim_id):
+     get_db().execute("UPDATE claims SET status = 'paid' WHERE id = ?", (claim_id,))
++
++
++# --- claim lines ----------------------------------------------------------------------
++
++_CLAIM_LINE_SELECT = "SELECT id, claim_id, amount, description FROM claim_lines"
++
++
++def _claim_line(row):
++    if row is None:
++        return None
++    return {"id": row["id"], "claim": row["claim_id"], "amount": row["amount"], "description": row["description"]}
++
++
++def list_claim_lines(claim_id=None):
++    if claim_id is None:
++        rows = get_db().execute(f"{_CLAIM_LINE_SELECT} ORDER BY id")
++    else:
++        rows = get_db().execute(f"{_CLAIM_LINE_SELECT} WHERE claim_id = ? ORDER BY id", (claim_id,))
++    return [_claim_line(row) for row in rows]
++
++
++def get_claim_line(line_id):
++    return _claim_line(get_db().execute(f"{_CLAIM_LINE_SELECT} WHERE id = ?", (line_id,)).fetchone())
++
++
++def insert_claim_line(claim_id, values):
++    cur = get_db().execute(
++        "INSERT INTO claim_lines (claim_id, amount, description) VALUES (?, ?, ?)",
++        (claim_id, values["amount"], values["description"]),
++    )
++    return cur.lastrowid
++
++
++def update_claim_line(line_id, values):
++    _update("claim_lines", {"amount": "amount", "description": "description"}, line_id, values)
++
++
++def delete_claim_line(line_id):
++    get_db().execute("DELETE FROM claim_lines WHERE id = ?", (line_id,))
+ 
+ 
+ # --- outbox ---------------------------------------------------------------------------
+--- a/expenses_app/routes_api.py
++++ b/expenses_app/routes_api.py
+@@ -105,6 +105,34 @@
+     return services.pay_claim(current_context(), claim_id, _body())
+ 
+ 
++# --- claim lines ----------------------------------------------------------------------
++
++@bp.get("/claim_lines")
++def list_claim_lines():
++    return _items(services.list_claim_lines(current_context(), _filters()))
++
++
++@bp.post("/claim_lines")
++def create_claim_line():
++    return services.create_claim_line(current_context(), _body()), 201
++
++
++@bp.get("/claim_lines/<int:line_id>")
++def get_claim_line(line_id):
++    return services.get_claim_line(current_context(), line_id)
++
++
++@bp.patch("/claim_lines/<int:line_id>")
++def update_claim_line(line_id):
++    return services.update_claim_line(current_context(), line_id, _body())
++
++
++@bp.delete("/claim_lines/<int:line_id>")
++def delete_claim_line(line_id):
++    services.delete_claim_line(current_context(), line_id)
++    return "", 204
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ @bp.get("/_outbox")
+--- a/expenses_app/routes_ui.py
++++ b/expenses_app/routes_ui.py
+@@ -109,7 +109,8 @@
+ def show_claim(claim_id):
+     ctx = current_context()
+     claim = services.get_claim(ctx, claim_id)
+-    return render_template("claims/detail.html", claim=claim, actions=services.claim_actions(ctx, claim))
++    return render_template("claims/detail.html", claim=claim, actions=services.claim_actions(ctx, claim),
++                           can_add_line=services.can_change_claim_lines(ctx, claim))
+ 
+ 
+ @bp.post("/claims/<int:claim_id>/submit")
+@@ -134,3 +135,29 @@
+ def pay_claim(claim_id):
+     services.pay_claim(current_context(), claim_id, {})
+     return redirect(url_for("ui.show_claim", claim_id=claim_id), 303)
++
++
++# --- claim lines ----------------------------------------------------------------------
++
++@bp.get("/claim_lines")
++def list_claim_lines():
++    lines = services.list_claim_lines(current_context(), request.args.to_dict())
++    return render_template("claim_lines/list.html", lines=lines)
++
++
++@bp.get("/claim_lines/new")
++def new_claim_line():
++    return render_template("claim_lines/new.html", claim_id=request.args.get("claim", ""))
++
++
++@bp.post("/claim_lines")
++def create_claim_line():
++    data = _form_values({"claim": _optional_int, "amount": _number, "description": _text})
++    line = services.create_claim_line(current_context(), data)
++    return redirect(url_for("ui.show_claim_line", line_id=line["id"]), 303)
++
++
++@bp.get("/claim_lines/<int:line_id>")
++def show_claim_line(line_id):
++    line = services.get_claim_line(current_context(), line_id)
++    return render_template("claim_lines/detail.html", line=line)
+--- a/expenses_app/services.py
++++ b/expenses_app/services.py
+@@ -8,6 +8,9 @@
+ 
+     draft --submit--> submitted --approve--> approved --pay--> paid
+                                 \\--reject--> rejected
++
++A claim consists of one or more lines (``claim_lines``); its ``amount`` is their total,
++which may never exceed ``validation.MAX_CLAIM_AMOUNT``.
+ """
+ from . import permissions, repository, validation
+ from .db import transaction
+@@ -17,6 +20,7 @@
+ EMPLOYEE_FIELDS = ("id", "username", "name", "role", "manager", "department")
+ CLAIM_FIELDS = ("id", "employee", "amount", "category", "description", "status",
+                 "submitted_at", "decided_at", "decided_by", "rejection_reason")
++CLAIM_LINE_FIELDS = ("id", "claim", "amount", "description")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -126,21 +130,28 @@
+ 
+ 
+ def create_claim(ctx, data):
+-    """Create a draft claim owned by the caller."""
++    """Create a draft claim owned by the caller, with a first line for its amount and description."""
+     ensure_can_create_claim(ctx)
+     with transaction():
+         values = validation.clean_claim(data, partial=False)
+         claim_id = repository.insert_claim(ctx.user["id"], values)
++        repository.insert_claim_line(claim_id, values)
+     return repository.get_claim(claim_id)
+ 
+ 
+ def update_claim(ctx, claim_id, data):
++    """PATCH a draft claim. ``amount`` is accepted only for a single-line claim and sets that line."""
+     with transaction():
+         claim = _load_claim(claim_id)
+         if not permissions.can_edit_claim(ctx.user, claim):
+             raise Forbidden("Only the claim's employee can edit it.")
+         _require_status(claim, "draft", "Only draft claims can be edited.")
++        lines = repository.list_claim_lines(claim_id)
++        if isinstance(data, dict) and "amount" in data and len(lines) != 1:
++            raise Conflict("The amount of a claim with several lines is the total of its lines; edit the lines.")
+         values = validation.clean_claim(data, partial=True)
++        if "amount" in values:
++            repository.update_claim_line(lines[0]["id"], {"amount": values.pop("amount")})
+         repository.update_claim(claim_id, values)
+     return repository.get_claim(claim_id)
+ 
+@@ -230,6 +241,91 @@
+         raise Conflict(message)
+ 
+ 
++# --- claim lines ----------------------------------------------------------------------
++# Lines follow their claim: readable by whoever can read the claim; added, changed and
++# removed only by the claim's employee while the claim is a draft.
++
++def list_claim_lines(ctx, filters=None):
++    readable = {claim["id"] for claim in list_claims(ctx)}
++    lines = [line for line in repository.list_claim_lines() if line["claim"] in readable]
++    return apply_filters(lines, filters or {}, CLAIM_LINE_FIELDS)
++
++
++def get_claim_line(ctx, line_id):
++    line = _load_claim_line(line_id)
++    claim = repository.get_claim(line["claim"])
++    if not permissions.can_read_claim_line(ctx.user, claim, _claimant(claim)):
++        raise Forbidden()
++    return line
++
++
++def create_claim_line(ctx, data):
++    """Add a line to a draft claim of the caller. An unknown or missing ``claim`` is a 400."""
++    with transaction():
++        claim_id = data.get("claim") if isinstance(data, dict) else None
++        claim = repository.get_claim(claim_id) if _is_record_id(claim_id) else None
++        if claim is not None:
++            _ensure_can_change_lines(ctx, claim)
++        values = validation.clean_claim_line(data, partial=False)
++        if claim is None:
++            raise ValidationError("Invalid input.", {"claim": "no such claim"})
++        _check_claim_total(claim, values["amount"])
++        line_id = repository.insert_claim_line(claim["id"], values)
++    return repository.get_claim_line(line_id)
++
++
++def update_claim_line(ctx, line_id, data):
++    with transaction():
++        line = _load_claim_line(line_id)
++        claim = repository.get_claim(line["claim"])
++        _ensure_can_change_lines(ctx, claim)
++        values = validation.clean_claim_line(data, partial=True, current_claim=claim["id"])
++        if "amount" in values:
++            _check_claim_total(claim, values["amount"] - line["amount"])
++        repository.update_claim_line(line_id, values)
++    return repository.get_claim_line(line_id)
++
++
++def delete_claim_line(ctx, line_id):
++    with transaction():
++        line = _load_claim_line(line_id)
++        claim = repository.get_claim(line["claim"])
++        _ensure_can_change_lines(ctx, claim)
++        if len(repository.list_claim_lines(claim["id"])) == 1:
++            raise Conflict("A claim's last line cannot be deleted; delete the claim instead.")
++        repository.delete_claim_line(line_id)
++
++
++def can_change_claim_lines(ctx, claim):
++    """Whether the caller could add, change or remove lines of ``claim`` right now."""
++    return claim["status"] == "draft" and permissions.can_edit_claim_lines(ctx.user, claim)
++
++
++def _load_claim_line(line_id):
++    line = repository.get_claim_line(line_id)
++    if line is None:
++        raise NotFound("No such claim line.")
++    return line
++
++
++def _ensure_can_change_lines(ctx, claim):
++    if not permissions.can_edit_claim_lines(ctx.user, claim):
++        raise Forbidden("Only the claim's employee can change its lines.")
++    _require_status(claim, "draft", "Only lines of draft claims can be changed.")
++
++
++def _check_claim_total(claim, change):
++    """The claim's total after adding ``change`` must not exceed the maximum claim amount."""
++    if repository.round_total(claim["amount"] + change) > validation.MAX_CLAIM_AMOUNT:
++        raise ValidationError(
++            "Invalid input.", {"amount": f"the claim's total would exceed {validation.MAX_CLAIM_AMOUNT}"}
++        )
++
++
++def _is_record_id(value):
++    return isinstance(value, int) and not isinstance(value, bool)
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def list_outbox(ctx, filters=None):
+--- a/expenses_app/templates/base.html
++++ b/expenses_app/templates/base.html
+@@ -18,6 +18,7 @@
+ <body>
+   <nav>
+     <a href="{{ url_for('ui.list_claims') }}">Claims</a>
++    <a href="{{ url_for('ui.list_claim_lines') }}">Claim lines</a>
+     <a href="{{ url_for('ui.list_employees') }}">Employees</a>
+     {% if ctx %}<span>Signed in as {{ ctx.user.username }} ({{ ctx.user.role }})</span>{% endif %}
+   </nav>
+--- a/expenses_app/templates/claim_lines/detail.html
++++ b/expenses_app/templates/claim_lines/detail.html
+@@ -0,0 +1,11 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}Claim line #{{ line.id }}{% endblock %}
++{% block content %}
++<h1>Claim line #{{ line.id }}</h1>
++<dl>
++  {{ field("claim", line.claim, href=url_for('ui.show_claim', claim_id=line.claim)) }}
++  {{ field("amount", line.amount) }}
++  {{ field("description", line.description) }}
++</dl>
++{% endblock %}
+--- a/expenses_app/templates/claim_lines/list.html
++++ b/expenses_app/templates/claim_lines/list.html
+@@ -0,0 +1,18 @@
++{% extends "base.html" %}
++{% block title %}Claim lines{% endblock %}
++{% block content %}
++<h1>Claim lines</h1>
++<table>
++  <thead><tr><th>Line</th><th>Claim</th><th>Amount</th><th>Description</th></tr></thead>
++  <tbody>
++  {% for line in lines %}
++    <tr data-id="{{ line.id }}">
++      <td><a href="{{ url_for('ui.show_claim_line', line_id=line.id) }}">#{{ line.id }}</a></td>
++      <td><a href="{{ url_for('ui.show_claim', claim_id=line.claim) }}">#{{ line.claim }}</a></td>
++      <td>{{ line.amount|display }}</td>
++      <td>{{ line.description }}</td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/expenses_app/templates/claim_lines/new.html
++++ b/expenses_app/templates/claim_lines/new.html
+@@ -0,0 +1,11 @@
++{% extends "base.html" %}
++{% block title %}New claim line{% endblock %}
++{% block content %}
++<h1>New claim line</h1>
++<form data-create="claim_lines" method="post" action="{{ url_for('ui.create_claim_line') }}">
++  <label>Claim <input name="claim" type="number" step="1" min="1" value="{{ claim_id }}" required></label>
++  <label>Amount <input name="amount" type="number" step="0.01" min="0.01" max="5000" required></label>
++  <label>Description <textarea name="description" required></textarea></label>
++  <button type="submit">Add line</button>
++</form>
++{% endblock %}
+--- a/expenses_app/templates/claims/detail.html
++++ b/expenses_app/templates/claims/detail.html
+@@ -14,6 +14,10 @@
+   {{ field("decided_by", claim.decided_by, href=claim.decided_by and url_for('ui.show_employee', employee_id=claim.decided_by)) }}
+   {{ field("rejection_reason", claim.rejection_reason) }}
+ </dl>
++<p><a href="{{ url_for('ui.list_claim_lines', claim=claim.id) }}">Lines</a>
++{% if can_add_line %}
++  · <a href="{{ url_for('ui.new_claim_line', claim=claim.id) }}">Add line</a>
++{% endif %}</p>
+ 
+ {% if "submit" in actions %}
+ <form data-action="submit" method="post" action="{{ url_for('ui.submit_claim', claim_id=claim.id) }}">
+--- a/expenses_app/validation.py
++++ b/expenses_app/validation.py
+@@ -71,12 +71,25 @@
+     return value
+ 
+ 
+-def claim_amount(value):
++def record_id(value):
++    if value is None:
++        raise FieldInvalid("required")
++    return optional_record_id(value)
++
++
++def positive_amount(value):
+     if value is None:
+         raise FieldInvalid("required")
+     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+         raise FieldInvalid("must be a number")
+-    if not 0 < value <= MAX_CLAIM_AMOUNT:
++    if not value > 0:
++        raise FieldInvalid("must be greater than 0")
++    return value
++
++
++def claim_amount(value):
++    value = positive_amount(value)
++    if not value <= MAX_CLAIM_AMOUNT:
+         raise FieldInvalid(f"must be greater than 0 and at most {MAX_CLAIM_AMOUNT}")
+     return value
+ 
+@@ -88,6 +101,9 @@
+ CLAIM_WRITABLE = ("amount", "category", "description")
+ # Maintained by the workflow actions; clients sending them get a 400.
+ CLAIM_READ_ONLY = ("id", "employee", "status", "submitted_at", "decided_at", "decided_by", "rejection_reason")
++
++# ``claim`` is set on creation only; changing it later is a 400.
++CLAIM_LINE_WRITABLE = ("claim", "amount", "description")
+ 
+ 
+ def clean_employee(data, *, partial):
+@@ -125,6 +141,31 @@
+     return values
+ 
+ 
++def clean_claim_line(data, *, partial, current_claim=None):
++    """Validate a claim line body. On PATCH (``partial``) ``claim`` may only repeat ``current_claim``.
++
++    Whether the referenced claim exists, and the claim's total, are checked in ``services``.
++    """
++    data = require_object(data)
++    errors = unknown_field_errors(data, CLAIM_LINE_WRITABLE, read_only=("id",))
++    values = {}
++    if "claim" in data or not partial:
++        with collect(errors, "claim"):
++            claim_id = record_id(data.get("claim"))
++            if partial and claim_id != current_claim:
++                raise FieldInvalid("cannot be changed")
++            if not partial:
++                values["claim"] = claim_id
++    if "amount" in data or not partial:
++        with collect(errors, "amount"):
++            values["amount"] = positive_amount(data.get("amount"))
++    if "description" in data or not partial:
++        with collect(errors, "description"):
++            values["description"] = required_text(data.get("description"))
++    raise_if_errors(errors)
++    return values
++
++
+ def clean_reject_params(data):
+     data = require_object(data)
+     errors = unknown_field_errors(data, ("reason",))
+--- a/seed.py
++++ b/seed.py
+@@ -25,10 +25,16 @@
+         seed["employees"],
+     )
+     conn.executemany(
+-        "INSERT INTO claims (id, employee_id, amount, category, description, status,"
++        "INSERT INTO claims (id, employee_id, category, description, status,"
+         " submitted_at, decided_at, decided_by_id, rejection_reason)"
+-        " VALUES (:id, :employee, :amount, :category, :description, :status,"
++        " VALUES (:id, :employee, :category, :description, :status,"
+         " :submitted_at, :decided_at, :decided_by, :rejection_reason)",
++        seed["claims"],
++    )
++    # A claim's amount is the total of its lines: each seed claim becomes a single line with
++    # the claim's id, amount and description (as migration 0002 does for existing data).
++    conn.executemany(
++        "INSERT INTO claim_lines (id, claim_id, amount, description) VALUES (:id, :id, :amount, :description)",
+         seed["claims"],
+     )
+ 
+--- a/tests/test_expenses_claim_lines.py
++++ b/tests/test_expenses_claim_lines.py
+@@ -0,0 +1,143 @@
++"""Itemised claims: claim lines, the derived claim amount and the migration of existing claims."""
++import os
++import sqlite3
++
++from accept_client import parse_ui
++
++NEW = {"amount": 42.5, "category": "meals", "description": "Team lunch"}
++
++
++def _line(app, claim_id, amount, user, description="Extra"):
++    return app.post("/api/claim_lines", {"claim": claim_id, "amount": amount, "description": description}, user=user)
++
++
++def test_existing_claims_have_one_line_with_the_same_id(app, seed):
++    lines = app.get("/api/claim_lines", user="fiona").json["items"]
++    assert lines == [{"id": c["id"], "claim": c["id"], "amount": c["amount"], "description": c["description"]}
++                     for c in seed["claims"]]
++    assert app.get("/api/claims", user="fiona").json["items"] == seed["claims"]  # amounts unchanged
++
++
++def test_migration_keeps_amounts_and_drops_stored_column(app):
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    columns = [row[1] for row in conn.execute("PRAGMA table_info(claims)")]
++    seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'claim_lines'").fetchone()[0]
++    conn.close()
++    assert "amount" not in columns and seq >= 80
++
++
++def test_creating_a_claim_creates_its_first_line(app):
++    claim = app.post("/api/claims", NEW, user="priya").json
++    assert claim["amount"] == 42.5
++    lines = app.get(f"/api/claim_lines?claim={claim['id']}", user="priya").json["items"]
++    assert len(lines) == 1 and lines[0]["id"] > 80
++    assert lines[0] == {"id": lines[0]["id"], "claim": claim["id"], "amount": 42.5, "description": "Team lunch"}
++
++
++def test_amount_is_total_of_lines_rounded(app):
++    r = _line(app, 1, 10.105, "wen")
++    assert r.status == 201 and r.json["claim"] == 1 and r.json["amount"] == 10.105 and r.json["id"] > 80
++    assert app.get("/api/claims/1", user="wen").json["amount"] == round(1271.32 + 10.105, 2)
++    assert _line(app, 1, 0.2, "wen").status == 201
++    assert app.get("/api/claims/1", user="wen").json["amount"] == round(1271.32 + 10.105 + 0.2, 2)
++
++
++def test_add_line_rules(app):
++    assert _line(app, 1, 5, "marco").status == 403  # manager, not owner
++    assert _line(app, 1, 5, "fiona").status == 403
++    assert _line(app, 2, 5, "victor").status == 409  # submitted
++    assert _line(app, 2, 0, "victor").status == 409  # 409 beats 400
++    assert _line(app, 999, 5, "wen").status == 400  # unknown claim
++    assert app.post("/api/claim_lines", {"amount": 5, "description": "x"}, user="wen").status == 400
++    assert _line(app, "1", 5, "wen").status == 400
++    for bad in (0, -1, "5", True, None):
++        assert _line(app, 1, bad, "wen").status == 400, bad
++    assert _line(app, 1, 5, "wen", description=" ").status == 400
++    r = app.post("/api/claim_lines", {"claim": 1, "amount": 5, "description": "x", "id": 3}, user="wen")
++    assert r.status == 400 and "id" in r.json["fields"]
++
++
++def test_total_may_not_exceed_maximum(app):
++    assert _line(app, 1, 5000 - 1271.32 + 0.01, "wen").status == 400
++    assert _line(app, 1, 5000 - 1271.32, "wen").status == 201
++    assert app.get("/api/claims/1", user="wen").json["amount"] == 5000
++    line = app.get("/api/claim_lines?claim=1", user="wen").json["items"][-1]
++    assert app.patch(f"/api/claim_lines/{line['id']}", {"amount": line["amount"] + 1}, user="wen").status == 400
++    assert app.patch("/api/claims/1", {"amount": 1}, user="wen").status == 409  # several lines
++
++
++def test_patch_line(app):
++    line_id = _line(app, 1, 5, "wen").json["id"]
++    r = app.patch(f"/api/claim_lines/{line_id}", {"amount": 7.5, "description": "Parking"}, user="wen")
++    assert r.status == 200 and r.json == {"id": line_id, "claim": 1, "amount": 7.5, "description": "Parking"}
++    assert app.get("/api/claims/1", user="wen").json["amount"] == round(1271.32 + 7.5, 2)
++    assert app.patch(f"/api/claim_lines/{line_id}", {"claim": 13}, user="wen").status == 400
++    assert app.patch(f"/api/claim_lines/{line_id}", {"claim": 1}, user="wen").status == 200  # unchanged
++    assert app.patch(f"/api/claim_lines/{line_id}", {"amount": 0}, user="wen").status == 400
++    assert app.patch(f"/api/claim_lines/{line_id}", {"amount": 1}, user="marco").status == 403
++    assert app.patch("/api/claim_lines/2", {"amount": 1}, user="victor").status == 409  # submitted claim
++    assert app.patch("/api/claim_lines/999", {"amount": 1}, user="wen").status == 404
++
++
++def test_delete_line(app):
++    assert app.delete("/api/claim_lines/1", user="wen").status == 409  # last remaining line
++    line_id = _line(app, 1, 5, "wen").json["id"]
++    assert app.delete(f"/api/claim_lines/{line_id}", user="marco").status == 403
++    assert app.delete("/api/claim_lines/2", user="victor").status == 409  # submitted claim
++    assert app.delete("/api/claim_lines/1", user="wen").status == 204
++    assert app.get("/api/claim_lines/1", user="wen").status == 404
++    assert app.get("/api/claims/1", user="wen").json["amount"] == 5
++    assert app.delete(f"/api/claim_lines/{line_id}", user="wen").status == 409  # now the last one
++
++
++def test_patch_claim_amount_with_one_line_sets_the_line(app):
++    r = app.patch("/api/claims/1", {"amount": 99, "description": "Changed"}, user="wen")
++    assert r.status == 200 and r.json["amount"] == 99 and r.json["description"] == "Changed"
++    assert app.get("/api/claim_lines/1", user="wen").json["amount"] == 99
++    assert app.patch("/api/claims/1", {"amount": 5000.01}, user="wen").status == 400
++    _line(app, 1, 1, "wen")
++    assert app.patch("/api/claims/1", {"amount": 50}, user="wen").status == 409
++    assert app.patch("/api/claims/1", {"category": "travel", "description": "Trip"}, user="wen").status == 200
++    assert app.get("/api/claims/1", user="wen").json["amount"] == 100
++
++
++def test_line_visibility_follows_claim(app):
++    def claim_ids(user, path):
++        return {item["claim" if "claim" in item else "id"] for item in app.get(path, user=user).json["items"]}
++
++    for user in ("priya", "omar", "marco", "fiona"):
++        assert claim_ids(user, "/api/claim_lines") == claim_ids(user, "/api/claims")
++    assert app.get("/api/claim_lines/2", user="omar").status == 200  # manages victor
++    assert app.get("/api/claim_lines/2", user="marco").status == 403  # indirect manager
++    assert app.get("/api/claim_lines/2", user="sam").status == 403
++    assert app.get("/api/claim_lines?claim=2", user="sam").json["items"] == []
++    assert [l["id"] for l in app.get("/api/claim_lines?claim=2", user="victor").json["items"]] == [2]
++    assert app.get("/api/claim_lines?colour=red", user="fiona").status == 400
++
++
++def test_deleting_a_claim_deletes_its_lines(app):
++    line_id = _line(app, 1, 5, "wen").json["id"]
++    assert app.delete("/api/claims/1", user="wen").status == 204
++    assert app.get(f"/api/claim_lines/{line_id}", user="wen").status == 404
++    assert app.get("/api/claim_lines?claim=1", user="fiona").json["items"] == []
++
++
++def test_payment_uses_total(app):
++    claim = app.post("/api/claims", {"amount": 100, "category": "travel", "description": "Train"}, user="sam").json
++    _line(app, claim["id"], 20.25, "sam")
++    for action, user in (("submit", "sam"), ("approve", "omar"), ("pay", "fiona")):
++        assert app.post(f"/api/claims/{claim['id']}/{action}", {}, user=user).status == 200
++    payload = app.get("/api/_outbox", user="sam").json["items"][-1]["payload"]
++    assert payload == {"claim": claim["id"], "employee": 8, "amount": 120.25}
++
++
++def test_claim_lines_ui(app):
++    _line(app, 1, 5, "wen")
++    api_ids = [l["id"] for l in app.get("/api/claim_lines", user="omar").json["items"]]
++    assert parse_ui(app.get("/ui/claim_lines", user="omar").text).rows == api_ids
++    page = parse_ui(app.get("/ui/claim_lines/1", user="wen").text)
++    assert page.fields == {"claim": "1", "amount": "1271.32", "description": "Hotel night #1"}
++    assert app.get("/ui/claim_lines/2", user="sam").status == 403
++    new = parse_ui(app.get("/ui/claim_lines/new", user="wen").text)
++    assert new.creates == ["claim_lines"] and sorted(new.inputs) == ["amount", "claim", "description"]
++    assert parse_ui(app.get("/ui/claims/1", user="wen").text).fields["amount"] == "1276.32"

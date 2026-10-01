@@ -1,0 +1,96 @@
+--- a/changes/0002-second-approval.yaml
++++ b/changes/0002-second-approval.yaml
+@@ -0,0 +1,93 @@
++request: "Second approval for large claims: a claim with amount greater than 1000.00 needs two approvals when the employee's manager has a manager (first the employee's manager, then that manager's own manager, the second approver). New status awaiting_second_approval, new system fields first_approved_by / first_approved_at. Existing approved, unpaid claims over 1000.00 whose employee's manager has a manager move to awaiting_second_approval."
++interpretation: >-
++  The second approver is record.employee.manager.manager (resolved through the current manager chain,
++  like the existing manager rules). approve by the employee's manager on a submitted claim with
++  amount > 1000 and a second approver -> awaiting_second_approval with first_approved_by/at set;
++  otherwise approve behaves as before. On awaiting_second_approval only the second approver may
++  approve/reject (allow), the employee's manager gets 409 (guard), anyone else 403. Read rule
++  extended for the second approver when first_approved_by is set. Existing approved claims matching
++  the rule are migrated (first_approved_* <- decided_*, decided_* <- null).
++ops:
++  - change_field: {entity: claims, name: status, values: [draft, submitted, awaiting_second_approval, approved, rejected, paid]}
++  - add_field: {entity: claims, name: first_approved_by, type: ref, ref: employees, system: true}
++  - add_field: {entity: claims, name: first_approved_at, type: datetime, system: true}
++  - update_records:
++      entity: claims
++      where: "record.status == 'approved' and record.amount > 1000 and record.employee.manager is not None and record.employee.manager.manager is not None"
++      set: {first_approved_by: record.decided_by, first_approved_at: record.decided_at}
++  - update_records:
++      entity: claims
++      where: "record.status == 'approved' and record.first_approved_by is not None"
++      set: {status: "'awaiting_second_approval'", decided_by: None, decided_at: None}
++  - set_rule:
++      entity: claims
++      rule: read
++      expr: "record.employee == user or record.employee.manager == user or user.role == 'finance' or (record.first_approved_by is not None and record.employee.manager is not None and record.employee.manager.manager == user)"
++  - change_action:
++      entity: claims
++      name: approve
++      allow: "record.employee.manager == user or (record.status == 'awaiting_second_approval' and record.employee.manager is not None and record.employee.manager.manager == user)"
++      guard: "(record.employee.manager == user and record.status == 'submitted') or (record.employee.manager != user and record.status == 'awaiting_second_approval')"
++      effects:
++        - if: "record.status == 'submitted' and record.amount > 1000 and record.employee.manager.manager is not None"
++          then:
++            - set: {status: "'awaiting_second_approval'", first_approved_by: user, first_approved_at: now}
++          else:
++            - set: {status: "'approved'", decided_at: now, decided_by: user}
++  - change_action:
++      entity: claims
++      name: reject
++      allow: "record.employee.manager == user or (record.status == 'awaiting_second_approval' and record.employee.manager is not None and record.employee.manager.manager == user)"
++      guard: "(record.employee.manager == user and record.status == 'submitted') or (record.employee.manager != user and record.status == 'awaiting_second_approval')"
++expect:
++  # migration
++  - {as: fiona, do: "GET /api/claims/21", status: 200, json: {status: awaiting_second_approval, first_approved_by: 4, first_approved_at: "2026-01-28T08:00:00", decided_by: null, decided_at: null}}
++  - {as: fiona, do: "GET /api/claims/22", status: 200, json: {status: awaiting_second_approval, first_approved_by: 4, decided_by: null}}
++  - {as: fiona, do: "GET /api/claims/44", status: 200, json: {status: awaiting_second_approval, first_approved_by: 4, decided_by: null}}
++  - {as: fiona, do: "GET /api/claims/50", status: 200, json: {status: approved, first_approved_by: null, first_approved_at: null, decided_by: 2}}
++  - {as: fiona, do: "GET /api/claims/38", status: 200, json: {status: approved, first_approved_by: null, decided_by: 3}}
++  - {as: fiona, do: "GET /api/claims/33", status: 200, json: {status: approved, first_approved_by: null}}
++  - {as: fiona, do: "GET /api/claims/17", status: 200, json: {status: paid, first_approved_by: null}}
++  - {as: fiona, do: "GET /api/claims?status=awaiting_second_approval", count: 3}
++  # reading by the second approver
++  - {as: marco, do: "GET /api/claims/21", status: 200}
++  - {as: marco, do: "GET /api/claims/36", status: 403}
++  - {as: marco, do: "GET /api/claims/17", status: 403}
++  # pay blocked
++  - {as: fiona, do: "POST /api/claims/21/pay", body: {}, status: 409}
++  # second approval on migrated claim
++  - {as: marco, do: "POST /api/claims/21/approve", body: {}, now: "2026-03-01T10:00:00", status: 200, json: {status: approved, decided_by: 2, decided_at: "2026-03-01T10:00:00", first_approved_by: 4, first_approved_at: "2026-01-28T08:00:00"}}
++  - {as: marco, do: "POST /api/claims/22/reject", body: {reason: "too much"}, now: "2026-03-01T10:00:00", status: 200, json: {status: rejected, decided_by: 2, rejection_reason: "too much", first_approved_by: 4}}
++  - {as: marco, do: "POST /api/claims/22/reject", body: {}, status: 400}
++  - {as: marco, do: "POST /api/claims/22/reject", body: {reason: ""}, status: 400}
++  - {as: omar, do: "POST /api/claims/21/approve", body: {}, status: 409}
++  - {as: omar, do: "POST /api/claims/21/reject", body: {}, status: 409}
++  - {as: nadia, do: "POST /api/claims/21/approve", body: {}, status: 403}
++  - {as: victor, do: "POST /api/claims/21/approve", body: {}, status: 403}
++  # second approver has no rights at other stages
++  - {as: marco, do: "POST /api/claims/36/approve", body: {}, status: 403}
++  - {as: marco, do: "POST /api/claims/36/reject", body: {reason: "x"}, status: 403}
++  - {as: marco, do: "POST /api/claims/33/approve", body: {}, status: 403}
++  # full two-step flow on submitted large claim
++  - name: "two-step approval"
++    steps:
++      - {as: omar, do: "POST /api/claims/36/approve", body: {}, now: "2026-03-02T09:00:00", status: 200, json: {status: awaiting_second_approval, first_approved_by: 4, first_approved_at: "2026-03-02T09:00:00", decided_by: null, decided_at: null}}
++      - {as: marco, do: "GET /api/claims/36", status: 200}
++      - {as: marco, do: "GET /api/claims?id=36", count: 1}
++      - {as: omar, do: "POST /api/claims/36/approve", body: {}, status: 409}
++      - {as: marco, do: "POST /api/claims/36/approve", body: {}, now: "2026-03-03T09:00:00", status: 200, json: {status: approved, decided_by: 2, decided_at: "2026-03-03T09:00:00", first_approved_by: 4}}
++      - {as: marco, do: "GET /api/claims/36", status: 200}
++      - {as: marco, do: "POST /api/claims/36/approve", body: {}, status: 403}
++      - {as: fiona, do: "POST /api/claims/36/pay", body: {}, status: 200, json: {status: paid}}
++      - {as: marco, do: "GET /api/claims/36", status: 200}
++  # single approval paths unchanged
++  - {as: omar, do: "POST /api/claims/2/approve", body: {}, status: 200, json: {status: approved, decided_by: 4, first_approved_by: null, first_approved_at: null}}
++  - {as: marco, do: "POST /api/claims/25/approve", body: {}, status: 200, json: {status: approved, decided_by: 2, first_approved_by: null}}
++  - {as: nadia, do: "POST /api/claims/58/approve", body: {}, status: 200, json: {status: approved, decided_by: 3, first_approved_by: null}}
++  - {as: omar, do: "POST /api/claims/5/reject", body: {reason: "no"}, status: 200, json: {status: rejected, decided_by: 4, first_approved_by: null}}
++  - {as: omar, do: "POST /api/claims/33/approve", body: {}, status: 409}
++  # clients cannot set new fields
++  - {as: priya, do: "POST /api/claims", body: {amount: 10, category: travel, description: "x", first_approved_by: 4}, status: 400}
++  - {as: priya, do: "POST /api/claims", body: {amount: 10, category: travel, description: "x", first_approved_at: "2026-01-01T00:00:00"}, status: 400}
++  - {as: wen, do: "PATCH /api/claims/1", body: {first_approved_by: 2}, status: 400}
++  - {as: wen, do: "PATCH /api/claims/1", body: {first_approved_at: "2026-01-01T00:00:00"}, status: 400}

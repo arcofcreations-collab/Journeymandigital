@@ -1,0 +1,606 @@
+--- a/README.md
++++ b/README.md
+@@ -50,11 +50,22 @@
+                                     \--reject (manager, reason)--> rejected
+ ```
+ 
++Second approval: a claim with `amount` > 1000 (`services.SECOND_APPROVAL_THRESHOLD`) whose
++employee's manager has a manager goes through one more step. The manager's `approve` sets
++`first_approved_by`/`first_approved_at`; that manager's own manager (the "second approver")
++then decides:
++
++```
++submitted --approve (manager)--> awaiting_second_approval --approve (second approver)--> approved
++                                                          \--reject (second approver, reason)--> rejected
++```
++
+ | Rule | Location |
+ |---|---|
+-| transitions, timestamps, `decided_by` | `services.submit_claim/approve_claim/reject_claim/pay_claim` |
++| transitions, timestamps, `decided_by`, `first_approved_*` | `services.submit_claim/approve_claim/reject_claim/pay_claim` |
++| when a second approval is needed; 403/409 for approve/reject | `services._needs_second_approval`, `services._check_can_decide` |
+ | outbox message `payment` | `services.pay_claim` → `repository.add_outbox_message` |
+-| who can read/edit/decide/pay | `permissions.py` (manager = the claimant's direct `manager`) |
++| who can read/edit/decide/pay | `permissions.py` (manager = the claimant's direct `manager`; second approver = that manager's `manager`) |
+ | fields clients may set / never set | `validation.CLAIM_WRITABLE`, `validation.CLAIM_READ_ONLY` |
+ | amount range, categories, roles | `validation.MAX_CLAIM_AMOUNT`, `CLAIM_CATEGORIES`, `EMPLOYEE_ROLES` |
+ | actions shown on detail pages | `services.claim_actions` |
+@@ -103,11 +114,17 @@
+ * "The claim employee's manager" means the direct manager (the claimant's `manager` reference),
+   regardless of role; managers do not see or decide claims of indirect reports.
+ * Managers and finance users can create claims for themselves like anyone else.
+-* Sending a workflow field (`employee`, `status`, `submitted_at`, `decided_at`, `decided_by`,
+-  `rejection_reason`) or `id` or an unknown field in a create/PATCH body → 400 (after 403/409 checks).
++* Sending a workflow field (`employee`, `status`, `submitted_at`, `first_approved_by`,
++  `first_approved_at`, `decided_at`, `decided_by`, `rejection_reason`) or `id` or an unknown field in a create/PATCH body → 400 (after 403/409 checks).
+   Unknown `?field=` filters → 400. Filters on null match `null` or an empty value.
+ * `amount` must be a JSON number (not a string or boolean); any precision is accepted.
+ * `pay` leaves `decided_at`/`decided_by` unchanged.
++* Second approval: the second approver is resolved from the current org chart (the claimant's
++  manager's manager) when the request is made. They may act only while the claim is
++  `awaiting_second_approval` (403 at any other stage); the employee's manager gets 409 on any
++  claim that is not `submitted`. They can read every claim that has a `first_approved_by`.
++  Migration `0002` moved existing approved, unpaid claims over 1000 that need the second
++  approval to `awaiting_second_approval` (their decision became the first approval).
+ * Employee `manager` must be an existing employee and must not create a reporting loop → else 400.
+   Deleting an employee who has claims, decided claims or reports → 409.
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the heading.
+--- a/expenses_app/migrations/0002_second_approval.sql
++++ b/expenses_app/migrations/0002_second_approval.sql
+@@ -0,0 +1,51 @@
++-- Second approval for large claims: new status 'awaiting_second_approval' and the
++-- first_approved_by / first_approved_at fields. The status CHECK constraint changes, so the
++-- claims table is rebuilt (create-copy-drop-rename).
++
++CREATE TABLE claims_new (
++    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
++    employee_id          INTEGER NOT NULL REFERENCES employees (id),
++    amount               REAL    NOT NULL CHECK (amount > 0 AND amount <= 5000),
++    category             TEXT    NOT NULL CHECK (category IN ('travel', 'meals', 'equipment', 'other')),
++    description          TEXT    NOT NULL,
++    status               TEXT    NOT NULL DEFAULT 'draft'
++                                 CHECK (status IN ('draft', 'submitted', 'awaiting_second_approval',
++                                                   'approved', 'rejected', 'paid')),
++    submitted_at         TEXT,   -- YYYY-MM-DDTHH:MM:SS (UTC)
++    first_approved_by_id INTEGER REFERENCES employees (id),
++    first_approved_at    TEXT,   -- YYYY-MM-DDTHH:MM:SS (UTC)
++    decided_at           TEXT,   -- YYYY-MM-DDTHH:MM:SS (UTC)
++    decided_by_id        INTEGER REFERENCES employees (id),
++    rejection_reason     TEXT
++);
++
++INSERT INTO claims_new (id, employee_id, amount, category, description, status,
++                        submitted_at, decided_at, decided_by_id, rejection_reason)
++SELECT id, employee_id, amount, category, description, status,
++       submitted_at, decided_at, decided_by_id, rejection_reason
++FROM claims;
++
++DROP TABLE claims;
++ALTER TABLE claims_new RENAME TO claims;
++
++CREATE INDEX claims_employee_id ON claims (employee_id);
++CREATE INDEX claims_decided_by_id ON claims (decided_by_id);
++CREATE INDEX claims_first_approved_by_id ON claims (first_approved_by_id);
++
++-- Approved, unpaid claims over 1000 whose employee's manager has a manager now also need
++-- the second approval: the existing decision becomes the first approval.
++UPDATE claims
++SET status = 'awaiting_second_approval',
++    first_approved_by_id = decided_by_id,
++    first_approved_at = decided_at,
++    decided_by_id = NULL,
++    decided_at = NULL
++WHERE status = 'approved'
++  AND amount > 1000
++  AND EXISTS (
++      SELECT 1
++      FROM employees AS claimant
++      JOIN employees AS manager ON manager.id = claimant.manager_id
++      WHERE claimant.id = claims.employee_id
++        AND manager.manager_id IS NOT NULL
++  );
+--- a/expenses_app/permissions.py
++++ b/expenses_app/permissions.py
+@@ -1,6 +1,7 @@
+ """Who may do what. Pure functions of the calling employee and the records involved.
+ 
+-``claimant`` is the employee record a claim belongs to (needed to find their manager).
++``claimant`` is the employee record a claim belongs to (needed to find their manager);
++``claimant_manager`` is that manager's record or None (needed to find the second approver).
+ These answer only "is this user allowed?"; state rules (409) live in ``services``.
+ """
+ 
+@@ -12,6 +13,11 @@
+ def is_manager_of(user, employee):
+     """Direct manager only: the employee's ``manager`` reference points at ``user``."""
+     return employee["manager"] == user["id"]
++
++
++def is_second_approver(user, claimant_manager):
++    """The manager of the claimant's manager: signs off large claims after the manager."""
++    return claimant_manager is not None and is_manager_of(user, claimant_manager)
+ 
+ 
+ # --- employees ------------------------------------------------------------------------
+@@ -31,8 +37,13 @@
+     return True
+ 
+ 
+-def can_read_claim(user, claim, claimant):
+-    return claim["employee"] == user["id"] or is_manager_of(user, claimant) or is_finance(user)
++def can_read_claim(user, claim, claimant, claimant_manager):
++    return (
++        claim["employee"] == user["id"]
++        or is_manager_of(user, claimant)
++        or is_finance(user)
++        or (claim["first_approved_by"] is not None and is_second_approver(user, claimant_manager))
++    )
+ 
+ 
+ def can_edit_claim(user, claim):
+@@ -44,9 +55,12 @@
+     return claim["employee"] == user["id"]
+ 
+ 
+-def can_decide_claim(user, claimant):
+-    """Approve or reject: the claimant's manager."""
+-    return is_manager_of(user, claimant)
++def can_decide_claim(user, claim, claimant, claimant_manager):
++    """Approve or reject: the claimant's manager, and the second approver while the claim is
++    awaiting the second approval (they have no rights on the claim at any other stage)."""
++    return is_manager_of(user, claimant) or (
++        claim["status"] == "awaiting_second_approval" and is_second_approver(user, claimant_manager)
++    )
+ 
+ 
+ def can_pay_claim(user, claim):
+--- a/expenses_app/repository.py
++++ b/expenses_app/repository.py
+@@ -64,10 +64,11 @@
+ 
+ 
+ def employee_is_referenced(employee_id):
+-    """True if the employee has claims, decided claims or reports (rows that point at them)."""
++    """True if the employee has claims, (first-)approved or decided claims or reports (rows that point at them)."""
+     row = get_db().execute(
+         """
+-        SELECT EXISTS (SELECT 1 FROM claims WHERE employee_id = :id OR decided_by_id = :id)
++        SELECT EXISTS (SELECT 1 FROM claims
++                       WHERE employee_id = :id OR decided_by_id = :id OR first_approved_by_id = :id)
+             OR EXISTS (SELECT 1 FROM employees WHERE manager_id = :id)
+         """,
+         {"id": employee_id},
+@@ -79,7 +80,8 @@
+ 
+ _CLAIM_SELECT = """
+     SELECT id, employee_id, amount, category, description, status,
+-           submitted_at, decided_at, decided_by_id, rejection_reason
++           submitted_at, first_approved_by_id, first_approved_at,
++           decided_at, decided_by_id, rejection_reason
+     FROM claims
+ """
+ 
+@@ -95,6 +97,8 @@
+         "description": row["description"],
+         "status": row["status"],
+         "submitted_at": row["submitted_at"],
++        "first_approved_by": row["first_approved_by_id"],
++        "first_approved_at": row["first_approved_at"],
+         "decided_at": row["decided_at"],
+         "decided_by": row["decided_by_id"],
+         "rejection_reason": row["rejection_reason"],
+@@ -133,8 +137,17 @@
+     )
+ 
+ 
++def mark_claim_first_approved(claim_id, approved_at, approved_by):
++    """Record the manager's approval of a claim that still needs the second approval."""
++    get_db().execute(
++        "UPDATE claims SET status = 'awaiting_second_approval', first_approved_at = ?, first_approved_by_id = ?"
++        " WHERE id = ?",
++        (approved_at, approved_by, claim_id),
++    )
++
++
+ def mark_claim_decided(claim_id, status, decided_at, decided_by, rejection_reason=None):
+-    """Record a manager's decision; ``status`` is 'approved' or 'rejected'."""
++    """Record the final decision; ``status`` is 'approved' or 'rejected'."""
+     get_db().execute(
+         "UPDATE claims SET status = ?, decided_at = ?, decided_by_id = ?, rejection_reason = ? WHERE id = ?",
+         (status, decided_at, decided_by, rejection_reason, claim_id),
+--- a/expenses_app/services.py
++++ b/expenses_app/services.py
+@@ -8,6 +8,12 @@
+ 
+     draft --submit--> submitted --approve--> approved --pay--> paid
+                                 \\--reject--> rejected
++
++Claims over ``SECOND_APPROVAL_THRESHOLD`` whose employee's manager has a manager need a
++second approval by that manager's manager (the "second approver")::
++
++    submitted --approve (manager)--> awaiting_second_approval --approve (second approver)--> approved
++                                                              \\--reject (second approver)--> rejected
+ """
+ from . import permissions, repository, validation
+ from .db import transaction
+@@ -15,8 +21,9 @@
+ from .filters import apply_filters
+ 
+ EMPLOYEE_FIELDS = ("id", "username", "name", "role", "manager", "department")
+-CLAIM_FIELDS = ("id", "employee", "amount", "category", "description", "status",
+-                "submitted_at", "decided_at", "decided_by", "rejection_reason")
++CLAIM_FIELDS = ("id", "employee", "amount", "category", "description", "status", "submitted_at",
++                "first_approved_by", "first_approved_at", "decided_at", "decided_by", "rejection_reason")
++SECOND_APPROVAL_THRESHOLD = 1000
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -106,16 +113,18 @@
+ 
+ def list_claims(ctx, filters=None):
+     employees = {e["id"]: e for e in repository.list_employees()}
+-    claims = [
+-        c for c in repository.list_claims()
+-        if permissions.can_read_claim(ctx.user, c, employees[c["employee"]])
+-    ]
++
++    def readable(claim):
++        claimant = employees[claim["employee"]]
++        return permissions.can_read_claim(ctx.user, claim, claimant, employees.get(claimant["manager"]))
++
++    claims = [c for c in repository.list_claims() if readable(c)]
+     return apply_filters(claims, filters or {}, CLAIM_FIELDS)
+ 
+ 
+ def get_claim(ctx, claim_id):
+     claim = _load_claim(claim_id)
+-    if not permissions.can_read_claim(ctx.user, claim, _claimant(claim)):
++    if not permissions.can_read_claim(ctx.user, claim, *_approval_chain(claim)):
+         raise Forbidden()
+     return claim
+ 
+@@ -166,22 +175,23 @@
+ 
+ 
+ def approve_claim(ctx, claim_id, params):
+-    with transaction():
+-        claim = _load_claim(claim_id)
+-        if not permissions.can_decide_claim(ctx.user, _claimant(claim)):
+-            raise Forbidden("Only the employee's manager can approve the claim.")
+-        _require_status(claim, "submitted", "Only submitted claims can be approved.")
++    """The manager's approval completes the claim unless it needs a second approval; the
++    second approver's approval always completes it."""
++    with transaction():
++        claim = _load_claim(claim_id)
++        claimant, claimant_manager = _check_can_decide(ctx, claim, "approved")
+         validation.clean_no_params(params)
+-        repository.mark_claim_decided(claim_id, "approved", ctx.now_text, ctx.user["id"])
++        if claim["status"] == "submitted" and _needs_second_approval(claim, claimant_manager):
++            repository.mark_claim_first_approved(claim_id, ctx.now_text, ctx.user["id"])
++        else:
++            repository.mark_claim_decided(claim_id, "approved", ctx.now_text, ctx.user["id"])
+     return repository.get_claim(claim_id)
+ 
+ 
+ def reject_claim(ctx, claim_id, params):
+     with transaction():
+         claim = _load_claim(claim_id)
+-        if not permissions.can_decide_claim(ctx.user, _claimant(claim)):
+-            raise Forbidden("Only the employee's manager can reject the claim.")
+-        _require_status(claim, "submitted", "Only submitted claims can be rejected.")
++        _check_can_decide(ctx, claim, "rejected")
+         reason = validation.clean_reject_params(params)
+         repository.mark_claim_decided(claim_id, "rejected", ctx.now_text, ctx.user["id"], reason)
+     return repository.get_claim(claim_id)
+@@ -207,8 +217,13 @@
+     actions = []
+     if status == "draft" and permissions.can_submit_claim(user, claim):
+         actions.append("submit")
+-    if status == "submitted" and permissions.can_decide_claim(user, _claimant(claim)):
+-        actions += ["approve", "reject"]
++    if status in ("submitted", "awaiting_second_approval"):
++        try:
++            _check_can_decide(ctx, claim, "approved")
++        except (Forbidden, Conflict):
++            pass
++        else:
++            actions += ["approve", "reject"]
+     if status == "approved" and permissions.can_pay_claim(user, claim):
+         actions.append("pay")
+     return actions
+@@ -221,8 +236,32 @@
+     return claim
+ 
+ 
+-def _claimant(claim):
+-    return repository.get_employee(claim["employee"])
++def _needs_second_approval(claim, claimant_manager):
++    """Large claims need a second approval when the employee's manager has a manager."""
++    return (claim["amount"] > SECOND_APPROVAL_THRESHOLD
++            and claimant_manager is not None and claimant_manager["manager"] is not None)
++
++
++def _check_can_decide(ctx, claim, outcome):
++    """403/409 checks shared by approve and reject; returns ``(claimant, claimant_manager)``.
++
++    The employee's manager decides only ``submitted`` claims (409 otherwise, also while the
++    claim awaits the second approval). The second approver passes the permission check only
++    while the claim awaits the second approval, so needs no state check here.
++    """
++    claimant, claimant_manager = _approval_chain(claim)
++    if not permissions.can_decide_claim(ctx.user, claim, claimant, claimant_manager):
++        raise Forbidden(f"Only the employee's manager or the second approver can mark the claim {outcome}.")
++    if permissions.is_manager_of(ctx.user, claimant):
++        _require_status(claim, "submitted", f"Only submitted claims can be {outcome} by the employee's manager.")
++    return claimant, claimant_manager
++
++
++def _approval_chain(claim):
++    """``(claimant, claimant_manager)``: the claim's employee and their manager (or None)."""
++    claimant = repository.get_employee(claim["employee"])
++    manager_id = claimant["manager"]
++    return claimant, (repository.get_employee(manager_id) if manager_id is not None else None)
+ 
+ 
+ def _require_status(claim, status, message):
+--- a/expenses_app/templates/claims/detail.html
++++ b/expenses_app/templates/claims/detail.html
+@@ -10,6 +10,8 @@
+   {{ field("description", claim.description) }}
+   {{ field("status", claim.status) }}
+   {{ field("submitted_at", claim.submitted_at) }}
++  {{ field("first_approved_by", claim.first_approved_by, href=claim.first_approved_by and url_for('ui.show_employee', employee_id=claim.first_approved_by)) }}
++  {{ field("first_approved_at", claim.first_approved_at) }}
+   {{ field("decided_at", claim.decided_at) }}
+   {{ field("decided_by", claim.decided_by, href=claim.decided_by and url_for('ui.show_employee', employee_id=claim.decided_by)) }}
+   {{ field("rejection_reason", claim.rejection_reason) }}
+--- a/expenses_app/validation.py
++++ b/expenses_app/validation.py
+@@ -87,7 +87,8 @@
+ 
+ CLAIM_WRITABLE = ("amount", "category", "description")
+ # Maintained by the workflow actions; clients sending them get a 400.
+-CLAIM_READ_ONLY = ("id", "employee", "status", "submitted_at", "decided_at", "decided_by", "rejection_reason")
++CLAIM_READ_ONLY = ("id", "employee", "status", "submitted_at", "first_approved_by", "first_approved_at",
++                   "decided_at", "decided_by", "rejection_reason")
+ 
+ 
+ def clean_employee(data, *, partial):
+--- a/seed.py
++++ b/seed.py
+@@ -25,10 +25,10 @@
+         seed["employees"],
+     )
+     conn.executemany(
+-        "INSERT INTO claims (id, employee_id, amount, category, description, status,"
+-        " submitted_at, decided_at, decided_by_id, rejection_reason)"
+-        " VALUES (:id, :employee, :amount, :category, :description, :status,"
+-        " :submitted_at, :decided_at, :decided_by, :rejection_reason)",
++        "INSERT INTO claims (id, employee_id, amount, category, description, status, submitted_at,"
++        " first_approved_by_id, first_approved_at, decided_at, decided_by_id, rejection_reason)"
++        " VALUES (:id, :employee, :amount, :category, :description, :status, :submitted_at,"
++        " :first_approved_by, :first_approved_at, :decided_at, :decided_by, :rejection_reason)",
+         seed["claims"],
+     )
+ 
+--- a/tests/test_expenses_claims.py
++++ b/tests/test_expenses_claims.py
+@@ -8,12 +8,13 @@
+         r = app.post("/api/claims", NEW, user=user)
+         assert r.status == 201
+         assert r.json == {"id": r.json["id"], **NEW, "employee": employee_id, "status": "draft",
+-                          "submitted_at": None, "decided_at": None, "decided_by": None, "rejection_reason": None}
++                          "submitted_at": None, "first_approved_by": None, "first_approved_at": None, "decided_at": None, "decided_by": None, "rejection_reason": None}
+ 
+ 
+ def test_workflow_fields_cannot_be_set(app):
+     for field, value in (("employee", 6), ("status", "approved"), ("submitted_at", "2026-01-01T00:00:00"),
+-                         ("decided_at", None), ("decided_by", 2), ("rejection_reason", "x")):
++                         ("decided_at", None), ("decided_by", 2), ("rejection_reason", "x"),
++                         ("first_approved_by", 4), ("first_approved_at", "2026-01-01T00:00:00")):
+         r = app.post("/api/claims", dict(NEW, **{field: value}), user="priya")
+         assert r.status == 400 and field in r.json["fields"], field
+         assert app.patch("/api/claims/1", {field: value}, user="wen").status == 400
+@@ -42,7 +43,8 @@
+     by_employee = lambda *emps: {c["id"] for c in all_claims if c["employee"] in emps}  # noqa: E731
+     assert ids("priya") == by_employee(5)
+     assert ids("omar") == by_employee(4, 5, 8, 11, 14)  # own + direct reports
+-    assert ids("marco") == by_employee(2, 4, 6, 9, 12, 15)  # not omar's reports
++    # not omar's reports, except claims omar approved that await marco's second approval
++    assert ids("marco") == by_employee(2, 4, 6, 9, 12, 15) | {21, 22, 44}
+     assert app.get("/api/claims/2", user="omar").status == 200  # victor's claim, omar manages victor
+     assert app.get("/api/claims/2", user="marco").status == 403  # indirect manager
+     assert app.get("/api/claims/2", user="sam").status == 403
+--- a/tests/test_expenses_second_approval.py
++++ b/tests/test_expenses_second_approval.py
+@@ -0,0 +1,178 @@
++"""Second approval for claims over 1000 whose employee's manager has a manager.
++
++Seed org chart used here: marco (2) manages omar (4); omar manages sam (8), victor (11) and
++yusuf (14); marco has no manager, so claims of marco's direct reports need one approval.
++"""
++import os
++import sqlite3
++
++from accept_client import fresh_app, parse_ui
++
++NOW = "2026-03-02T09:30:00"
++LATER = "2026-03-03T10:00:00"
++
++
++def _create_submitted(app, user, amount):
++    claim = app.post("/api/claims", {"amount": amount, "category": "travel", "description": "Trip"}, user=user).json
++    assert app.post(f"/api/claims/{claim['id']}/submit", {}, user=user).status == 200
++    return claim["id"]
++
++
++def test_large_claim_needs_two_approvals(app):
++    # claim 5: yusuf, 1057.93, submitted
++    r = app.post("/api/claims/5/approve", {}, user="omar", now=NOW)
++    assert r.status == 200
++    assert (r.json["status"], r.json["first_approved_by"], r.json["first_approved_at"]) == (
++        "awaiting_second_approval", 4, NOW)
++    assert r.json["decided_at"] is None and r.json["decided_by"] is None
++    assert app.post("/api/claims/5/pay", {}, user="fiona").status == 409
++
++    r = app.post("/api/claims/5/approve", {}, user="marco", now=LATER)
++    assert r.status == 200
++    assert (r.json["status"], r.json["decided_at"], r.json["decided_by"]) == ("approved", LATER, 2)
++    assert (r.json["first_approved_by"], r.json["first_approved_at"]) == (4, NOW)
++    assert app.post("/api/claims/5/pay", {}, user="fiona").status == 200
++
++
++def test_second_approver_rejects(app):
++    # claim 36: victor, 1655.60, submitted
++    assert app.post("/api/claims/36/approve", {}, user="omar", now=NOW).status == 200
++    assert app.post("/api/claims/36/reject", {}, user="marco").status == 400
++    assert app.post("/api/claims/36/reject", {"reason": " "}, user="marco").status == 400
++    r = app.post("/api/claims/36/reject", {"reason": "Over budget"}, user="marco", now=LATER)
++    assert r.status == 200
++    assert (r.json["status"], r.json["rejection_reason"], r.json["decided_by"], r.json["decided_at"]) == (
++        "rejected", "Over budget", 2, LATER)
++    assert (r.json["first_approved_by"], r.json["first_approved_at"]) == (4, NOW)
++
++
++def test_who_gets_which_error(app):
++    # Before the first approval the second approver has no rights on the claim.
++    assert app.post("/api/claims/5/approve", {}, user="marco").status == 403
++    assert app.post("/api/claims/5/reject", {"reason": "x"}, user="marco").status == 403
++    assert app.get("/api/claims/5", user="marco").status == 403
++
++    assert app.post("/api/claims/5/approve", {}, user="omar").status == 200
++    # The employee's manager acting on a claim awaiting the second approval: 409 (before 400).
++    assert app.post("/api/claims/5/approve", {}, user="omar").status == 409
++    assert app.post("/api/claims/5/reject", {"reason": "x"}, user="omar").status == 409
++    assert app.post("/api/claims/5/reject", {}, user="omar").status == 409
++    for user in ("yusuf", "fiona", "sam", "nadia"):
++        assert app.post("/api/claims/5/approve", {}, user=user).status == 403, user
++        assert app.post("/api/claims/5/reject", {}, user=user).status == 403, user
++    assert app.post("/api/claims/5/approve", {"note": "x"}, user="marco").status == 400
++
++    assert app.post("/api/claims/5/approve", {}, user="marco").status == 200
++    # Once decided, the second approver has no rights again; the manager still gets 409.
++    assert app.post("/api/claims/5/approve", {}, user="marco").status == 403
++    assert app.post("/api/claims/5/reject", {"reason": "x"}, user="marco").status == 403
++    assert app.post("/api/claims/5/approve", {}, user="omar").status == 409
++
++
++def test_single_approval_claims_unchanged(app):
++    exactly_limit = _create_submitted(app, "sam", 1000)  # sam -> omar -> marco, but not over 1000
++    for claim_id, manager in ((2, "omar"), (25, "marco"), (exactly_limit, "omar")):  # 25: zoe, 1452.80, marco has no manager
++        r = app.post(f"/api/claims/{claim_id}/approve", {}, user=manager, now=NOW)
++        assert r.status == 200 and r.json["status"] == "approved" and r.json["decided_at"] == NOW
++        assert r.json["first_approved_by"] is None and r.json["first_approved_at"] is None
++    assert app.get("/api/claims/2", user="marco").status == 403
++    rejected = app.post("/api/claims/36/reject", {"reason": "No"}, user="omar").json
++    assert rejected["status"] == "rejected" and rejected["first_approved_by"] is None
++
++
++def test_second_approver_reads_first_approved_claims(app):
++    def marco_ids():
++        return {c["id"] for c in app.get("/api/claims", user="marco").json["items"]}
++
++    assert 5 not in marco_ids()
++    app.post("/api/claims/5/approve", {}, user="omar")
++    assert 5 in marco_ids() and app.get("/api/claims/5", user="marco").status == 200
++    app.post("/api/claims/5/approve", {}, user="marco")
++    assert 5 in marco_ids() and app.get("/api/claims/5", user="marco").status == 200
++    # Other readers unchanged; filters cover the new fields.
++    assert app.get("/api/claims/5", user="sam").status == 403
++    items = app.get("/api/claims?status=awaiting_second_approval&first_approved_by=4", user="fiona").json["items"]
++    assert [c["id"] for c in items] == [21, 22, 44]
++
++
++def test_ui_actions_while_awaiting_second_approval(app):
++    def actions(claim_id, user):
++        return parse_ui(app.get(f"/ui/claims/{claim_id}", user=user).text).actions
++
++    assert actions(21, "marco") == ["approve", "reject"]
++    assert "reason" in parse_ui(app.get("/ui/claims/21", user="marco").text).inputs
++    for user in ("omar", "fiona", "victor"):
++        assert actions(21, user) == [], user
++    page = parse_ui(app.get("/ui/claims/21", user="marco").text)
++    assert page.fields["status"] == "awaiting_second_approval"
++    assert (page.fields["first_approved_by"], page.fields["first_approved_at"]) == ("4", "2026-01-28T08:00:00")
++    assert actions(5, "marco") == []  # submitted: not the second approver's turn
++    assert app.get("/ui/claims/5", user="marco").status == 403
++    app.post("/api/claims/21/approve", {}, user="marco")
++    assert actions(21, "marco") == [] and actions(21, "fiona") == ["pay"]
++
++
++def test_seed_claims_were_migrated(app):
++    def claim(claim_id):
++        return app.get(f"/api/claims/{claim_id}", user="fiona").json
++
++    # Approved, unpaid, over 1000, employee's manager (omar) has a manager (marco).
++    for claim_id, decided_at in ((21, "2026-01-28T08:00:00"), (22, "2026-01-11T13:00:00"),
++                                 (44, "2026-01-19T14:00:00")):
++        c = claim(claim_id)
++        assert (c["status"], c["first_approved_by"], c["first_approved_at"], c["decided_by"], c["decided_at"]) == (
++            "awaiting_second_approval", 4, decided_at, None, None)
++    assert claim(33)["status"] == "approved"  # under 1000
++    assert claim(50)["status"] == "approved"  # omar's own claim: marco has no manager
++    assert claim(17)["status"] == "paid"  # already paid
++    assert claim(17)["first_approved_by"] is None
++
++
++OLD_EMPLOYEES = [
++    (1, "fiona", "finance", None), (2, "marco", "manager", None), (4, "omar", "manager", 2),
++    (5, "priya", "employee", 4), (6, "quinn", "employee", 2),
++]
++OLD_CLAIMS = [  # id, employee, amount, status, decided_at, decided_by
++    (1, 5, 1500.0, "approved", "2026-01-05T10:00:00", 4),  # migrated
++    (2, 5, 1000.0, "approved", "2026-01-06T10:00:00", 4),  # not over 1000
++    (3, 5, 1500.0, "paid", "2026-01-07T10:00:00", 4),  # paid
++    (4, 6, 1500.0, "approved", "2026-01-08T10:00:00", 2),  # manager has no manager
++    (5, 5, 1500.0, "submitted", None, None),
++    (6, 4, 4000.0, "approved", "2026-01-09T10:00:00", 2),  # omar's manager has no manager
++]
++
++
++def test_migration_converts_existing_approved_claims(app):
++    """Build a database at schema version 1 with old-style claims, then start the app."""
++    path = os.path.join(app.workdir, "data.db")
++    os.remove(path)
++    with open(os.path.join(app.workdir, "expenses_app", "migrations", "0001_initial.sql"), encoding="utf-8") as fh:
++        initial = fh.read()
++    conn = sqlite3.connect(path)
++    conn.executescript(initial)
++    conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)")
++    conn.execute("INSERT INTO schema_version VALUES (1, 'initial', '2026-01-01T00:00:00')")
++    conn.executemany("INSERT INTO employees VALUES (?, ?, ?, ?, ?, 'Eng')",
++                     [(i, u, u.title(), r, m) for i, u, r, m in OLD_EMPLOYEES])
++    conn.executemany(
++        "INSERT INTO claims (id, employee_id, amount, category, description, status, submitted_at, decided_at,"
++        " decided_by_id) VALUES (?, ?, ?, 'travel', 'Trip', ?, '2026-01-01T09:00:00', ?, ?)",
++        OLD_CLAIMS,
++    )
++    conn.commit()
++    conn.close()
++
++    upgraded = fresh_app(app.workdir)
++    claims = {c["id"]: c for c in upgraded.get("/api/claims", user="fiona").json["items"]}
++    assert (claims[1]["status"], claims[1]["first_approved_by"], claims[1]["first_approved_at"],
++            claims[1]["decided_by"], claims[1]["decided_at"]) == (
++        "awaiting_second_approval", 4, "2026-01-05T10:00:00", None, None)
++    for claim_id, employee, amount, status, decided_at, decided_by in OLD_CLAIMS[1:]:
++        c = claims[claim_id]
++        assert (c["employee"], c["amount"], c["status"], c["decided_at"], c["decided_by"]) == (
++            employee, amount, status, decided_at, decided_by), claim_id
++        assert c["first_approved_by"] is None and c["first_approved_at"] is None
++    # The migrated claim continues through the new workflow.
++    assert upgraded.post("/api/claims/1/approve", {}, user="marco", now=NOW).json["status"] == "approved"
++    new = upgraded.post("/api/claims", {"amount": 5, "category": "meals", "description": "x"}, user="priya").json
++    assert new["id"] == 7
+--- a/tests/test_expenses_ui.py
++++ b/tests/test_expenses_ui.py
+@@ -38,7 +38,8 @@
+     page = parse_ui(app.get("/ui/claims/7", user="yusuf").text)
+     assert page.fields == {"employee": "14", "amount": "613.88", "category": "equipment",
+                            "description": "Hotel night #7", "status": "rejected",
+-                           "submitted_at": "2026-01-28T11:00:00", "decided_at": "2026-01-30T09:00:00",
++                           "submitted_at": "2026-01-28T11:00:00", "first_approved_by": "", "first_approved_at": "",
++                           "decided_at": "2026-01-30T09:00:00",
+                            "decided_by": "4", "rejection_reason": "Missing receipt"}
+     assert page.actions == []
+     assert app.get("/ui/claims/7", user="priya").status == 403

@@ -1,0 +1,207 @@
+request: "Itemised claims: a claim can consist of several line items (claim_lines); a claim's amount becomes the total of its lines."
+interpretation: >-
+  New collection claim_lines (claim, amount > 0, description). claims.amount stays a stored field but is kept equal to
+  round(sum of the claim's lines, 2) by triggers on line create/update/delete. Creating a claim (same input and validation
+  as before) creates its first line via a create trigger. Line create/update/delete is allowed only for the claim's employee (403)
+  while the claim is draft (409); deleting the last line is 409; a line making the claim's total exceed 5000 is 400; changing a
+  line's claim is 400. PATCHing a claim's amount sets its single line's amount; with several lines (amount differing from the
+  total) it is 409, which takes precedence over the 0..5000 check (the claim-level range check applies to single-line claims;
+  multi-line totals are enforced on the lines). Deleting a claim deletes its lines. Lines are readable by exactly the readers of
+  their claim. claim_lines.claim is stored as the claim's integer id (serialised exactly like a reference) with an existence
+  constraint (400) rather than a ref field, because the runtime refuses (409) to delete a record still referenced, which would
+  block deleting a draft claim together with its lines. Existing claims each get line id = claim id with their current amount and
+  description; new lines get ids from 81.
+ops:
+  - add_entity:
+      name: claim_lines
+      fields:
+        claim: int required
+        amount: number required
+        description: text required
+      rules:
+        read: "any(c.employee == user or c.employee.manager == user or user.role == 'finance' for c in claims if c.id == record.claim)"
+        create: "all(c.employee == user for c in claims if c.id == record.claim)"
+        create_guard: "all(c.status == 'draft' for c in claims if c.id == record.claim)"
+        update: "any(c.employee == user for c in claims if c.id == record.claim)"
+        update_guard: "any(c.status == 'draft' for c in claims if c.id == record.claim)"
+        delete: "any(c.employee == user for c in claims if c.id == record.claim)"
+        delete_guard: "any(c.status == 'draft' for c in claims if c.id == record.claim) and count(claim_lines, claim=record.claim) > 1"
+      constraints:
+        claim_exists: {expr: "any(c.id == record.claim for c in claims)", message: "refers to a record that does not exist", field: claim}
+        amount_positive: {expr: "record.amount > 0", message: "must be greater than 0", field: amount}
+        claim_total_max: {expr: "round(sum(l.amount for l in claim_lines if l.claim == record.claim and l.id != record.id) + record.amount, 2) <= 5000", message: "the claim's total must be at most 5000", field: amount}
+      triggers:
+        claim_fixed: {on: update, when: "record.claim != old.claim", effects: [{fail: "'the claim of a line cannot be changed'", status: 400}]}
+        total_on_create: {on: create, effects: [{update: "[c for c in claims if c.id == record.claim]", set: {amount: "round(sum(l.amount for l in claim_lines if l.claim == it.id and l.id != record.id) + record.amount, 2)"}}]}
+        total_on_update: {on: update, effects: [{update: "[c for c in claims if c.id == record.claim]", set: {amount: "round(sum(l.amount for l in claim_lines if l.claim == it.id and l.id != record.id) + record.amount, 2)"}}]}
+        total_on_delete: {on: delete, when: "any(l.claim == record.claim and l.id != record.id for l in claim_lines)", effects: [{update: "[c for c in claims if c.id == record.claim]", set: {amount: "round(sum(l.amount for l in claim_lines if l.claim == it.id and l.id != record.id), 2)"}}]}
+  - change_constraint: {entity: claims, name: amount_range, expr: "count(claim_lines, claim=record.id) > 1 or (record.amount > 0 and record.amount <= 5000)", message: "must be greater than 0 and at most 5000", field: amount}
+  - add_trigger:
+      entity: claims
+      name: first_line
+      on: create
+      effects:
+        - {create: claim_lines, values: {claim: record.id, amount: record.amount, description: record.description}}
+  - add_trigger:
+      entity: claims
+      name: amount_to_line
+      on: update
+      when: "record.amount != old.amount"
+      effects:
+        - {fail: "'this claim has several lines; change its lines instead'", status: 409, when: "count(claim_lines, claim=record.id) > 1 and record.amount != round(sum(l.amount for l in claim_lines if l.claim == record.id), 2)"}
+        - {if: "count(claim_lines, claim=record.id) == 1", then: [{update: "[l for l in claim_lines if l.claim == record.id and l.amount != record.amount]", set: {amount: "record.amount"}}]}
+  - add_trigger:
+      entity: claims
+      name: delete_lines
+      on: delete
+      effects:
+        - {delete: "[l for l in claim_lines if l.claim == record.id]"}
+  - add_records:
+      entity: claim_lines
+      records:
+      - {id: 1, claim: 1, amount: 1271.32, description: "Hotel night #1"}
+      - {id: 2, claim: 2, amount: 734.81, description: "Train to client #2"}
+      - {id: 3, claim: 3, amount: 468.5, description: "Keyboard #3"}
+      - {id: 4, claim: 4, amount: 558.67, description: "Monitor #4"}
+      - {id: 5, claim: 5, amount: 1057.93, description: "Team lunch #5"}
+      - {id: 6, claim: 6, amount: 1122.39, description: "Keyboard #6"}
+      - {id: 7, claim: 7, amount: 613.88, description: "Hotel night #7"}
+      - {id: 8, claim: 8, amount: 176.27, description: "Keyboard #8"}
+      - {id: 9, claim: 9, amount: 968.13, description: "Keyboard #9"}
+      - {id: 10, claim: 10, amount: 913.33, description: "Taxi #10"}
+      - {id: 11, claim: 11, amount: 966.86, description: "Hotel night #11"}
+      - {id: 12, claim: 12, amount: 380.94, description: "Keyboard #12"}
+      - {id: 13, claim: 13, amount: 246.02, description: "Monitor #13"}
+      - {id: 14, claim: 14, amount: 1377.2, description: "Team lunch #14"}
+      - {id: 15, claim: 15, amount: 896.78, description: "Hotel night #15"}
+      - {id: 16, claim: 16, amount: 1114.27, description: "Train to client #16"}
+      - {id: 17, claim: 17, amount: 1588.92, description: "Hotel night #17"}
+      - {id: 18, claim: 18, amount: 475.38, description: "Train to client #18"}
+      - {id: 19, claim: 19, amount: 406.34, description: "Train to client #19"}
+      - {id: 20, claim: 20, amount: 1553.42, description: "Keyboard #20"}
+      - {id: 21, claim: 21, amount: 1644.21, description: "Conference fee #21"}
+      - {id: 22, claim: 22, amount: 1455.12, description: "Team lunch #22"}
+      - {id: 23, claim: 23, amount: 120.06, description: "Train to client #23"}
+      - {id: 24, claim: 24, amount: 766.43, description: "Conference fee #24"}
+      - {id: 25, claim: 25, amount: 1452.8, description: "Taxi #25"}
+      - {id: 26, claim: 26, amount: 396.68, description: "Monitor #26"}
+      - {id: 27, claim: 27, amount: 1201.41, description: "Monitor #27"}
+      - {id: 28, claim: 28, amount: 615.55, description: "Team lunch #28"}
+      - {id: 29, claim: 29, amount: 923.85, description: "Monitor #29"}
+      - {id: 30, claim: 30, amount: 290.03, description: "Conference fee #30"}
+      - {id: 31, claim: 31, amount: 690.04, description: "Hotel night #31"}
+      - {id: 32, claim: 32, amount: 14.63, description: "Train to client #32"}
+      - {id: 33, claim: 33, amount: 827.52, description: "Keyboard #33"}
+      - {id: 34, claim: 34, amount: 987.58, description: "Conference fee #34"}
+      - {id: 35, claim: 35, amount: 535.38, description: "Keyboard #35"}
+      - {id: 36, claim: 36, amount: 1655.6, description: "Hotel night #36"}
+      - {id: 37, claim: 37, amount: 309.15, description: "Monitor #37"}
+      - {id: 38, claim: 38, amount: 1207.79, description: "Team lunch #38"}
+      - {id: 39, claim: 39, amount: 1748.0, description: "Hotel night #39"}
+      - {id: 40, claim: 40, amount: 201.82, description: "Keyboard #40"}
+      - {id: 41, claim: 41, amount: 635.61, description: "Conference fee #41"}
+      - {id: 42, claim: 42, amount: 1070.38, description: "Team lunch #42"}
+      - {id: 43, claim: 43, amount: 1663.17, description: "Hotel night #43"}
+      - {id: 44, claim: 44, amount: 1667.52, description: "Train to client #44"}
+      - {id: 45, claim: 45, amount: 1254.28, description: "Train to client #45"}
+      - {id: 46, claim: 46, amount: 757.37, description: "Train to client #46"}
+      - {id: 47, claim: 47, amount: 437.41, description: "Team lunch #47"}
+      - {id: 48, claim: 48, amount: 953.91, description: "Hotel night #48"}
+      - {id: 49, claim: 49, amount: 981.82, description: "Team lunch #49"}
+      - {id: 50, claim: 50, amount: 1154.01, description: "Monitor #50"}
+      - {id: 51, claim: 51, amount: 209.55, description: "Conference fee #51"}
+      - {id: 52, claim: 52, amount: 816.79, description: "Train to client #52"}
+      - {id: 53, claim: 53, amount: 1444.4, description: "Conference fee #53"}
+      - {id: 54, claim: 54, amount: 250.64, description: "Hotel night #54"}
+      - {id: 55, claim: 55, amount: 543.6, description: "Hotel night #55"}
+      - {id: 56, claim: 56, amount: 1510.47, description: "Keyboard #56"}
+      - {id: 57, claim: 57, amount: 150.96, description: "Hotel night #57"}
+      - {id: 58, claim: 58, amount: 1118.43, description: "Monitor #58"}
+      - {id: 59, claim: 59, amount: 1090.4, description: "Conference fee #59"}
+      - {id: 60, claim: 60, amount: 1243.02, description: "Team lunch #60"}
+      - {id: 61, claim: 61, amount: 266.96, description: "Train to client #61"}
+      - {id: 62, claim: 62, amount: 293.2, description: "Team lunch #62"}
+      - {id: 63, claim: 63, amount: 915.26, description: "Monitor #63"}
+      - {id: 64, claim: 64, amount: 1646.14, description: "Team lunch #64"}
+      - {id: 65, claim: 65, amount: 184.6, description: "Conference fee #65"}
+      - {id: 66, claim: 66, amount: 1701.95, description: "Monitor #66"}
+      - {id: 67, claim: 67, amount: 566.16, description: "Team lunch #67"}
+      - {id: 68, claim: 68, amount: 174.81, description: "Taxi #68"}
+      - {id: 69, claim: 69, amount: 1492.97, description: "Monitor #69"}
+      - {id: 70, claim: 70, amount: 926.71, description: "Keyboard #70"}
+      - {id: 71, claim: 71, amount: 1711.93, description: "Keyboard #71"}
+      - {id: 72, claim: 72, amount: 1646.02, description: "Train to client #72"}
+      - {id: 73, claim: 73, amount: 1649.13, description: "Conference fee #73"}
+      - {id: 74, claim: 74, amount: 1407.45, description: "Conference fee #74"}
+      - {id: 75, claim: 75, amount: 1647.06, description: "Conference fee #75"}
+      - {id: 76, claim: 76, amount: 427.14, description: "Conference fee #76"}
+      - {id: 77, claim: 77, amount: 423.85, description: "Monitor #77"}
+      - {id: 78, claim: 78, amount: 1658.68, description: "Team lunch #78"}
+      - {id: 79, claim: 79, amount: 553.87, description: "Keyboard #79"}
+      - {id: 80, claim: 80, amount: 759.62, description: "Train to client #80"}
+expect:
+  - name: "creating a claim creates its first line"
+    steps:
+      - {as: wen, do: "POST /api/claims", body: {amount: 120.5, category: travel, description: "Taxi"}, status: 201, json: {id: 81, amount: 120.5}}
+      - {as: wen, do: "GET /api/claim_lines?claim=81", count: 1}
+      - {as: wen, do: "GET /api/claim_lines/81", status: 200, json: {id: 81, claim: 81, amount: 120.5, description: "Taxi"}}
+  - name: "lines add up to the claim amount"
+    steps:
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 1, amount: 28.68, description: "Dinner"}, status: 201, json: {id: 81, claim: 1}}
+      - {as: wen, do: "GET /api/claims/1", status: 200, json: {amount: 1300.0}}
+      - {as: wen, do: "PATCH /api/claim_lines/81", body: {amount: 100}, status: 200}
+      - {as: wen, do: "GET /api/claims/1", json: {amount: 1371.32}}
+      - {as: wen, do: "PATCH /api/claims/1", body: {amount: 50}, status: 409}
+      - {as: wen, do: "PATCH /api/claims/1", body: {amount: 8000}, status: 409}
+      - {as: wen, do: "PATCH /api/claims/1", body: {category: meals, description: "Trip"}, status: 200, json: {amount: 1371.32, category: meals}}
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 1, amount: 3628.69, description: "Too much"}, status: 400}
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 1, amount: 3628.68, description: "Max"}, status: 201}
+      - {as: wen, do: "GET /api/claims/1", json: {amount: 5000.0}}
+      - {as: wen, do: "PATCH /api/claim_lines/81", body: {amount: 100.01}, status: 400}
+      - {as: wen, do: "DELETE /api/claim_lines/1", status: 204}
+      - {as: wen, do: "GET /api/claims/1", json: {amount: 3728.68}}
+      - {as: wen, do: "GET /api/claim_lines?claim=1", count: 2}
+      - {as: quinn, do: "DELETE /api/claim_lines/81", status: 403}
+      - {as: wen, do: "POST /api/claims/1/submit", status: 200}
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 1, amount: 1, description: "Late"}, status: 409}
+      - {as: wen, do: "PATCH /api/claim_lines/81", body: {amount: 5}, status: 409}
+      - {as: wen, do: "DELETE /api/claim_lines/81", status: 409}
+  - name: "single-line claim amount patch sets the line"
+    steps:
+      - {as: wen, do: "PATCH /api/claims/1", body: {amount: 42.5}, status: 200, json: {amount: 42.5}}
+      - {as: wen, do: "GET /api/claim_lines/1", json: {amount: 42.5, description: "Hotel night #1"}}
+      - {as: wen, do: "PATCH /api/claims/1", body: {amount: 0}, status: 400}
+      - {as: wen, do: "PATCH /api/claims/1", body: {amount: 5000.01}, status: 400}
+      - {as: wen, do: "DELETE /api/claim_lines/1", status: 409}
+  - name: "deleting a draft claim deletes its lines"
+    steps:
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 1, amount: 5, description: "Extra"}, status: 201}
+      - {as: wen, do: "DELETE /api/claims/1", status: 204}
+      - {as: fiona, do: "GET /api/claim_lines?claim=1", count: 0}
+      - {as: fiona, do: "GET /api/claim_lines/81", status: 404}
+  - name: "line input validation and permissions"
+    steps:
+      - {as: wen, do: "POST /api/claim_lines", body: {amount: 5, description: "x"}, status: 400}
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 999, amount: 5, description: "x"}, status: 400}
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 1, amount: 0, description: "x"}, status: 400}
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 1, amount: 5}, status: 400}
+      - {as: marco, do: "POST /api/claim_lines", body: {claim: 1, amount: 5, description: "x"}, status: 403}
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 24, amount: 5, description: "x"}, status: 409}
+      - {as: wen, do: "PATCH /api/claim_lines/1", body: {claim: 29}, status: 400}
+      - {as: wen, do: "GET /api/claim_lines/1", json: {claim: 1}}
+      - {as: marco, do: "GET /api/claim_lines/1", status: 200}
+      - {as: nadia, do: "GET /api/claim_lines/1", status: 403}
+      - {as: quinn, do: "GET /api/claim_lines?claim=1", count: 0}
+  - name: "payment uses the total"
+    steps:
+      - {as: wen, do: "POST /api/claim_lines", body: {claim: 1, amount: 28.68, description: "Dinner"}, status: 201}
+      - {as: wen, do: "POST /api/claims/1/submit", status: 200}
+      - {as: marco, do: "POST /api/claims/1/approve", status: 200}
+      - {as: fiona, do: "POST /api/claims/1/pay", status: 200, json: {amount: 1300.0}}
+      - {as: fiona, do: "GET /api/_outbox?channel=payment", count: 1}
+      - {as: fiona, do: "GET /api/_outbox?channel=payment", json: {items: [{payload: {claim: 1, employee: 12, amount: 1300.0}}]}}
+  - name: "existing claims keep their amounts"
+    steps:
+      - {as: fiona, do: "GET /api/claim_lines", count: 80}
+      - {as: fiona, do: "GET /api/claims/80", json: {amount: 759.62}}
+      - {as: fiona, do: "GET /api/claim_lines/80", json: {claim: 80, amount: 759.62, description: "Train to client #80"}}

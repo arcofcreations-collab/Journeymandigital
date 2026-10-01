@@ -1,0 +1,437 @@
+--- a/README.md
++++ b/README.md
+@@ -100,9 +100,14 @@
+ * Unknown body fields and read-only/derived fields (`id`, `status`, `overdue`) in a create or
+   PATCH body → 400. Unknown `?field=` filters → 400. Filters on null match `null` or an empty value.
+ * A member PATCHing their own record with any field other than `name` → 403 (the whole request).
++* Roles: `member`, `librarian`, `assistant` (migration `0002`). Assistants are desk staff: they
++  read everything, lend to any member (`{"member": id}`) and return any loan, and may PATCH only
++  `active` on records whose role is `member` (their own record: only `name`); anything else → 403.
++  They cannot manage books, create/delete members or touch loans directly. Librarians stay the
++  only role that creates members or changes roles.
+ * A librarian lending to an unknown or non-integer `member` → 400; if the book is on loan, 409 wins.
+ * Deleting a member who has loans → 409 (mirrors the book rule; loans keep their history).
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the
+   heading. The borrow form is shown when the book is available and (for members) the caller
+-  is active with fewer than 3 open loans; librarians get a member picker.
++  is active with fewer than 3 open loans; librarians and assistants get a member picker.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/library_app/migrations/0002_add_assistant_role.sql
++++ b/library_app/migrations/0002_add_assistant_role.sql
+@@ -0,0 +1,44 @@
++-- Allow a third staff role, 'assistant', in members.role.
++--
++-- SQLite cannot change a CHECK constraint in place, so members is rebuilt
++-- (create-copy-drop-rename). Foreign-key enforcement is on and cannot be switched off
++-- inside the migration's transaction, so loans (the only table referencing members) is
++-- rebuilt alongside it and dropped first (its reference to members_new follows the rename
++-- back to members). Every row, id and AUTOINCREMENT counter is kept.
++
++CREATE TABLE members_new (
++    id       INTEGER PRIMARY KEY AUTOINCREMENT,
++    username TEXT    NOT NULL UNIQUE,
++    name     TEXT    NOT NULL,
++    role     TEXT    NOT NULL CHECK (role IN ('member', 'librarian', 'assistant')),
++    active   INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
++);
++INSERT INTO members_new (id, username, name, role, active)
++    SELECT id, username, name, role, active FROM members;
++
++CREATE TABLE loans_new (
++    id          INTEGER PRIMARY KEY AUTOINCREMENT,
++    book_id     INTEGER NOT NULL REFERENCES books (id),
++    member_id   INTEGER NOT NULL REFERENCES members_new (id),
++    borrowed_at TEXT    NOT NULL,  -- YYYY-MM-DDTHH:MM:SS (UTC)
++    due_at      TEXT    NOT NULL,  -- YYYY-MM-DD
++    returned_at TEXT               -- YYYY-MM-DDTHH:MM:SS (UTC) or NULL while on loan
++);
++INSERT INTO loans_new (id, book_id, member_id, borrowed_at, due_at, returned_at)
++    SELECT id, book_id, member_id, borrowed_at, due_at, returned_at FROM loans;
++
++-- Keep the AUTOINCREMENT high-water marks, so ids of deleted rows are never reused.
++UPDATE sqlite_sequence SET seq = max(seq, (SELECT seq FROM sqlite_sequence WHERE name = 'members'))
++    WHERE name = 'members_new' AND EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'members');
++UPDATE sqlite_sequence SET seq = max(seq, (SELECT seq FROM sqlite_sequence WHERE name = 'loans'))
++    WHERE name = 'loans_new' AND EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'loans');
++
++DROP TABLE loans;
++DROP TABLE members;
++ALTER TABLE members_new RENAME TO members;
++ALTER TABLE loans_new RENAME TO loans;
++
++CREATE INDEX loans_book_id ON loans (book_id);
++CREATE INDEX loans_member_id ON loans (member_id);
++-- A book can be on loan to at most one member at a time.
++CREATE UNIQUE INDEX loans_one_open_loan_per_book ON loans (book_id) WHERE returned_at IS NULL;
+--- a/library_app/permissions.py
++++ b/library_app/permissions.py
+@@ -1,19 +1,30 @@
+ """Who may do what. Pure functions of the calling member and the records involved.
+ 
+ These answer only "is this user allowed?"; state rules (409) live in ``services``.
++
++Roles: ``librarian`` manages everything; ``assistant`` (desk staff) reads everything,
++handles lending and may (de)activate ordinary members; ``member`` sees only their own data.
+ """
+ 
+ MEMBER_SELF_EDITABLE = {"name"}
++ASSISTANT_EDITABLE_ON_MEMBERS = {"active"}
++
++STAFF_ROLES = ("librarian", "assistant")
+ 
+ 
+ def is_librarian(user):
+     return user["role"] == "librarian"
+ 
+ 
++def is_staff(user):
++    """Librarians and assistants: read everything and lend to any member."""
++    return user["role"] in STAFF_ROLES
++
++
+ # --- members --------------------------------------------------------------------------
+ 
+ def can_read_member(user, member):
+-    return is_librarian(user) or member["id"] == user["id"]
++    return is_staff(user) or member["id"] == user["id"]
+ 
+ 
+ def can_create_member(user):
+@@ -21,10 +32,15 @@
+ 
+ 
+ def can_update_member(user, member, fields):
+-    """Librarians may change anything; members only the ``name`` of their own record."""
++    """Librarians may change anything. Anyone may change the ``name`` of their own record;
++    assistants may also change ``active`` on records whose role is ``member``."""
+     if is_librarian(user):
+         return True
+-    return member["id"] == user["id"] and set(fields) <= MEMBER_SELF_EDITABLE
++    if member["id"] == user["id"]:
++        return set(fields) <= MEMBER_SELF_EDITABLE
++    if user["role"] == "assistant" and member["role"] == "member":
++        return set(fields) <= ASSISTANT_EDITABLE_ON_MEMBERS
++    return False
+ 
+ 
+ def can_delete_member(user, member):
+@@ -42,17 +58,20 @@
+     return is_librarian(user)
+ 
+ 
++def can_lend_to_others(user):
++    return is_staff(user)
++
++
+ def can_borrow_for(user, member_id):
+     """May ``user`` borrow a book on behalf of ``member_id`` (None means themselves)?"""
+-    return member_id is None or member_id == user["id"] or is_librarian(user)
++    return member_id is None or member_id == user["id"] or can_lend_to_others(user)
+ 
+ 
+ # --- loans ----------------------------------------------------------------------------
+ 
+ def can_read_loan(user, loan):
+-    return is_librarian(user) or loan["member"] == user["id"]
++    return is_staff(user) or loan["member"] == user["id"]
+ 
+ 
+ def can_return_loan(user, loan):
+-    return is_librarian(user) or loan["member"] == user["id"]
+-
++    return is_staff(user) or loan["member"] == user["id"]
+--- a/library_app/routes_ui.py
++++ b/library_app/routes_ui.py
+@@ -8,7 +8,7 @@
+ """
+ from flask import Blueprint, redirect, render_template, request, url_for
+ 
+-from . import services, validation
++from . import permissions, services, validation
+ from .auth import current_context
+ 
+ bp = Blueprint("ui", __name__, url_prefix="/ui")
+@@ -99,8 +99,9 @@
+     ctx = current_context()
+     book = services.get_book(ctx, book_id)
+     actions = services.book_actions(ctx, book)
+-    # Librarians lend to a chosen member; members always borrow for themselves.
+-    borrowers = services.list_members(ctx, {"active": "true"}) if ctx.is_librarian else []
++    # Staff (librarians, assistants) lend to a chosen member; members borrow for themselves.
++    staff = permissions.can_lend_to_others(ctx.user)
++    borrowers = services.list_members(ctx, {"active": "true"}) if staff else []
+     return render_template("books/detail.html", book=book, actions=actions, borrowers=borrowers)
+ 
+ 
+--- a/library_app/services.py
++++ b/library_app/services.py
+@@ -53,7 +53,7 @@
+         member = _load_member(member_id)
+         fields = data.keys() if isinstance(data, dict) else ()
+         if not permissions.can_update_member(ctx.user, member, fields):
+-            raise Forbidden("Members may only change their own name.")
++            raise Forbidden("You may not change these fields of this member.")
+         values = validation.clean_member(data, partial=True)
+         if "username" in values:
+             _ensure_username_free(values["username"], exclude_id=member_id)
+@@ -134,7 +134,7 @@
+ 
+ 
+ def borrow_book(ctx, book_id, params):
+-    """Lend the book to the caller (or, for librarians, to ``params["member"]``)."""
++    """Lend the book to the caller (or, for librarians and assistants, to ``params["member"]``)."""
+     with transaction():
+         book = _load_book(book_id)
+         requested = params.get("member") if isinstance(params, dict) else None
+@@ -160,8 +160,8 @@
+     """Names of the actions the caller could successfully start on ``book`` right now."""
+     if book["status"] != "available":
+         return []
+-    if permissions.is_librarian(ctx.user):
+-        return ["borrow"]  # librarians can lend to any eligible member
++    if permissions.can_lend_to_others(ctx.user):
++        return ["borrow"]  # staff can lend to any eligible member
+     return ["borrow"] if _may_borrow(ctx.user) else []
+ 
+ 
+@@ -235,7 +235,7 @@
+     with transaction():
+         loan = _load_loan(loan_id)
+         if not permissions.can_return_loan(ctx.user, loan):
+-            raise Forbidden("Only the borrower or a librarian can return a loan.")
++            raise Forbidden("Only the borrower or library staff can return a loan.")
+         if loan["returned_at"] is not None:
+             raise Conflict("The loan has already been returned.")
+         validation.clean_no_params(params)
+--- a/library_app/validation.py
++++ b/library_app/validation.py
+@@ -10,7 +10,7 @@
+ 
+ from .errors import ValidationError
+ 
+-MEMBER_ROLES = ("member", "librarian")
++MEMBER_ROLES = ("member", "librarian", "assistant")
+ 
+ 
+ class FieldInvalid(Exception):
+--- a/tests/test_library_assistants.py
++++ b/tests/test_library_assistants.py
+@@ -0,0 +1,218 @@
++"""Assistants: desk staff who handle lending but not the catalogue or membership."""
++import os
++import shutil
++import sqlite3
++
++import pytest
++
++from accept_client import fresh_app, parse_ui
++
++NOW = "2026-03-01T10:00:00"
++
++
++@pytest.fixture
++def staffed(app):
++    """The seed plus an assistant, ``asa`` (id 13), created by a librarian."""
++    r = app.post("/api/members", {"username": "asa", "name": "Asa Desk", "role": "assistant"}, user="ada")
++    assert r.status == 201
++    assert r.json == {"id": 13, "username": "asa", "name": "Asa Desk", "role": "assistant", "active": True}
++    return app
++
++
++def _add_assistant(app, username, user="ada"):
++    return app.post("/api/members", {"username": username, "name": username.title(), "role": "assistant"}, user=user)
++
++
++# --- role value -------------------------------------------------------------------------
++
++def test_role_accepts_assistant_and_nothing_else_new(app):
++    assert _add_assistant(app, "asa").status == 201
++    assert app.post("/api/members", {"username": "q", "name": "Q", "role": "admin"}, user="ada").status == 400
++    assert app.patch("/api/members/4", {"role": "assistant"}, user="ada").json["role"] == "assistant"
++    assert app.patch("/api/members/4", {"role": "clerk"}, user="ada").status == 400
++    assert [m["id"] for m in app.get("/api/members?role=assistant", user="ada").json["items"]] == [4, 13]
++
++
++def test_only_librarians_create_assistants_or_change_roles(staffed):
++    app = staffed
++    assert _add_assistant(app, "x", user="asa").status == 403
++    assert _add_assistant(app, "y", user="chen").status == 403
++    assert app.patch("/api/members/3", {"role": "assistant"}, user="asa").status == 403
++    assert app.patch("/api/members/13", {"role": "librarian"}, user="asa").status == 403
++    assert app.patch("/api/members/3", {"role": "assistant"}, user="chen").status == 403
++    assert app.get("/api/members/3", user="ada").json["role"] == "member"
++
++
++def test_new_assistant_can_authenticate(staffed):
++    assert staffed.get("/api/books", user="asa").status == 200
++
++
++# --- reading ----------------------------------------------------------------------------
++
++def test_assistant_reads_everything(staffed):
++    app = staffed
++    assert len(app.get("/api/members", user="asa").json["items"]) == 13
++    assert app.get("/api/members/1", user="asa").json["role"] == "librarian"
++    assert len(app.get("/api/loans", user="asa").json["items"]) == 60
++    assert app.get("/api/loans/46", user="asa").status == 200
++    assert len(app.get("/api/books", user="asa").json["items"]) == 40
++    assert parse_ui(app.get("/ui/members", user="asa").text).rows == list(range(1, 14))
++    assert len(parse_ui(app.get("/ui/loans", user="asa").text).rows) == 60
++
++
++# --- lending ----------------------------------------------------------------------------
++
++def test_assistant_lends_to_member(staffed):
++    app = staffed
++    r = app.post("/api/books/3/borrow", {"member": 5}, user="asa", now=NOW)
++    assert r.status == 200 and r.json["status"] == "on_loan"
++    assert app.get("/api/loans/61", user="eli").json == {
++        "id": 61, "book": 3, "member": 5, "borrowed_at": NOW, "due_at": "2026-03-15",
++        "returned_at": None, "overdue": False}
++    assert app.get("/api/_outbox", user="asa").json["items"][0]["payload"] == {"loan": 61, "book": 3, "member": 5}
++
++
++def test_assistant_lending_follows_borrow_rules(staffed):
++    app = staffed
++    assert app.post("/api/books/4/borrow", {"member": 3}, user="asa").status == 409  # on loan
++    assert app.post("/api/books/3/borrow", {"member": 12}, user="asa").status == 409  # inactive
++    assert app.post("/api/books/3/borrow", {"member": 10}, user="asa").status == 409  # 3 open loans
++    assert app.post("/api/books/3/borrow", {"member": 999}, user="asa").status == 400
++    assert app.post("/api/books/4/borrow", {"member": 999}, user="asa").status == 409  # 409 beats 400
++    assert app.get("/api/_outbox", user="asa").json["items"] == []
++
++
++def test_assistant_returns_any_loan(staffed):
++    app = staffed
++    r = app.post("/api/loans/52/return", {}, user="asa", now=NOW)
++    assert r.status == 200 and r.json["returned_at"] == NOW
++    assert app.post("/api/loans/52/return", {}, user="asa").status == 409
++    assert app.post("/api/loans/999/return", {}, user="asa").status == 404
++
++
++def test_assistant_cannot_touch_loans_directly(staffed):
++    app = staffed
++    assert app.post("/api/loans", {"book": 3, "member": 3}, user="asa").status == 403
++    assert app.patch("/api/loans/52", {"due_at": "2030-01-01"}, user="asa").status == 403
++    assert app.delete("/api/loans/52", user="asa").status == 403
++    assert app.patch("/api/loans/999", {}, user="asa").status == 404
++
++
++# --- members ----------------------------------------------------------------------------
++
++def test_assistant_toggles_active_on_ordinary_members(staffed):
++    app = staffed
++    r = app.patch("/api/members/3", {"active": False}, user="asa")
++    assert r.status == 200 and r.json["active"] is False
++    assert app.post("/api/books/3/borrow", {}, user="chen").status == 409  # now inactive
++    assert app.patch("/api/members/12", {"active": True}, user="asa").json["active"] is True
++    assert app.patch("/api/members/12", {"active": "yes"}, user="asa").status == 400
++
++
++def test_assistant_member_patch_limits(staffed):
++    app = staffed
++    assert _add_assistant(app, "bo").status == 201  # id 14
++    before = app.get("/api/members", user="ada").json["items"]
++    assert app.patch("/api/members/3", {"active": False, "name": "Chen"}, user="asa").status == 403
++    assert app.patch("/api/members/3", {"name": "Chen"}, user="asa").status == 403
++    assert app.patch("/api/members/3", {"role": "librarian"}, user="asa").status == 403
++    assert app.patch("/api/members/1", {"active": False}, user="asa").status == 403  # librarian
++    assert app.patch("/api/members/14", {"active": False}, user="asa").status == 403  # other assistant
++    assert app.patch("/api/members/14", ["not", "an", "object"], user="asa").status == 403  # 403 beats 400
++    assert app.patch("/api/members/99", {"active": False}, user="asa").status == 404
++    assert app.get("/api/members", user="ada").json["items"] == before
++
++
++def test_assistant_edits_only_own_name(staffed):
++    app = staffed
++    r = app.patch("/api/members/13", {"name": "Asa D."}, user="asa")
++    assert r.status == 200 and r.json["name"] == "Asa D." and r.json["role"] == "assistant"
++    assert app.patch("/api/members/13", {"active": False}, user="asa").status == 403
++    assert app.patch("/api/members/13", {"role": "librarian"}, user="asa").status == 403
++    assert app.patch("/api/members/13", {"name": ""}, user="asa").status == 400
++    assert app.get("/api/members/13", user="asa").json["active"] is True
++
++
++def test_assistant_cannot_create_or_delete_members(staffed):
++    app = staffed
++    assert app.post("/api/members", {"username": "x", "name": "X", "role": "member"}, user="asa").status == 403
++    assert app.post("/api/members", {}, user="asa").status == 403
++    assert app.delete("/api/members/11", user="asa").status == 403
++    assert app.delete("/api/members/99", user="asa").status == 404
++
++
++def test_librarians_and_members_keep_their_permissions_over_assistants(staffed):
++    app = staffed
++    assert app.patch("/api/members/13", {"active": False, "role": "member"}, user="ada").status == 200
++    assert app.get("/api/members/13", user="chen").status == 403
++    assert app.patch("/api/members/13", {"active": True}, user="chen").status == 403
++
++
++# --- books ------------------------------------------------------------------------------
++
++def test_assistant_cannot_manage_books(staffed):
++    app = staffed
++    book = {"title": "Dune", "author": "F. Herbert", "isbn": "978-0441013593", "year": 1965}
++    assert app.post("/api/books", book, user="asa").status == 403
++    assert app.patch("/api/books/1", {"title": "X"}, user="asa").status == 403
++    assert app.delete("/api/books/2", user="asa").status == 403
++    assert app.get("/api/books/1", user="asa").json["title"] != "X"
++
++
++# --- UI ---------------------------------------------------------------------------------
++
++def test_assistant_create_pages_are_forbidden(staffed):
++    for path in ("/ui/books/new", "/ui/members/new", "/ui/loans/new"):
++        assert staffed.get(path, user="asa").status == 403
++
++
++def test_assistant_sees_borrow_and_return_forms(staffed):
++    app = staffed
++    page = parse_ui(app.get("/ui/books/2", user="asa").text)
++    assert page.actions == ["borrow"] and "member" in page.inputs
++    assert parse_ui(app.get("/ui/books/4", user="asa").text).actions == []  # on loan
++    assert parse_ui(app.get("/ui/loans/52", user="asa").text).actions == ["return"]  # chen's
++    assert parse_ui(app.get("/ui/loans/46", user="asa").text).actions == ["return"]
++    assert parse_ui(app.get("/ui/loans/1", user="asa").text).actions == []  # returned
++
++
++def test_member_create_form_offers_assistant_role(app):
++    assert 'value="assistant"' in app.get("/ui/members/new", user="ada").text
++
++
++# --- migration --------------------------------------------------------------------------
++
++def test_migration_keeps_existing_data(app, tmp_path):
++    """A database still at version 1 is upgraded on startup without losing anything."""
++    old = str(tmp_path / "v1")
++    shutil.copytree(app.workdir, old)
++    db_path = os.path.join(old, "data.db")
++    os.remove(db_path)
++    with open(os.path.join(old, "library_app", "migrations", "0001_initial.sql"), encoding="utf-8") as fh:
++        initial = fh.read()
++    conn = sqlite3.connect(db_path)
++    conn.executescript(initial)
++    conn.executescript(
++        "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);"
++        "INSERT INTO schema_version VALUES (1, 'initial', '2026-01-01T00:00:00');"
++        "INSERT INTO members VALUES (1, 'ada', 'Ada', 'librarian', 1), (2, 'chen', 'Chen', 'member', 1),"
++        " (3, 'gone', 'Gone', 'member', 1);"
++        "INSERT INTO books VALUES (1, 'T', 'A', 'I-1', NULL);"
++        "INSERT INTO loans VALUES (1, 1, 2, '2026-02-01T10:00:00', '2026-02-15', NULL);"
++        "DELETE FROM members WHERE id = 3;"
++    )
++    conn.close()
++
++    upgraded = fresh_app(old)
++    assert upgraded.get("/api/members", user="ada").json["items"] == [
++        {"id": 1, "username": "ada", "name": "Ada", "role": "librarian", "active": True},
++        {"id": 2, "username": "chen", "name": "Chen", "role": "member", "active": True}]
++    assert upgraded.get("/api/loans/1", user="chen").json["member"] == 2
++    assert upgraded.get("/api/books/1", user="chen").json["status"] == "on_loan"
++    r = upgraded.post("/api/members", {"username": "asa", "name": "Asa", "role": "assistant"}, user="ada")
++    assert r.status == 201 and r.json["id"] == 4  # AUTOINCREMENT never reuses the deleted id 3
++    assert upgraded.post("/api/loans/1/return", {}, user="asa").status == 200
++    conn = sqlite3.connect(os.path.join(upgraded.workdir, "data.db"))
++    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
++    assert 2 in [row[0] for row in conn.execute("SELECT version FROM schema_version")]
++    conn.close()

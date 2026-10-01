@@ -1,0 +1,596 @@
+--- a/README.md
++++ b/README.md
+@@ -9,8 +9,9 @@
+ ```
+ app_entry.py              create_app() -> WSGI app bound to ./data.db (the contract's entry point)
+ data.db                   committed database: fully migrated + seed data, nothing else
+-seed.py                   rebuilds data.db from scratch (migrations + seed_data.json)
+-seed_data.json            starting records (ids are preserved)
++seed.py                   rebuilds data.db from scratch (seed_data.json loaded at schema 0001, then
++                          the remaining migrations, which backfill e.g. the claim history)
++seed_data.json            starting records (ids are preserved; employees and claims only)
+ expenses_app/
+   __init__.py             app factory: config, migrations, blueprints, error handlers
+   db.py                   per-request connection, transaction(), migration runner
+@@ -54,6 +55,7 @@
+ |---|---|
+ | transitions, timestamps, `decided_by` | `services.submit_claim/approve_claim/reject_claim/pay_claim` |
+ | outbox message `payment` | `services.pay_claim` → `repository.add_outbox_message` |
++| claim history (`claim_events`) | `services._record_event`, called by each action inside its transaction |
+ | who can read/edit/decide/pay | `permissions.py` (manager = the claimant's direct `manager`) |
+ | fields clients may set / never set | `validation.CLAIM_WRITABLE`, `validation.CLAIM_READ_ONLY` |
+ | amount range, categories, roles | `validation.MAX_CLAIM_AMOUNT`, `CLAIM_CATEGORIES`, `EMPLOYEE_ROLES` |
+@@ -111,4 +113,9 @@
+ * Employee `manager` must be an existing employee and must not create a reporting loop → else 400.
+   Deleting an employee who has claims, decided claims or reports → 409.
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the heading.
++* `claim_events` is the read-only claim history: one event per successful submit/approve/reject/pay
++  (`actor` = caller, `at` = now, `from_status`/`to_status`). Readable exactly like its claim
++  (`?claim=<id>` gives one claim's history); POST/PATCH/DELETE → 403 for everyone (404 first for an
++  unknown event id); `/ui/claim_events/new` → 403. Migration 0002 backfilled existing claims
++  (`pay` events have null `actor`/`at`). An employee who is the actor of an event cannot be deleted (409).
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/expenses_app/db.py
++++ b/expenses_app/db.py
+@@ -78,16 +78,18 @@
+     return {row[0] for row in conn.execute("SELECT version FROM schema_version")}
+ 
+ 
+-def migrate(database_path, migrations_dir=MIGRATIONS_DIR):
++def migrate(database_path, migrations_dir=MIGRATIONS_DIR, up_to=None):
+     """Apply every pending migration in order, each in its own transaction.
+ 
+-    Returns the list of applied migration file names.
++    With ``up_to``, stop after that version. Returns the list of applied migration file names.
+     """
+     conn = connect(database_path)
+     try:
+         done = applied_versions(conn)
+         applied = []
+         for version, name, path in available_migrations(migrations_dir):
++            if up_to is not None and version > up_to:
++                break
+             if version in done:
+                 continue
+             with open(path, encoding="utf-8") as fh:
+--- a/expenses_app/migrations/0002_claim_events.sql
++++ b/expenses_app/migrations/0002_claim_events.sql
+@@ -0,0 +1,46 @@
++-- Claim history: one row per successful workflow action (submit, approve, reject, pay).
++-- Exposed read-only at /api/claim_events. AUTOINCREMENT keeps ids increasing in the
++-- order events are recorded (ids are never reused).
++
++CREATE TABLE claim_events (
++    id          INTEGER PRIMARY KEY AUTOINCREMENT,
++    claim_id    INTEGER NOT NULL REFERENCES claims (id),
++    action      TEXT    NOT NULL CHECK (action IN ('submit', 'approve', 'reject', 'pay')),
++    actor_id    INTEGER REFERENCES employees (id),  -- null when not known (backfilled payments)
++    at          TEXT,                               -- YYYY-MM-DDTHH:MM:SS (UTC); null when not known
++    from_status TEXT    NOT NULL
++                        CHECK (from_status IN ('draft', 'submitted', 'approved', 'rejected', 'paid')),
++    to_status   TEXT    NOT NULL
++                        CHECK (to_status IN ('draft', 'submitted', 'approved', 'rejected', 'paid'))
++);
++
++CREATE INDEX claim_events_claim_id ON claim_events (claim_id);
++CREATE INDEX claim_events_actor_id ON claim_events (actor_id);
++
++-- Backfill the history of existing claims from their workflow fields, claim by claim,
++-- each claim's events in the order submit, decision, pay. Who paid and when was never
++-- recorded, so backfilled payments have no actor and no time.
++INSERT INTO claim_events (claim_id, action, actor_id, at, from_status, to_status)
++SELECT claim_id, action, actor_id, at, from_status, to_status
++FROM (
++    SELECT id AS claim_id, 1 AS step, 'submit' AS action, employee_id AS actor_id, submitted_at AS at,
++           'draft' AS from_status, 'submitted' AS to_status
++    FROM claims
++    WHERE submitted_at IS NOT NULL
++
++    UNION ALL
++
++    SELECT id, 2,
++           CASE status WHEN 'rejected' THEN 'reject' ELSE 'approve' END,
++           decided_by_id, decided_at, 'submitted',
++           CASE status WHEN 'rejected' THEN 'rejected' ELSE 'approved' END
++    FROM claims
++    WHERE decided_at IS NOT NULL AND status IN ('approved', 'paid', 'rejected')
++
++    UNION ALL
++
++    SELECT id, 3, 'pay', NULL, NULL, 'approved', 'paid'
++    FROM claims
++    WHERE status = 'paid'
++)
++ORDER BY claim_id, step;
+--- a/expenses_app/permissions.py
++++ b/expenses_app/permissions.py
+@@ -51,3 +51,15 @@
+ 
+ def can_pay_claim(user, claim):
+     return is_finance(user)
++
++
++# --- claim events (read-only history) -------------------------------------------------
++
++def can_read_claim_event(user, claim, claimant):
++    """An event is readable by exactly the users who can read its claim."""
++    return can_read_claim(user, claim, claimant)
++
++
++def can_write_claim_events(user):
++    """Events are recorded by the workflow only; nobody creates, edits or deletes them."""
++    return False
+--- a/expenses_app/repository.py
++++ b/expenses_app/repository.py
+@@ -64,10 +64,11 @@
+ 
+ 
+ def employee_is_referenced(employee_id):
+-    """True if the employee has claims, decided claims or reports (rows that point at them)."""
++    """True if the employee has claims, decided claims, claim events or reports (rows that point at them)."""
+     row = get_db().execute(
+         """
+         SELECT EXISTS (SELECT 1 FROM claims WHERE employee_id = :id OR decided_by_id = :id)
++            OR EXISTS (SELECT 1 FROM claim_events WHERE actor_id = :id)
+             OR EXISTS (SELECT 1 FROM employees WHERE manager_id = :id)
+         """,
+         {"id": employee_id},
+@@ -145,6 +146,42 @@
+     get_db().execute("UPDATE claims SET status = 'paid' WHERE id = ?", (claim_id,))
+ 
+ 
++# --- claim events (claim history) -----------------------------------------------------
++
++_CLAIM_EVENT_SELECT = "SELECT id, claim_id, action, actor_id, at, from_status, to_status FROM claim_events"
++
++
++def _claim_event(row):
++    if row is None:
++        return None
++    return {
++        "id": row["id"],
++        "claim": row["claim_id"],
++        "action": row["action"],
++        "actor": row["actor_id"],
++        "at": row["at"],
++        "from_status": row["from_status"],
++        "to_status": row["to_status"],
++    }
++
++
++def list_claim_events():
++    return [_claim_event(row) for row in get_db().execute(f"{_CLAIM_EVENT_SELECT} ORDER BY id")]
++
++
++def get_claim_event(event_id):
++    return _claim_event(get_db().execute(f"{_CLAIM_EVENT_SELECT} WHERE id = ?", (event_id,)).fetchone())
++
++
++def add_claim_event(claim_id, action, actor_id, at, from_status, to_status):
++    cur = get_db().execute(
++        "INSERT INTO claim_events (claim_id, action, actor_id, at, from_status, to_status)"
++        " VALUES (?, ?, ?, ?, ?, ?)",
++        (claim_id, action, actor_id, at, from_status, to_status),
++    )
++    return cur.lastrowid
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def add_outbox_message(channel, payload, created_at):
+--- a/expenses_app/routes_api.py
++++ b/expenses_app/routes_api.py
+@@ -105,6 +105,29 @@
+     return services.pay_claim(current_context(), claim_id, _body())
+ 
+ 
++# --- claim events (read-only claim history) -------------------------------------------
++
++@bp.get("/claim_events")
++def list_claim_events():
++    return _items(services.list_claim_events(current_context(), _filters()))
++
++
++@bp.get("/claim_events/<int:event_id>")
++def get_claim_event(event_id):
++    return services.get_claim_event(current_context(), event_id)
++
++
++@bp.post("/claim_events")
++def create_claim_event():
++    services.ensure_can_write_claim_events(current_context())
++
++
++@bp.patch("/claim_events/<int:event_id>")
++@bp.delete("/claim_events/<int:event_id>")
++def change_claim_event(event_id):
++    services.ensure_can_write_claim_events(current_context(), event_id)
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ @bp.get("/_outbox")
+--- a/expenses_app/routes_ui.py
++++ b/expenses_app/routes_ui.py
+@@ -134,3 +134,22 @@
+ def pay_claim(claim_id):
+     services.pay_claim(current_context(), claim_id, {})
+     return redirect(url_for("ui.show_claim", claim_id=claim_id), 303)
++
++
++# --- claim events (read-only claim history) -------------------------------------------
++
++@bp.get("/claim_events")
++def list_claim_events():
++    events = services.list_claim_events(current_context(), request.args.to_dict())
++    return render_template("claim_events/list.html", events=events)
++
++
++@bp.get("/claim_events/new")
++def new_claim_event():
++    services.ensure_can_write_claim_events(current_context())
++
++
++@bp.get("/claim_events/<int:event_id>")
++def show_claim_event(event_id):
++    event = services.get_claim_event(current_context(), event_id)
++    return render_template("claim_events/detail.html", event=event)
+--- a/expenses_app/services.py
++++ b/expenses_app/services.py
+@@ -8,6 +8,9 @@
+ 
+     draft --submit--> submitted --approve--> approved --pay--> paid
+                                 \\--reject--> rejected
++
++Every successful workflow action records one claim event (the claim's history) in the
++same transaction, so a failed action records nothing.
+ """
+ from . import permissions, repository, validation
+ from .db import transaction
+@@ -17,6 +20,7 @@
+ EMPLOYEE_FIELDS = ("id", "username", "name", "role", "manager", "department")
+ CLAIM_FIELDS = ("id", "employee", "amount", "category", "description", "status",
+                 "submitted_at", "decided_at", "decided_by", "rejection_reason")
++CLAIM_EVENT_FIELDS = ("id", "claim", "action", "actor", "at", "from_status", "to_status")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -162,6 +166,7 @@
+         _require_status(claim, "draft", "Only draft claims can be submitted.")
+         validation.clean_no_params(params)
+         repository.mark_claim_submitted(claim_id, ctx.now_text)
++        _record_event(ctx, claim, "submit", "submitted")
+     return repository.get_claim(claim_id)
+ 
+ 
+@@ -173,6 +178,7 @@
+         _require_status(claim, "submitted", "Only submitted claims can be approved.")
+         validation.clean_no_params(params)
+         repository.mark_claim_decided(claim_id, "approved", ctx.now_text, ctx.user["id"])
++        _record_event(ctx, claim, "approve", "approved")
+     return repository.get_claim(claim_id)
+ 
+ 
+@@ -184,6 +190,7 @@
+         _require_status(claim, "submitted", "Only submitted claims can be rejected.")
+         reason = validation.clean_reject_params(params)
+         repository.mark_claim_decided(claim_id, "rejected", ctx.now_text, ctx.user["id"], reason)
++        _record_event(ctx, claim, "reject", "rejected")
+     return repository.get_claim(claim_id)
+ 
+ 
+@@ -195,6 +202,7 @@
+         _require_status(claim, "approved", "Only approved claims can be paid.")
+         validation.clean_no_params(params)
+         repository.mark_claim_paid(claim_id)
++        _record_event(ctx, claim, "pay", "paid")
+         repository.add_outbox_message(
+             "payment", {"claim": claim_id, "employee": claim["employee"], "amount": claim["amount"]}, ctx.now_text
+         )
+@@ -230,6 +238,49 @@
+         raise Conflict(message)
+ 
+ 
++def _record_event(ctx, claim, action, to_status):
++    """Append ``action`` by the caller, now, to the claim's history (``claim`` is the record before it)."""
++    repository.add_claim_event(claim["id"], action, ctx.user["id"], ctx.now_text, claim["status"], to_status)
++
++
++# --- claim events (read-only claim history) -------------------------------------------
++
++def list_claim_events(ctx, filters=None):
++    """Events of the claims the caller may read; ``?claim=<id>`` gives one claim's history."""
++    employees = {e["id"]: e for e in repository.list_employees()}
++    claims = {c["id"]: c for c in repository.list_claims()}
++    readable = {
++        claim_id for claim_id, claim in claims.items()
++        if permissions.can_read_claim_event(ctx.user, claim, employees[claim["employee"]])
++    }
++    events = [e for e in repository.list_claim_events() if e["claim"] in readable]
++    return apply_filters(events, filters or {}, CLAIM_EVENT_FIELDS)
++
++
++def get_claim_event(ctx, event_id):
++    event = _load_claim_event(event_id)
++    claim = repository.get_claim(event["claim"])
++    if not permissions.can_read_claim_event(ctx.user, claim, _claimant(claim)):
++        raise Forbidden()
++    return event
++
++
++def ensure_can_write_claim_events(ctx, event_id=None):
++    """Claim events are recorded by the workflow only: creating, editing or deleting one is
++    forbidden for everyone (after the 404 check for a specific event)."""
++    if event_id is not None:
++        _load_claim_event(event_id)
++    if not permissions.can_write_claim_events(ctx.user):
++        raise Forbidden("Claim history is read-only.")
++
++
++def _load_claim_event(event_id):
++    event = repository.get_claim_event(event_id)
++    if event is None:
++        raise NotFound("No such claim event.")
++    return event
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def list_outbox(ctx, filters=None):
+--- a/expenses_app/templates/base.html
++++ b/expenses_app/templates/base.html
+@@ -19,6 +19,7 @@
+   <nav>
+     <a href="{{ url_for('ui.list_claims') }}">Claims</a>
+     <a href="{{ url_for('ui.list_employees') }}">Employees</a>
++    <a href="{{ url_for('ui.list_claim_events') }}">History</a>
+     {% if ctx %}<span>Signed in as {{ ctx.user.username }} ({{ ctx.user.role }})</span>{% endif %}
+   </nav>
+   <main>
+--- a/expenses_app/templates/claim_events/detail.html
++++ b/expenses_app/templates/claim_events/detail.html
+@@ -0,0 +1,14 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}Claim event #{{ event.id }}{% endblock %}
++{% block content %}
++<h1>Claim event #{{ event.id }}</h1>
++<dl>
++  {{ field("claim", event.claim, href=url_for('ui.show_claim', claim_id=event.claim)) }}
++  {{ field("action", event.action) }}
++  {{ field("actor", event.actor, href=event.actor and url_for('ui.show_employee', employee_id=event.actor)) }}
++  {{ field("at", event.at) }}
++  {{ field("from_status", event.from_status) }}
++  {{ field("to_status", event.to_status) }}
++</dl>
++{% endblock %}
+--- a/expenses_app/templates/claim_events/list.html
++++ b/expenses_app/templates/claim_events/list.html
+@@ -0,0 +1,21 @@
++{% extends "base.html" %}
++{% block title %}Claim history{% endblock %}
++{% block content %}
++<h1>Claim history</h1>
++<table>
++  <thead><tr><th>Event</th><th>Claim</th><th>Action</th><th>Actor</th><th>At</th><th>From</th><th>To</th></tr></thead>
++  <tbody>
++  {% for event in events %}
++    <tr data-id="{{ event.id }}">
++      <td><a href="{{ url_for('ui.show_claim_event', event_id=event.id) }}">#{{ event.id }}</a></td>
++      <td><a href="{{ url_for('ui.show_claim', claim_id=event.claim) }}">#{{ event.claim }}</a></td>
++      <td>{{ event.action }}</td>
++      <td>{{ event.actor|display }}</td>
++      <td>{{ event.at|display }}</td>
++      <td>{{ event.from_status }}</td>
++      <td>{{ event.to_status }}</td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/expenses_app/templates/claims/detail.html
++++ b/expenses_app/templates/claims/detail.html
+@@ -14,6 +14,7 @@
+   {{ field("decided_by", claim.decided_by, href=claim.decided_by and url_for('ui.show_employee', employee_id=claim.decided_by)) }}
+   {{ field("rejection_reason", claim.rejection_reason) }}
+ </dl>
++<p><a href="{{ url_for('ui.list_claim_events', claim=claim.id) }}">History</a></p>
+ 
+ {% if "submit" in actions %}
+ <form data-action="submit" method="post" action="{{ url_for('ui.submit_claim', claim_id=claim.id) }}">
+--- a/seed.py
++++ b/seed.py
+@@ -1,8 +1,11 @@
+-"""Rebuild ``data.db`` from scratch: apply all migrations, then load ``seed_data.json``.
++"""Rebuild ``data.db`` from scratch: load ``seed_data.json`` and apply all migrations.
+ 
+     python seed.py            # from this directory
+ 
+-Seed records keep their ids. Any existing database file is replaced.
++The seed records are loaded into the schema they were written for (``SEED_SCHEMA_VERSION``);
++later migrations then upgrade them exactly as they upgraded the committed database (e.g.
++0002 backfills the claim history). Seed records keep their ids. Any existing database file
++is replaced.
+ """
+ import json
+ import os
+@@ -15,6 +18,7 @@
+ 
+ DATABASE_PATH = os.path.join(HERE, "data.db")
+ SEED_PATH = os.path.join(HERE, "seed_data.json")
++SEED_SCHEMA_VERSION = 1  # 0001_initial: the schema seed_data.json matches
+ 
+ 
+ def load_seed(conn, seed):
+@@ -36,7 +40,7 @@
+ def main():
+     if os.path.exists(DATABASE_PATH):
+         os.remove(DATABASE_PATH)
+-    db.migrate(DATABASE_PATH)
++    db.migrate(DATABASE_PATH, up_to=SEED_SCHEMA_VERSION)
+     with open(SEED_PATH, encoding="utf-8") as fh:
+         seed = json.load(fh)
+     conn = db.connect(DATABASE_PATH)
+@@ -46,6 +50,7 @@
+         conn.execute("COMMIT")
+     finally:
+         conn.close()
++    db.migrate(DATABASE_PATH)
+     print(f"seeded {DATABASE_PATH}: " + ", ".join(f"{len(v)} {k}" for k, v in seed.items()))
+ 
+ 
+--- a/tests/test_expenses_claim_events.py
++++ b/tests/test_expenses_claim_events.py
+@@ -0,0 +1,152 @@
++"""Claim history (claim_events): recording, visibility, read-only access and the backfill."""
++import os
++import sqlite3
++
++from accept_client import parse_ui
++
++NOW = "2026-03-02T09:30:00"
++LATER = "2026-03-03T10:00:00"
++BACKFILLED = 139  # events backfilled from the 80 seed claims by migration 0002
++
++
++def _events(app, claim_id, user="fiona"):
++    return app.get(f"/api/claim_events?claim={claim_id}", user=user).json["items"]
++
++
++def _strip_ids(events):
++    return [{k: v for k, v in e.items() if k != "id"} for e in events]
++
++
++def test_backfill_from_existing_claims(app):
++    assert _strip_ids(_events(app, 6)) == [  # paid
++        {"claim": 6, "action": "submit", "actor": 11, "at": "2026-02-09T13:00:00",
++         "from_status": "draft", "to_status": "submitted"},
++        {"claim": 6, "action": "approve", "actor": 4, "at": "2026-02-11T11:00:00",
++         "from_status": "submitted", "to_status": "approved"},
++        {"claim": 6, "action": "pay", "actor": None, "at": None, "from_status": "approved", "to_status": "paid"},
++    ]
++    assert _strip_ids(_events(app, 7)) == [  # rejected
++        {"claim": 7, "action": "submit", "actor": 14, "at": "2026-01-28T11:00:00",
++         "from_status": "draft", "to_status": "submitted"},
++        {"claim": 7, "action": "reject", "actor": 4, "at": "2026-01-30T09:00:00",
++         "from_status": "submitted", "to_status": "rejected"},
++    ]
++    assert [e["action"] for e in _events(app, 4)] == ["submit", "approve"]  # approved
++    assert [e["action"] for e in _events(app, 2)] == ["submit"]  # submitted
++    assert _events(app, 1) == []  # draft
++
++
++def test_backfill_matches_every_claim(app):
++    claims = app.get("/api/claims", user="fiona").json["items"]
++    events = app.get("/api/claim_events", user="fiona").json["items"]
++    assert len(events) == BACKFILLED
++    assert [e["id"] for e in events] == list(range(1, BACKFILLED + 1))
++    for claim in claims:
++        expected = []
++        if claim["submitted_at"]:
++            expected.append(("submit", claim["employee"], claim["submitted_at"], "draft", "submitted"))
++        if claim["decided_at"]:
++            action, to = ("reject", "rejected") if claim["status"] == "rejected" else ("approve", "approved")
++            expected.append((action, claim["decided_by"], claim["decided_at"], "submitted", to))
++        if claim["status"] == "paid":
++            expected.append(("pay", None, None, "approved", "paid"))
++        got = [(e["action"], e["actor"], e["at"], e["from_status"], e["to_status"])
++               for e in events if e["claim"] == claim["id"]]
++        assert got == expected, claim["id"]
++
++
++def test_actions_record_one_event_each(app):
++    claim = app.post("/api/claims", {"amount": 120, "category": "travel", "description": "Train"}, user="sam").json
++    path = f"/api/claims/{claim['id']}"
++    app.patch(path, {"amount": 130}, user="sam")
++    assert _events(app, claim["id"]) == []  # creating and editing drafts record nothing
++    assert app.post(f"{path}/submit", {}, user="sam", now=NOW).status == 200
++    assert app.post(f"{path}/approve", {}, user="omar", now=NOW).status == 200
++    assert app.post(f"{path}/pay", {}, user="fiona", now=LATER).status == 200
++    assert _events(app, claim["id"]) == [
++        {"id": BACKFILLED + 1, "claim": claim["id"], "action": "submit", "actor": 8, "at": NOW,
++         "from_status": "draft", "to_status": "submitted"},
++        {"id": BACKFILLED + 2, "claim": claim["id"], "action": "approve", "actor": 4, "at": NOW,
++         "from_status": "submitted", "to_status": "approved"},
++        {"id": BACKFILLED + 3, "claim": claim["id"], "action": "pay", "actor": 1, "at": LATER,
++         "from_status": "approved", "to_status": "paid"},
++    ]
++    assert len(app.get("/api/_outbox", user="sam").json["items"]) == 1  # only the payment message
++
++
++def test_reject_records_event(app):
++    assert app.post("/api/claims/3/reject", {"reason": "Missing receipt"}, user="marco", now=NOW).status == 200
++    assert _events(app, 3)[-1] == {"id": BACKFILLED + 1, "claim": 3, "action": "reject", "actor": 2, "at": NOW,
++                                   "from_status": "submitted", "to_status": "rejected"}
++
++
++def test_failed_actions_and_draft_changes_record_nothing(app):
++    app.post("/api/claims/2/pay", {}, user="fiona")  # 409
++    app.post("/api/claims/2/approve", {}, user="marco")  # 403
++    app.post("/api/claims/3/reject", {}, user="marco")  # 400
++    app.post("/api/claims/1/submit", {"extra": 1}, user="wen")  # 400
++    app.post("/api/claims/999/submit", {}, user="wen")  # 404
++    assert app.delete("/api/claims/1", user="wen").status == 204
++    assert len(app.get("/api/claim_events", user="fiona").json["items"]) == BACKFILLED
++
++
++def test_events_visible_like_their_claim(app):
++    for user in ("priya", "omar", "marco", "nadia", "victor", "fiona"):
++        claims = {c["id"] for c in app.get("/api/claims", user=user).json["items"]}
++        events = app.get("/api/claim_events", user=user).json["items"]
++        assert {e["claim"] for e in events} == {c for c in claims if _events(app, c)}
++    event_of_claim_7 = _events(app, 7)[0]["id"]  # yusuf's claim, manager omar
++    assert app.get(f"/api/claim_events/{event_of_claim_7}", user="yusuf").status == 200
++    assert app.get(f"/api/claim_events/{event_of_claim_7}", user="omar").status == 200
++    assert app.get(f"/api/claim_events/{event_of_claim_7}", user="fiona").status == 200
++    r = app.get(f"/api/claim_events/{event_of_claim_7}", user="priya")
++    assert r.status == 403 and r.json["error"] == "forbidden"
++    assert app.get(f"/api/claim_events/{event_of_claim_7}", user="marco").status == 403  # indirect manager
++    assert app.get("/api/claim_events/9999", user="fiona").status == 404
++    assert _events(app, 7, user="priya") == []
++
++
++def test_filters(app):
++    items = app.get("/api/claim_events?action=pay&actor=null", user="fiona").json["items"]
++    assert len(items) == 21 and all(e["action"] == "pay" and e["actor"] is None for e in items)
++    items = app.get("/api/claim_events?claim=7&to_status=rejected", user="fiona").json["items"]
++    assert [e["action"] for e in items] == ["reject"]
++    assert app.get("/api/claim_events?colour=red", user="fiona").status == 400
++
++
++def test_events_are_read_only(app):
++    for user in ("fiona", "marco", "yusuf"):
++        assert app.post("/api/claim_events", {"claim": 7, "action": "pay"}, user=user).status == 403
++        assert app.patch("/api/claim_events/1", {"at": NOW}, user=user).status == 403
++        assert app.delete("/api/claim_events/1", user=user).status == 403
++    assert app.patch("/api/claim_events/9999", {}, user="fiona").status == 404
++    assert app.delete("/api/claim_events/9999", user="fiona").status == 404
++    assert app.post("/api/claim_events", {}).status == 401
++    assert len(app.get("/api/claim_events", user="fiona").json["items"]) == BACKFILLED
++
++
++def test_event_actor_cannot_be_deleted(app):
++    created = app.post("/api/employees", {"username": "fred", "name": "Fred", "role": "finance", "manager": None,
++                                          "department": "Finance"}, user="fiona").json
++    assert app.post("/api/claims/4/pay", {}, user="fred").status == 200
++    assert app.delete(f"/api/employees/{created['id']}", user="fiona").status == 409
++
++
++def test_ui_pages(app):
++    api_ids = [e["id"] for e in app.get("/api/claim_events", user="omar").json["items"]]
++    assert parse_ui(app.get("/ui/claim_events", user="omar").text).rows == api_ids
++    assert parse_ui(app.get("/ui/claim_events?claim=7", user="omar").text).rows == [e["id"] for e in _events(app, 7)]
++    event = _events(app, 7)[1]
++    page = parse_ui(app.get(f"/ui/claim_events/{event['id']}", user="yusuf").text)
++    assert page.fields == {"claim": "7", "action": "reject", "actor": "4", "at": "2026-01-30T09:00:00",
++                           "from_status": "submitted", "to_status": "rejected"}
++    assert page.actions == []
++    assert app.get(f"/ui/claim_events/{event['id']}", user="priya").status == 403
++    assert app.get("/ui/claim_events/new", user="fiona").status == 403
++
++
++def test_event_ids_never_reused(app):
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'claim_events'").fetchone()[0]
++    conn.close()
++    assert seq == BACKFILLED

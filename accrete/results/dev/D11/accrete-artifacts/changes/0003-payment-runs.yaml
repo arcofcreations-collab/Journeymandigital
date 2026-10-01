@@ -1,0 +1,85 @@
+request: "Payment runs: new collection payment_runs (claims list in given order, total = rounded sum of amounts, created_by = caller, created_at = now); claims get system field payment_run (null for existing and single-pay claims). POST /api/payment_runs finance only (403 even with invalid body); 400 for missing/non-list/empty/duplicate/unknown claim ids or total > 10000.00; 409 if any listed claim is not approved (409 wins over 400); on success every claim becomes paid with payment_run set, per claim in list order a payment outbox message (same payload as pay) and a pay claim event, then one payment_run outbox message {run, claims, total}. All or nothing. Runs readable only by finance (others: empty list, 403 on a single run); PATCH/DELETE 403 for everyone. Single pay action unchanged."
+interpretation: "Add entity payment_runs: claims = list ref claims required distinct (client-set, order kept); total = system number default round(sum of claim amounts, 2) with constraint total <= 10000 (400); created_by = system ref employees default user; created_at = system datetime default now. Rules: read/create = finance; update/delete = False. create_guard = all listed (existing) claims approved -> 409 before any 400. A create trigger loops over record.claims in order: records the pay claim_event (actor user, at now, approved -> paid), sets status paid and payment_run = the run, emits payment {claim, employee, amount}; then emits payment_run {run, claims, total}. Trigger runs in the create transaction, so any failure leaves nothing. Claims get payment_run: system ref payment_runs (existing records null, the pay action does not touch it). No backfill needed."
+ops:
+  - add_entity:
+      name: payment_runs
+      fields:
+        claims: {type: list, of: ref, ref: claims, required: true, distinct: true}
+        total: {type: number, system: true, default: "round(sum(c.amount for c in record.claims), 2)"}
+        created_by: {type: ref, ref: employees, system: true, default: user}
+        created_at: {type: datetime, system: true, default: now}
+      rules:
+        read: "user.role == 'finance'"
+        create: "user.role == 'finance'"
+        create_guard: "all(c.status == 'approved' for c in record.claims)"
+        update: "False"
+        delete: "False"
+      constraints:
+        total_limit: {expr: "record.total <= 10000", message: "the total of a payment run must not exceed 10000.00", field: claims}
+  - add_field:
+      entity: claims
+      name: payment_run
+      type: ref
+      ref: payment_runs
+      system: true
+  - add_trigger:
+      entity: payment_runs
+      name: pay_claims
+      on: create
+      effects:
+        - for: c
+          in: record.claims
+          do:
+            - create: claim_events
+              values: {claim: c, action: "'pay'", actor: user, at: now, from_status: c.status, to_status: "'paid'"}
+            - update: c
+              set: {status: "'paid'", payment_run: record}
+            - emit: payment
+              payload: {claim: c, employee: c.employee, amount: c.amount}
+        - emit: payment_run
+          payload: {run: record, claims: record.claims, total: record.total}
+expect:
+  - name: "successful run pays claims in order"
+    steps:
+      - {as: fiona, do: "POST /api/payment_runs", body: {claims: [13, 4, 12]}, now: "2026-10-01T09:00:00", status: 201, json: {id: 1, claims: [13, 4, 12], total: 1185.63, created_by: 1, created_at: "2026-10-01T09:00:00"}}
+      - {as: fiona, do: "GET /api/claims/4", json: {status: paid, payment_run: 1}}
+      - {as: fiona, do: "GET /api/claims/13", json: {status: paid, payment_run: 1}}
+      - {as: fiona, do: "GET /api/claims?payment_run=1", count: 3}
+      - {as: fiona, do: "GET /api/_outbox", count: 4}
+      - {as: fiona, do: "GET /api/claim_events", count: 142}
+      - {as: fiona, do: "GET /api/claim_events/140", json: {claim: 13, action: pay, actor: 1, at: "2026-10-01T09:00:00", from_status: approved, to_status: paid}}
+      - {as: fiona, do: "GET /api/claim_events/142", json: {claim: 12, action: pay}}
+      - {as: fiona, do: "GET /api/payment_runs", count: 1}
+      - {as: marco, do: "GET /api/payment_runs", count: 0}
+      - {as: marco, do: "GET /api/payment_runs/1", status: 403}
+      - {as: fiona, do: "PATCH /api/payment_runs/1", body: {}, status: 403}
+      - {as: fiona, do: "DELETE /api/payment_runs/1", status: 403}
+      - {as: fiona, do: "POST /api/claims/4/pay", body: {}, status: 409}
+  - {as: marco, do: "POST /api/payment_runs", body: {claims: [4]}, status: 403}
+  - {as: marco, do: "POST /api/payment_runs", body: {claims: "x"}, status: 403}
+  - {as: marco, do: "POST /api/payment_runs", body: {}, status: 403}
+  - {as: fiona, do: "POST /api/payment_runs", body: {}, status: 400}
+  - {as: fiona, do: "POST /api/payment_runs", body: {claims: []}, status: 400}
+  - {as: fiona, do: "POST /api/payment_runs", body: {claims: 4}, status: 400}
+  - {as: fiona, do: "POST /api/payment_runs", body: {claims: [4, 4]}, status: 400}
+  - {as: fiona, do: "POST /api/payment_runs", body: {claims: [4, 9999]}, status: 400}
+  - {as: fiona, do: "POST /api/payment_runs", body: {claims: [4, 1]}, status: 409}
+  - {as: fiona, do: "POST /api/payment_runs", body: {claims: [1, 9999]}, status: 409}
+  - {as: fiona, do: "POST /api/payment_runs", body: {claims: [1, 1]}, status: 409}
+  - {as: fiona, do: "POST /api/payment_runs", body: {claims: [21, 22, 27, 38, 44, 50, 59, 66, 69, 74, 78]}, status: 400}
+  - {as: fiona, do: "POST /api/payment_runs", body: {claims: [21, 22, 27, 38, 44, 50, 59, 66, 69, 74, 78, 1]}, status: 409}
+  - name: "failed run changes nothing"
+    steps:
+      - {as: fiona, do: "POST /api/payment_runs", body: {claims: [4, 1]}, status: 409}
+      - {as: fiona, do: "POST /api/payment_runs", body: {claims: [4, 9999]}, status: 400}
+      - {as: fiona, do: "POST /api/payment_runs", body: {claims: [21, 22, 27, 38, 44, 50, 59, 66, 69, 74, 78]}, status: 400}
+      - {as: fiona, do: "GET /api/claims/4", json: {status: approved, payment_run: null}}
+      - {as: fiona, do: "GET /api/_outbox", count: 0}
+      - {as: fiona, do: "GET /api/claim_events", count: 139}
+      - {as: fiona, do: "GET /api/payment_runs", count: 0}
+  - name: "single pay unchanged"
+    steps:
+      - {as: fiona, do: "POST /api/claims/4/pay", body: {}, status: 200, json: {status: paid, payment_run: null}}
+      - {as: fiona, do: "GET /api/_outbox", count: 1}
+  - {as: wen, do: "POST /api/claims", body: {amount: 10, category: meals, description: "x", payment_run: 1}, status: 400}
+  - {as: wen, do: "PATCH /api/claims/1", body: {payment_run: null}, status: 400}

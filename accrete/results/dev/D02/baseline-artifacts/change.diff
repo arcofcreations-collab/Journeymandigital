@@ -1,0 +1,893 @@
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # Lending library
+ 
+-A small community library: members, books and loans. Flask 3 + SQLite (stdlib `sqlite3`) +
++A small community library: members, books, loans and holds (queueing for books that are out). Flask 3 + SQLite (stdlib `sqlite3`) +
+ Jinja2. External behaviour follows `spec/CONTRACT.md` and `spec/apps/library.md`.
+ 
+ ## Layout
+@@ -19,7 +19,7 @@
+   validation.py           request-body checks (shape, types, required fields, enums)
+   repository.py           all SQL; returns API-shaped dicts (book_id column -> "book" field)
+   permissions.py          who may do what (pure functions of user + record)
+-  services.py             business rules and actions (borrow, return); one function per operation
++  services.py             business rules and actions (borrow, return, hold, cancel); one function per operation
+   filters.py              ?field=value list filtering (works on derived fields too)
+   routes_api.py           /api/... JSON endpoints (thin: parse, call service, respond)
+   routes_ui.py            /ui/... HTML pages and their form handlers
+@@ -48,13 +48,16 @@
+ 
+ | Rule | Location |
+ |---|---|
+-| book `status` (on_loan/available) | `repository._BOOK_SELECT` (SQL `EXISTS`) |
++| book `status` (on_loan/reserved/available) | `repository._BOOK_SELECT` (SQL `EXISTS`), `repository._book_status` |
+ | loan `overdue` (depends on X-Now) | `services.present_loan` |
+ | 14-day loan period, max 3 open loans | `services.LOAN_PERIOD`, `services.MAX_OPEN_LOANS` |
+ | borrow / return | `services.borrow_book`, `services.return_loan` |
+ | outbox message `loan_created` | `services.borrow_book` → `repository.add_outbox_message` |
++| place / cancel a hold, borrowing a reserved book | `services.place_hold`, `services.cancel_hold`, `services.borrow_book` |
++| hold queue order (placed_at, then id) | `repository.first_waiting_hold` |
++| next hold becomes ready + `hold_ready` message | `services._serve_next_hold` (after return / cancelling a ready hold) |
+ | who can read/edit what | `permissions.py` |
+-| actions shown on detail pages | `services.book_actions`, `services.loan_actions` |
++| actions shown on detail pages | `services.book_actions`, `services.loan_actions`, `services.hold_actions` |
+ 
+ ## Running the tests
+ 
+@@ -105,4 +108,11 @@
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the
+   heading. The borrow form is shown when the book is available and (for members) the caller
+   is active with fewer than 3 open loans; librarians get a member picker.
++* Holds: a librarian placing a hold for an unknown or non-integer `member` → 400; if the book is
++  `available`, 409 wins. Borrowing a `reserved` book for anyone other than the ready hold's member
++  → 409 (also when that `member` value is unknown or malformed). Deleting a member who has holds → 409.
++* The hold form is shown when the caller could place a hold for themselves (book on loan or reserved,
++  caller active, no open hold on it, not borrowing it); librarians get a member picker. On a reserved
++  book the borrow form is offered to librarians (picker limited to the hold's member) and to the
++  ready hold's member when they could borrow (active, under 3 open loans).
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/library_app/migrations/0002_holds.sql
++++ b/library_app/migrations/0002_holds.sql
+@@ -0,0 +1,18 @@
++-- Holds (reservations): members queue for a book that is on loan. Existing data has no holds.
++
++CREATE TABLE holds (
++    id        INTEGER PRIMARY KEY AUTOINCREMENT,
++    book_id   INTEGER NOT NULL REFERENCES books (id),
++    member_id INTEGER NOT NULL REFERENCES members (id),
++    placed_at TEXT    NOT NULL,  -- YYYY-MM-DDTHH:MM:SS (UTC)
++    status    TEXT    NOT NULL CHECK (status IN ('waiting', 'ready', 'fulfilled', 'cancelled')),
++    ready_at  TEXT               -- YYYY-MM-DDTHH:MM:SS (UTC) or NULL until the hold becomes ready
++);
++
++CREATE INDEX holds_book_id ON holds (book_id);
++CREATE INDEX holds_member_id ON holds (member_id);
++-- A book is reserved for at most one member at a time.
++CREATE UNIQUE INDEX holds_one_ready_per_book ON holds (book_id) WHERE status = 'ready';
++-- A member has at most one open (waiting or ready) hold per book.
++CREATE UNIQUE INDEX holds_one_open_per_member_and_book ON holds (book_id, member_id)
++    WHERE status IN ('waiting', 'ready');
+--- a/library_app/permissions.py
++++ b/library_app/permissions.py
+@@ -42,8 +42,8 @@
+     return is_librarian(user)
+ 
+ 
+-def can_borrow_for(user, member_id):
+-    """May ``user`` borrow a book on behalf of ``member_id`` (None means themselves)?"""
++def can_act_for(user, member_id):
++    """May ``user`` borrow a book or place a hold on behalf of ``member_id`` (None means themselves)?"""
+     return member_id is None or member_id == user["id"] or is_librarian(user)
+ 
+ 
+@@ -56,3 +56,13 @@
+ def can_return_loan(user, loan):
+     return is_librarian(user) or loan["member"] == user["id"]
+ 
++
++
++# --- holds ----------------------------------------------------------------------------
++
++def can_read_hold(user, hold):
++    return is_librarian(user) or hold["member"] == user["id"]
++
++
++def can_cancel_hold(user, hold):
++    return is_librarian(user) or hold["member"] == user["id"]
+--- a/library_app/repository.py
++++ b/library_app/repository.py
+@@ -65,6 +65,10 @@
+     return get_db().execute("SELECT 1 FROM loans WHERE member_id = ?", (member_id,)).fetchone() is not None
+ 
+ 
++def member_has_holds(member_id):
++    return get_db().execute("SELECT 1 FROM holds WHERE member_id = ?", (member_id,)).fetchone() is not None
++
++
+ def count_open_loans(member_id):
+     return get_db().execute(
+         "SELECT COUNT(*) FROM loans WHERE member_id = ? AND returned_at IS NULL", (member_id,)
+@@ -75,9 +79,17 @@
+ 
+ _BOOK_SELECT = """
+     SELECT b.id, b.title, b.author, b.isbn, b.year,
+-           EXISTS (SELECT 1 FROM loans l WHERE l.book_id = b.id AND l.returned_at IS NULL) AS on_loan
++           EXISTS (SELECT 1 FROM loans l WHERE l.book_id = b.id AND l.returned_at IS NULL) AS on_loan,
++           EXISTS (SELECT 1 FROM holds h WHERE h.book_id = b.id AND h.status = 'ready') AS reserved
+     FROM books b
+ """
++
++
++def _book_status(row):
++    """``on_loan`` while a loan is open, else ``reserved`` while a hold is ready, else ``available``."""
++    if row["on_loan"]:
++        return "on_loan"
++    return "reserved" if row["reserved"] else "available"
+ 
+ 
+ def _book(row):
+@@ -89,7 +101,7 @@
+         "author": row["author"],
+         "isbn": row["isbn"],
+         "year": row["year"],
+-        "status": "on_loan" if row["on_loan"] else "available",
++        "status": _book_status(row),
+     }
+ 
+ 
+@@ -164,6 +176,79 @@
+ 
+ def mark_loan_returned(loan_id, returned_at):
+     get_db().execute("UPDATE loans SET returned_at = ? WHERE id = ?", (returned_at, loan_id))
++
++
++def member_has_book_on_loan(member_id, book_id):
++    row = get_db().execute(
++        "SELECT 1 FROM loans WHERE member_id = ? AND book_id = ? AND returned_at IS NULL", (member_id, book_id)
++    ).fetchone()
++    return row is not None
++
++
++# --- holds ----------------------------------------------------------------------------
++
++_HOLD_SELECT = "SELECT id, book_id, member_id, placed_at, status, ready_at FROM holds"
++# A book's queue: holds are served in order of placed_at, ties broken by id.
++_QUEUE_ORDER = "ORDER BY placed_at, id"
++
++
++def _hold(row):
++    if row is None:
++        return None
++    return {
++        "id": row["id"],
++        "book": row["book_id"],
++        "member": row["member_id"],
++        "placed_at": row["placed_at"],
++        "status": row["status"],
++        "ready_at": row["ready_at"],
++    }
++
++
++def list_holds():
++    return [_hold(row) for row in get_db().execute(f"{_HOLD_SELECT} ORDER BY id")]
++
++
++def get_hold(hold_id):
++    return _hold(get_db().execute(f"{_HOLD_SELECT} WHERE id = ?", (hold_id,)).fetchone())
++
++
++def get_ready_hold(book_id):
++    """The book's ``ready`` hold (there is at most one), or None."""
++    return _hold(get_db().execute(f"{_HOLD_SELECT} WHERE book_id = ? AND status = 'ready'", (book_id,)).fetchone())
++
++
++def first_waiting_hold(book_id):
++    """The ``waiting`` hold at the head of the book's queue, or None."""
++    row = get_db().execute(
++        f"{_HOLD_SELECT} WHERE book_id = ? AND status = 'waiting' {_QUEUE_ORDER} LIMIT 1", (book_id,)
++    ).fetchone()
++    return _hold(row)
++
++
++def member_has_open_hold(member_id, book_id):
++    """Does the member have a ``waiting`` or ``ready`` hold on the book?"""
++    row = get_db().execute(
++        "SELECT 1 FROM holds WHERE member_id = ? AND book_id = ? AND status IN ('waiting', 'ready')",
++        (member_id, book_id),
++    ).fetchone()
++    return row is not None
++
++
++def insert_hold(book_id, member_id, placed_at):
++    cur = get_db().execute(
++        "INSERT INTO holds (book_id, member_id, placed_at, status, ready_at) VALUES (?, ?, ?, 'waiting', NULL)",
++        (book_id, member_id, placed_at),
++    )
++    return cur.lastrowid
++
++
++def mark_hold_ready(hold_id, ready_at):
++    get_db().execute("UPDATE holds SET status = 'ready', ready_at = ? WHERE id = ?", (ready_at, hold_id))
++
++
++def set_hold_status(hold_id, status):
++    get_db().execute("UPDATE holds SET status = ? WHERE id = ?", (status, hold_id))
+ 
+ 
+ # --- outbox ---------------------------------------------------------------------------
+--- a/library_app/routes_api.py
++++ b/library_app/routes_api.py
+@@ -90,6 +90,11 @@
+     return services.borrow_book(current_context(), book_id, _body())
+ 
+ 
++@bp.post("/books/<int:book_id>/hold")
++def place_hold(book_id):
++    return services.place_hold(current_context(), book_id, _body())
++
++
+ # --- loans ----------------------------------------------------------------------------
+ 
+ @bp.get("/loans")
+@@ -123,6 +128,39 @@
+     return services.return_loan(current_context(), loan_id, _body())
+ 
+ 
++# --- holds ----------------------------------------------------------------------------
++
++@bp.get("/holds")
++def list_holds():
++    return _items(services.list_holds(current_context(), _filters()))
++
++
++@bp.post("/holds")
++def create_hold():
++    return services.create_hold(current_context(), _body()), 201
++
++
++@bp.get("/holds/<int:hold_id>")
++def get_hold(hold_id):
++    return services.get_hold(current_context(), hold_id)
++
++
++@bp.patch("/holds/<int:hold_id>")
++def update_hold(hold_id):
++    return services.update_hold(current_context(), hold_id, _body())
++
++
++@bp.delete("/holds/<int:hold_id>")
++def delete_hold(hold_id):
++    services.delete_hold(current_context(), hold_id)
++    return "", 204
++
++
++@bp.post("/holds/<int:hold_id>/cancel")
++def cancel_hold(hold_id):
++    return services.cancel_hold(current_context(), hold_id, _body())
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ @bp.get("/_outbox")
+--- a/library_app/routes_ui.py
++++ b/library_app/routes_ui.py
+@@ -99,15 +99,30 @@
+     ctx = current_context()
+     book = services.get_book(ctx, book_id)
+     actions = services.book_actions(ctx, book)
+-    # Librarians lend to a chosen member; members always borrow for themselves.
+-    borrowers = services.list_members(ctx, {"active": "true"}) if ctx.is_librarian else []
+-    return render_template("books/detail.html", book=book, actions=actions, borrowers=borrowers)
++    # Librarians lend (or place holds) for a chosen member; members always act for themselves.
++    members = services.list_members(ctx, {"active": "true"}) if ctx.is_librarian else []
++    reserved_for = services.ready_hold_member(book)
++    # A reserved book can only be lent to the member whose hold is ready.
++    borrowers = [m for m in members if reserved_for in (None, m["id"])]
++    return render_template(
++        "books/detail.html", book=book, actions=actions, borrowers=borrowers, members=members,
++        reserved_for=reserved_for,
++    )
++
++
++def _member_param():
++    return {k: v for k, v in _form_values({"member": _optional_int}).items() if v is not None}
+ 
+ 
+ @bp.post("/books/<int:book_id>/borrow")
+ def borrow_book(book_id):
+-    params = {k: v for k, v in _form_values({"member": _optional_int}).items() if v is not None}
+-    services.borrow_book(current_context(), book_id, params)
++    services.borrow_book(current_context(), book_id, _member_param())
++    return redirect(url_for("ui.show_book", book_id=book_id), 303)
++
++
++@bp.post("/books/<int:book_id>/hold")
++def place_hold(book_id):
++    services.place_hold(current_context(), book_id, _member_param())
+     return redirect(url_for("ui.show_book", book_id=book_id), 303)
+ 
+ 
+@@ -136,3 +151,30 @@
+ def return_loan(loan_id):
+     services.return_loan(current_context(), loan_id, {})
+     return redirect(url_for("ui.show_loan", loan_id=loan_id), 303)
++
++
++# --- holds ----------------------------------------------------------------------------
++
++@bp.get("/holds")
++def list_holds():
++    holds = services.list_holds(current_context(), request.args.to_dict())
++    return render_template("holds/list.html", holds=holds)
++
++
++@bp.get("/holds/new")
++def new_hold():
++    # Holds are placed from a book's page, never created directly, so this is always 403.
++    services.ensure_can_create_hold(current_context())
++
++
++@bp.get("/holds/<int:hold_id>")
++def show_hold(hold_id):
++    ctx = current_context()
++    hold = services.get_hold(ctx, hold_id)
++    return render_template("holds/detail.html", hold=hold, actions=services.hold_actions(ctx, hold))
++
++
++@bp.post("/holds/<int:hold_id>/cancel")
++def cancel_hold(hold_id):
++    services.cancel_hold(current_context(), hold_id, {})
++    return redirect(url_for("ui.show_hold", hold_id=hold_id), 303)
+--- a/library_app/services.py
++++ b/library_app/services.py
+@@ -13,10 +13,13 @@
+ 
+ LOAN_PERIOD = timedelta(days=14)
+ MAX_OPEN_LOANS = 3
++HOLDABLE_STATUSES = ("on_loan", "reserved")
++OPEN_HOLD_STATUSES = ("waiting", "ready")
+ 
+ MEMBER_FIELDS = ("id", "username", "name", "role", "active")
+ BOOK_FIELDS = ("id", "title", "author", "isbn", "year", "status")
+ LOAN_FIELDS = ("id", "book", "member", "borrowed_at", "due_at", "returned_at", "overdue")
++HOLD_FIELDS = ("id", "book", "member", "placed_at", "status", "ready_at")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -68,6 +71,8 @@
+             raise Forbidden("Only librarians can delete members.")
+         if repository.member_has_loans(member_id):
+             raise Conflict("A member with loans cannot be deleted.")
++        if repository.member_has_holds(member_id):
++            raise Conflict("A member with holds cannot be deleted.")
+         repository.delete_member(member_id)
+ 
+ 
+@@ -134,15 +139,22 @@
+ 
+ 
+ def borrow_book(ctx, book_id, params):
+-    """Lend the book to the caller (or, for librarians, to ``params["member"]``)."""
++    """Lend the book to the caller (or, for librarians, to ``params["member"]``).
++
++    A reserved book can only be borrowed by the member of its ``ready`` hold, which is then
++    fulfilled; if the borrow fails, the hold stays ``ready``.
++    """
+     with transaction():
+         book = _load_book(book_id)
+-        requested = params.get("member") if isinstance(params, dict) else None
+-        if not permissions.can_borrow_for(ctx.user, requested):
++        requested = _requested_member(params)
++        if not permissions.can_act_for(ctx.user, requested):
+             raise Forbidden("Members can only borrow for themselves.")
+         if book["status"] == "on_loan":
+             raise Conflict("The book is already on loan.")
+-        member_id = validation.clean_borrow_params(params)
++        hold = repository.get_ready_hold(book_id) if book["status"] == "reserved" else None
++        if hold is not None and not _is_member_id(ctx.user["id"] if requested is None else requested, hold["member"]):
++            raise Conflict("The book is reserved for another member.")
++        member_id = validation.clean_member_params(params)
+         borrower = ctx.user if member_id is None else repository.get_member(member_id)
+         if borrower is None:
+             raise ValidationError("No such member.", {"member": "no such member"})
+@@ -153,16 +165,64 @@
+         repository.add_outbox_message(
+             "loan_created", {"loan": loan_id, "book": book_id, "member": borrower["id"]}, ctx.now_text
+         )
++        if hold is not None:
++            repository.set_hold_status(hold["id"], "fulfilled")
++    return repository.get_book(book_id)
++
++
++def place_hold(ctx, book_id, params):
++    """Queue the caller (or, for librarians, ``params["member"]``) for a book that is out."""
++    with transaction():
++        book = _load_book(book_id)
++        requested = _requested_member(params)
++        if not permissions.can_act_for(ctx.user, requested):
++            raise Forbidden("Members can only place holds for themselves.")
++        if book["status"] not in HOLDABLE_STATUSES:
++            raise Conflict("Holds can only be placed on books that are on loan or reserved.")
++        member_id = validation.clean_member_params(params)
++        member = ctx.user if member_id is None else repository.get_member(member_id)
++        if member is None:
++            raise ValidationError("No such member.", {"member": "no such member"})
++        refusal = _hold_refusal(member, book)
++        if refusal:
++            raise Conflict(refusal)
++        repository.insert_hold(book_id, member["id"], placed_at=ctx.now_text)
+     return repository.get_book(book_id)
+ 
+ 
+ def book_actions(ctx, book):
+     """Names of the actions the caller could successfully start on ``book`` right now."""
+-    if book["status"] != "available":
+-        return []
++    actions = []
++    if _may_offer_borrow(ctx, book):
++        actions.append("borrow")
++    if _hold_refusal(ctx.user, book) is None:
++        actions.append("hold")
++    return actions
++
++
++def ready_hold_member(book):
++    """Id of the member a reserved book is waiting for, or None."""
++    if book["status"] != "reserved":
++        return None
++    return repository.get_ready_hold(book["id"])["member"]
++
++
++def _may_offer_borrow(ctx, book):
++    if book["status"] == "on_loan":
++        return False
+     if permissions.is_librarian(ctx.user):
+-        return ["borrow"]  # librarians can lend to any eligible member
+-    return ["borrow"] if _may_borrow(ctx.user) else []
++        return True  # librarians can lend to any eligible member (on a reserved book: its hold's member)
++    if book["status"] == "reserved" and ready_hold_member(book) != ctx.user["id"]:
++        return False
++    return _may_borrow(ctx.user)
++
++
++def _requested_member(params):
++    return params.get("member") if isinstance(params, dict) else None
++
++
++def _is_member_id(value, member_id):
++    return isinstance(value, int) and not isinstance(value, bool) and value == member_id
+ 
+ 
+ def _load_book(book_id):
+@@ -179,6 +239,19 @@
+ 
+ def _may_borrow(member):
+     return member["active"] and repository.count_open_loans(member["id"]) < MAX_OPEN_LOANS
++
++
++def _hold_refusal(member, book):
++    """Why ``member`` may not place a hold on ``book`` right now (a 409 message), or None if they may."""
++    if book["status"] not in HOLDABLE_STATUSES:
++        return "Holds can only be placed on books that are on loan or reserved."
++    if not member["active"]:
++        return "Inactive members cannot place holds."
++    if repository.member_has_open_hold(member["id"], book["id"]):
++        return "The member already has a hold on this book."
++    if repository.member_has_book_on_loan(member["id"], book["id"]):
++        return "The member currently has this book on loan."
++    return None
+ 
+ 
+ def _ensure_may_borrow(member):
+@@ -240,6 +313,7 @@
+             raise Conflict("The loan has already been returned.")
+         validation.clean_no_params(params)
+         repository.mark_loan_returned(loan_id, ctx.now_text)
++        _serve_next_hold(ctx, loan["book"])
+     return present_loan(ctx, repository.get_loan(loan_id))
+ 
+ 
+@@ -256,6 +330,87 @@
+     return loan
+ 
+ 
++# --- holds ----------------------------------------------------------------------------
++
++def list_holds(ctx, filters=None):
++    holds = [h for h in repository.list_holds() if permissions.can_read_hold(ctx.user, h)]
++    return apply_filters(holds, filters or {}, HOLD_FIELDS)
++
++
++def get_hold(ctx, hold_id):
++    hold = _load_hold(hold_id)
++    if not permissions.can_read_hold(ctx.user, hold):
++        raise Forbidden()
++    return hold
++
++
++# Holds are created only by ``place_hold`` and changed only by returning, borrowing or
++# cancelling: nobody may create, update or delete them directly.
++
++def ensure_can_create_hold(ctx):
++    """Always refuses (403): holds are placed through ``POST /api/books/{id}/hold``."""
++    raise Forbidden("Holds are placed through the book's hold action.")
++
++
++def create_hold(ctx, data):
++    """``POST /api/holds``: always 403, see ``ensure_can_create_hold``."""
++    ensure_can_create_hold(ctx)
++
++
++def update_hold(ctx, hold_id, data):
++    _load_hold(hold_id)
++    raise Forbidden("Holds change only through their actions.")
++
++
++def delete_hold(ctx, hold_id):
++    _load_hold(hold_id)
++    raise Forbidden("Holds cannot be deleted.")
++
++
++def cancel_hold(ctx, hold_id, params):
++    """Cancel a waiting or ready hold; a cancelled ready hold passes the book to the next in line."""
++    with transaction():
++        hold = _load_hold(hold_id)
++        if not permissions.can_cancel_hold(ctx.user, hold):
++            raise Forbidden("Only the hold's member or a librarian can cancel a hold.")
++        if hold["status"] not in OPEN_HOLD_STATUSES:
++            raise Conflict(f"A {hold['status']} hold cannot be cancelled.")
++        validation.clean_no_params(params)
++        repository.set_hold_status(hold_id, "cancelled")
++        if hold["status"] == "ready":
++            _serve_next_hold(ctx, hold["book"])
++    return repository.get_hold(hold_id)
++
++
++def hold_actions(ctx, hold):
++    if hold["status"] in OPEN_HOLD_STATUSES and permissions.can_cancel_hold(ctx.user, hold):
++        return ["cancel"]
++    return []
++
++
++def _serve_next_hold(ctx, book_id):
++    """The book is back on the shelf: make the first waiting hold ready and notify, if there is one.
++
++    Without a waiting hold the book simply becomes available (its status is derived).
++    """
++    if repository.get_ready_hold(book_id) is not None:
++        return  # already reserved for someone
++    hold = repository.first_waiting_hold(book_id)
++    if hold is None:
++        return
++    repository.mark_hold_ready(hold["id"], ctx.now_text)
++    repository.add_outbox_message(
++        "hold_ready", {"hold": hold["id"], "book": book_id, "member": hold["member"]}, ctx.now_text
++    )
++
++
++def _load_hold(hold_id):
++    hold = repository.get_hold(hold_id)
++    if hold is None:
++        raise NotFound("No such hold.")
++    return hold
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def list_outbox(ctx, filters=None):
+--- a/library_app/templates/base.html
++++ b/library_app/templates/base.html
+@@ -19,6 +19,7 @@
+   <nav>
+     <a href="{{ url_for('ui.list_books') }}">Books</a>
+     <a href="{{ url_for('ui.list_loans') }}">Loans</a>
++    <a href="{{ url_for('ui.list_holds') }}">Holds</a>
+     <a href="{{ url_for('ui.list_members') }}">Members</a>
+     {% if ctx %}<span>Signed in as {{ ctx.user.username }} ({{ ctx.user.role }})</span>{% endif %}
+   </nav>
+--- a/library_app/templates/books/detail.html
++++ b/library_app/templates/books/detail.html
+@@ -13,10 +13,10 @@
+ 
+ {% if "borrow" in actions %}
+ <form data-action="borrow" method="post" action="{{ url_for('ui.borrow_book', book_id=book.id) }}">
+-  {% if borrowers %}
++  {% if ctx.is_librarian %}
+   <label>Lend to
+     <select name="member">
+-      <option value="">myself</option>
++      {% if reserved_for is none or reserved_for == ctx.user.id %}<option value="">myself</option>{% endif %}
+       {% for member in borrowers %}<option value="{{ member.id }}">{{ member.name }} ({{ member.username }})</option>{% endfor %}
+     </select>
+   </label>
+@@ -24,4 +24,18 @@
+   <button type="submit">Borrow</button>
+ </form>
+ {% endif %}
++
++{% if "hold" in actions %}
++<form data-action="hold" method="post" action="{{ url_for('ui.place_hold', book_id=book.id) }}">
++  {% if members %}
++  <label>Place hold for
++    <select name="member">
++      <option value="">myself</option>
++      {% for member in members %}<option value="{{ member.id }}">{{ member.name }} ({{ member.username }})</option>{% endfor %}
++    </select>
++  </label>
++  {% endif %}
++  <button type="submit">Place hold</button>
++</form>
++{% endif %}
+ {% endblock %}
+--- a/library_app/templates/holds/detail.html
++++ b/library_app/templates/holds/detail.html
+@@ -0,0 +1,19 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}Hold #{{ hold.id }}{% endblock %}
++{% block content %}
++<h1>Hold #{{ hold.id }}</h1>
++<dl>
++  {{ field("book", hold.book, href=url_for('ui.show_book', book_id=hold.book)) }}
++  {{ field("member", hold.member, href=url_for('ui.show_member', member_id=hold.member)) }}
++  {{ field("placed_at", hold.placed_at) }}
++  {{ field("status", hold.status) }}
++  {{ field("ready_at", hold.ready_at) }}
++</dl>
++
++{% if "cancel" in actions %}
++<form data-action="cancel" method="post" action="{{ url_for('ui.cancel_hold', hold_id=hold.id) }}">
++  <button type="submit">Cancel hold</button>
++</form>
++{% endif %}
++{% endblock %}
+--- a/library_app/templates/holds/list.html
++++ b/library_app/templates/holds/list.html
+@@ -0,0 +1,20 @@
++{% extends "base.html" %}
++{% block title %}Holds{% endblock %}
++{% block content %}
++<h1>Holds</h1>
++<table>
++  <thead><tr><th>Hold</th><th>Book</th><th>Member</th><th>Placed</th><th>Status</th><th>Ready</th></tr></thead>
++  <tbody>
++  {% for hold in holds %}
++    <tr data-id="{{ hold.id }}">
++      <td><a href="{{ url_for('ui.show_hold', hold_id=hold.id) }}">#{{ hold.id }}</a></td>
++      <td><a href="{{ url_for('ui.show_book', book_id=hold.book) }}">{{ hold.book }}</a></td>
++      <td>{{ hold.member }}</td>
++      <td>{{ hold.placed_at }}</td>
++      <td>{{ hold.status }}</td>
++      <td>{{ hold.ready_at|display }}</td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/library_app/validation.py
++++ b/library_app/validation.py
+@@ -115,8 +115,8 @@
+     return values
+ 
+ 
+-def clean_borrow_params(data):
+-    """Return the requested borrower's member id, or None to borrow for oneself."""
++def clean_member_params(data):
++    """Parameters ``{"member": id}`` of borrow and hold: return the member id, or None for oneself."""
+     data = require_object(data)
+     errors = unknown_field_errors(data, ("member",))
+     member_id = None
+--- a/tests/test_library_holds.py
++++ b/tests/test_library_holds.py
+@@ -0,0 +1,182 @@
++"""Holds: queueing for books on loan, readiness on return, reserved books, cancelling, UI."""
++from accept_client import parse_ui
++
++T1, T2, T3, T4 = "2026-03-01T10:00:00", "2026-03-02T10:00:00", "2026-03-03T10:00:00", "2026-03-04T10:00:00"
++# Book 4 is on loan to jo (loan 46); book 22 to chen (loan 52); book 3 is available.
++
++
++def _outbox(app, channel=None):
++    items = app.get("/api/_outbox", user="ada").json["items"]
++    return [m for m in items if channel is None or m["channel"] == channel]
++
++
++def test_member_places_hold_on_book_on_loan(app):
++    r = app.post("/api/books/4/hold", {}, user="chen", now=T1)
++    assert r.status == 200 and r.json["id"] == 4 and r.json["status"] == "on_loan"
++    assert app.get("/api/holds", user="chen").json["items"] == [
++        {"id": 1, "book": 4, "member": 3, "placed_at": T1, "status": "waiting", "ready_at": None}]
++    assert _outbox(app) == []
++
++
++def test_librarian_places_hold_for_member(app):
++    assert app.post("/api/books/4/hold", {"member": 5}, user="ada").status == 200
++    assert app.get("/api/holds/1", user="eli").json["member"] == 5
++    assert app.post("/api/books/4/hold", {"member": 999}, user="ada").status == 400
++    assert app.post("/api/books/4/hold", {"member": "eli"}, user="ada").status == 400
++    assert app.post("/api/books/3/hold", {"member": 999}, user="ada").status == 409  # 409 beats 400
++
++
++def test_member_cannot_hold_for_someone_else(app):
++    assert app.post("/api/books/4/hold", {"member": 4}, user="chen").status == 403
++    assert app.post("/api/books/3/hold", {"member": 4}, user="chen").status == 403  # 403 beats 409
++    assert app.post("/api/books/4/hold", {"member": 3}, user="chen").status == 200
++    assert app.post("/api/books/999/hold", {}, user="chen").status == 404
++
++
++def test_hold_conflicts(app):
++    assert app.post("/api/books/3/hold", {}, user="chen").status == 409  # available
++    assert app.post("/api/books/4/hold", {}, user="lena").status == 409  # inactive
++    assert app.post("/api/books/4/hold", {}, user="jo").status == 409  # jo has book 4 on loan
++    assert app.post("/api/books/4/hold", {}, user="chen").status == 200
++    assert app.post("/api/books/4/hold", {}, user="chen").status == 409  # already waiting
++    assert app.post("/api/books/4/hold", {"colour": 1}, user="dara").status == 400
++    assert len(app.get("/api/holds", user="ada").json["items"]) == 1
++
++
++def test_loan_limit_does_not_apply_to_holds(app):
++    assert app.post("/api/books/22/hold", {}, user="jo").status == 200  # jo has 3 open loans
++
++
++def test_return_makes_first_hold_ready_in_queue_order(app):
++    app.post("/api/books/4/hold", {}, user="chen", now=T2)   # hold 1
++    app.post("/api/books/4/hold", {}, user="dara", now=T1)   # hold 2: placed earlier
++    app.post("/api/books/4/hold", {}, user="eli", now=T1)    # hold 3: same time, higher id
++    assert app.post("/api/loans/46/return", {}, user="jo", now=T3).status == 200
++    holds = {h["id"]: h for h in app.get("/api/holds", user="ada").json["items"]}
++    assert holds[2]["status"] == "ready" and holds[2]["ready_at"] == T3
++    assert holds[1]["status"] == holds[3]["status"] == "waiting"
++    assert app.get("/api/books/4", user="chen").json["status"] == "reserved"
++    assert app.get("/api/books?status=reserved", user="chen").json["items"][0]["id"] == 4
++    assert _outbox(app) == [{"id": 1, "channel": "hold_ready", "payload": {"hold": 2, "book": 4, "member": 4},
++                             "created_at": T3}]
++
++
++def test_return_without_holds_makes_book_available(app):
++    app.post("/api/loans/46/return", {}, user="jo")
++    assert app.get("/api/books/4", user="chen").json["status"] == "available"
++    assert _outbox(app) == []
++
++
++def test_only_ready_member_may_borrow_reserved_book(app):
++    app.post("/api/books/4/hold", {}, user="chen", now=T1)
++    app.post("/api/books/4/hold", {}, user="dara", now=T2)
++    app.post("/api/loans/46/return", {}, user="jo", now=T3)
++    assert app.post("/api/books/4/borrow", {}, user="dara").status == 409
++    assert app.post("/api/books/4/borrow", {}, user="ada").status == 409
++    assert app.post("/api/books/4/borrow", {"member": 4}, user="ada").status == 409
++    assert app.post("/api/books/4/hold", {}, user="eli").status == 200  # reserved books take holds
++    r = app.post("/api/books/4/borrow", {"member": 3}, user="ada", now=T4)
++    assert r.status == 200 and r.json["status"] == "on_loan"
++    assert app.get("/api/holds/1", user="chen").json["status"] == "fulfilled"
++    assert app.get("/api/holds/2", user="dara").json["status"] == "waiting"
++    assert [m["channel"] for m in _outbox(app)] == ["hold_ready", "loan_created"]
++
++
++def test_ready_member_borrows_for_themselves(app):
++    app.post("/api/books/22/hold", {}, user="dara")
++    app.post("/api/loans/52/return", {}, user="chen")
++    assert app.post("/api/books/22/borrow", {}, user="dara").status == 200
++    assert app.get("/api/holds/1", user="dara").json["status"] == "fulfilled"
++
++
++def test_failed_borrow_keeps_hold_ready(app):
++    app.post("/api/books/22/hold", {}, user="jo")  # jo has 3 open loans
++    app.post("/api/loans/52/return", {}, user="chen")
++    assert app.post("/api/books/22/borrow", {}, user="jo").status == 409
++    assert app.get("/api/holds/1", user="jo").json["status"] == "ready"
++    assert app.get("/api/books/22", user="jo").json["status"] == "reserved"
++    app.post("/api/loans/46/return", {}, user="jo")
++    assert app.post("/api/books/22/borrow", {}, user="jo").status == 200
++    assert app.get("/api/holds/1", user="jo").json["status"] == "fulfilled"
++
++
++def test_cancel_waiting_hold(app):
++    app.post("/api/books/4/hold", {}, user="chen")
++    assert app.post("/api/holds/1/cancel", {}, user="dara").status == 403
++    r = app.post("/api/holds/1/cancel", {}, user="chen")
++    assert r.status == 200 and r.json["status"] == "cancelled" and r.json["id"] == 1
++    assert app.post("/api/holds/1/cancel", {}, user="chen").status == 409
++    assert app.post("/api/holds/999/cancel", {}, user="chen").status == 404
++    assert app.get("/api/books/4", user="chen").json["status"] == "on_loan"
++    assert app.post("/api/books/4/hold", {}, user="chen").status == 200  # may queue again
++
++
++def test_cancel_ready_hold_passes_book_on(app):
++    app.post("/api/books/4/hold", {}, user="chen", now=T1)
++    app.post("/api/books/4/hold", {}, user="dara", now=T2)
++    app.post("/api/loans/46/return", {}, user="jo", now=T3)
++    r = app.post("/api/holds/1/cancel", {}, user="ben", now=T4)
++    assert r.status == 200 and r.json["status"] == "cancelled" and r.json["ready_at"] == T3
++    hold = app.get("/api/holds/2", user="dara").json
++    assert hold["status"] == "ready" and hold["ready_at"] == T4
++    assert app.get("/api/books/4", user="chen").json["status"] == "reserved"
++    assert _outbox(app, "hold_ready")[-1]["payload"] == {"hold": 2, "book": 4, "member": 4}
++    app.post("/api/holds/2/cancel", {}, user="dara")
++    assert app.get("/api/books/4", user="chen").json["status"] == "available"
++    assert len(_outbox(app, "hold_ready")) == 2
++    assert app.post("/api/books/4/borrow", {}, user="eli").status == 200
++
++
++def test_cancel_finished_hold_is_409(app):
++    app.post("/api/books/22/hold", {}, user="dara")
++    app.post("/api/loans/52/return", {}, user="chen")
++    app.post("/api/books/22/borrow", {}, user="dara")
++    assert app.post("/api/holds/1/cancel", {}, user="ada").status == 409
++
++
++def test_hold_permissions(app):
++    app.post("/api/books/4/hold", {}, user="chen")
++    app.post("/api/books/4/hold", {}, user="dara")
++    assert [h["id"] for h in app.get("/api/holds", user="chen").json["items"]] == [1]
++    assert [h["id"] for h in app.get("/api/holds", user="ada").json["items"]] == [1, 2]
++    assert app.get("/api/holds?member=4", user="ada").json["items"][0]["id"] == 2
++    assert app.get("/api/holds/2", user="chen").status == 403
++    assert app.get("/api/holds/999", user="chen").status == 404
++    assert app.post("/api/holds", {"book": 4, "member": 3}, user="ada").status == 403
++    assert app.patch("/api/holds/1", {"status": "ready"}, user="ada").status == 403
++    assert app.delete("/api/holds/1", user="ada").status == 403
++    assert app.patch("/api/holds/999", {}, user="ada").status == 404
++    assert app.delete("/api/holds/999", user="ada").status == 404
++
++
++def test_member_with_holds_cannot_be_deleted(app):
++    app.post("/api/books/4/hold", {}, user="ada")  # ada has no loans
++    assert app.delete("/api/members/1", user="ben").status == 409
++
++
++def test_book_page_hold_and_borrow_forms(app):
++    assert parse_ui(app.get("/ui/books/4", user="chen").text).actions == ["hold"]
++    assert parse_ui(app.get("/ui/books/4", user="jo").text).actions == []  # jo has it on loan
++    assert parse_ui(app.get("/ui/books/4", user="lena").text).actions == []  # inactive
++    assert parse_ui(app.get("/ui/books/3", user="chen").text).actions == ["borrow"]  # available
++    app.post("/api/books/4/hold", {}, user="chen")
++    assert parse_ui(app.get("/ui/books/4", user="chen").text).actions == []  # already waiting
++    app.post("/api/loans/46/return", {}, user="jo")
++    assert parse_ui(app.get("/ui/books/4", user="chen").text).actions == ["borrow"]
++    assert parse_ui(app.get("/ui/books/4", user="dara").text).actions == ["hold"]
++    page = parse_ui(app.get("/ui/books/4", user="ada").text)
++    assert page.fields["status"] == "reserved" and page.actions == ["borrow", "hold"]
++
++
++def test_hold_pages(app):
++    app.post("/api/books/4/hold", {}, user="chen", now=T1)
++    page = parse_ui(app.get("/ui/holds/1", user="chen").text)
++    assert page.fields == {"book": "4", "member": "3", "placed_at": T1, "status": "waiting", "ready_at": ""}
++    assert page.actions == ["cancel"]
++    assert parse_ui(app.get("/ui/holds/1", user="ada").text).actions == ["cancel"]
++    assert app.get("/ui/holds/1", user="dara").status == 403
++    assert parse_ui(app.get("/ui/holds", user="chen").text).rows == [1]
++    assert parse_ui(app.get("/ui/holds", user="dara").text).rows == []
++    assert app.get("/ui/holds/new", user="ada").status == 403
++    app.post("/api/holds/1/cancel", {}, user="chen")
++    assert parse_ui(app.get("/ui/holds/1", user="chen").text).actions == []
+--- a/tests/test_library_ui.py
++++ b/tests/test_library_ui.py
+@@ -22,7 +22,7 @@
+     assert page.fields == {"title": "The Lantern Song 2", "author": "T. Okoye", "isbn": "978-0-1014-002-2",
+                            "year": "2005", "status": "available"}
+     assert page.actions == ["borrow"]
+-    assert parse_ui(app.get("/ui/books/4", user="chen").text).actions == []  # on loan
++    assert parse_ui(app.get("/ui/books/4", user="chen").text).actions == ["hold"]  # on loan: hold only
+     assert parse_ui(app.get("/ui/books/2", user="jo").text).actions == []  # 3 open loans
+     assert parse_ui(app.get("/ui/books/2", user="lena").text).actions == []  # inactive
+     assert parse_ui(app.get("/ui/books/4", user="chen").text).fields["year"] == ""
+@@ -89,3 +89,15 @@
+     assert code == 400
+     code, _, _ = _post_form(app, "/ui/members", {"username": "u1", "name": "U", "role": "member", "active": "false"}, "ada")
+     assert code == 303 and app.get("/api/members/13", user="ada").json["active"] is False
++
++
++def test_hold_forms_post_through_services(app):
++    code, headers, _ = _post_form(app, "/ui/books/4/hold", {"member": "5"}, "ada")
++    assert code == 303 and headers["Location"].endswith("/ui/books/4")
++    assert app.get("/api/holds/1", user="eli").json["member"] == 5
++    code, _, _ = _post_form(app, "/ui/books/4/hold", {}, "chen")
++    assert code == 303 and app.get("/api/holds/2", user="chen").json["member"] == 3
++    code, headers, _ = _post_form(app, "/ui/holds/2/cancel", {}, "chen")
++    assert code == 303 and headers["Location"].endswith("/ui/holds/2")
++    assert app.get("/api/holds/2", user="chen").json["status"] == "cancelled"
++    assert _post_form(app, "/ui/holds/1/cancel", {}, "chen")[0] == 403

@@ -1,0 +1,53 @@
+request: "Authors as records: books.author becomes a reference to a new authors collection (name required unique, derived book_count); books get derived author_name; ?author=<id> filters; existing author texts become author records in order of first appearance by book id; only librarians write authors; deleting an author with books -> 409."
+interpretation: "Promote books.author (text) to a ref to new entity authors keyed by name (ids by first appearance in ascending book id order, display = name in UI). authors: name text required unique; book_count computed = count(books, author=record); read for any authenticated user, create/update/delete librarian only; deleting a referenced author gives 409 automatically. books.author stays required; add computed books.author_name = record.author.name."
+ops:
+  - promote_field:
+      entity: books
+      field: author
+      to: authors
+      key: name
+      fields:
+        book_count: {type: int, computed: "count(books, author=record)"}
+      rules:
+        read: "True"
+        create: "user.role == 'librarian'"
+        update: "user.role == 'librarian'"
+        delete: "user.role == 'librarian'"
+  - change_field: {entity: books, name: author, required: true}
+  - add_field: {entity: books, name: author_name, type: text, computed: "record.author.name"}
+expect:
+  - {as: chen, do: "GET /api/authors", status: 200, count: 6}
+  - {as: chen, do: "GET /api/authors/1", status: 200, json: {id: 1, name: "M. Reyes", book_count: 8}}
+  - {as: ada, do: "GET /api/authors/6", status: 200, json: {id: 6, name: "K. Tanaka"}}
+  - {as: chen, do: "GET /api/books/1", status: 200, json: {author: 1, author_name: "M. Reyes", isbn: "978-0-1007-001-1"}}
+  - {as: chen, do: "GET /api/books/3", status: 200, json: {author: 3, author_name: "S. Lindqvist"}}
+  - {as: chen, do: "GET /api/books?author=6", count: 6}
+  - {as: chen, do: "POST /api/authors", body: {name: "New Writer"}, status: 403}
+  - {as: chen, do: "PATCH /api/authors/1", body: {name: "X"}, status: 403}
+  - {as: chen, do: "DELETE /api/authors/1", status: 403}
+  - {as: ada, do: "POST /api/authors", body: {name: "New Writer"}, status: 201, json: {id: 7, name: "New Writer", book_count: 0}}
+  - {as: ada, do: "POST /api/authors", body: {}, status: 400}
+  - {as: ada, do: "POST /api/authors", body: {name: "M. Reyes"}, status: 400}
+  - {as: ada, do: "PATCH /api/authors/2", body: {name: "M. Reyes"}, status: 400}
+  - {as: ada, do: "PATCH /api/authors/2", body: {name: null}, status: 400}
+  - {as: ada, do: "DELETE /api/authors/1", status: 409}
+  - {as: ada, do: "PATCH /api/authors/1", body: {book_count: 3}, status: 400}
+  - name: "author_name follows renames"
+    steps:
+      - {as: ada, do: "PATCH /api/authors/1", body: {name: "Maria Reyes"}, status: 200, json: {name: "Maria Reyes"}}
+      - {as: chen, do: "GET /api/books/1", status: 200, json: {author: 1, author_name: "Maria Reyes"}}
+  - name: "delete unused author"
+    steps:
+      - {as: ada, do: "POST /api/authors", body: {name: "Tmp"}, status: 201}
+      - {as: ada, do: "DELETE /api/authors/7", status: 204}
+  - {as: ada, do: "POST /api/books", body: {title: "T", author: 2, isbn: "999"}, status: 201, json: {author: 2, author_name: "T. Okoye"}}
+  - {as: ada, do: "POST /api/books", body: {title: "T", author: "T. Okoye", isbn: "999"}, status: 400}
+  - {as: ada, do: "POST /api/books", body: {title: "T", author: 99, isbn: "999"}, status: 400}
+  - {as: ada, do: "POST /api/books", body: {title: "T", author: null, isbn: "999"}, status: 400}
+  - {as: ada, do: "POST /api/books", body: {title: "T", isbn: "999"}, status: 400}
+  - {as: ada, do: "PATCH /api/books/1", body: {author: 3}, status: 200, json: {author: 3, author_name: "S. Lindqvist"}}
+  - {as: ada, do: "PATCH /api/books/1", body: {author: null}, status: 400}
+  - {as: ada, do: "PATCH /api/books/1", body: {author: "M. Reyes"}, status: 400}
+  - {as: ada, do: "PATCH /api/books/1", body: {author: 42}, status: 400}
+  - {as: ada, do: "PATCH /api/books/1", body: {author_name: "x"}, status: 400}
+  - {as: chen, do: "POST /api/books", body: {title: "T", author: 2, isbn: "999"}, status: 403}

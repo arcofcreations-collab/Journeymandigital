@@ -1,0 +1,105 @@
+request: "Approval delegation: managers can delegate their approval duties to another manager for a date range (delegations collection; active delegates may read, approve and reject claims of the delegator's direct reports; no self-approval; no chaining)."
+interpretation: >
+  New entity delegations (delegator = creator, system; delegate required ref employees; starts_on/ends_on
+  required dates). Create only by managers (403); delegate must be another manager (400, constraint);
+  ends_on >= starts_on (400, constraint). Read by delegator, delegate or finance; delete only by delegator;
+  update forbidden for everyone. A delegation is active when starts_on <= today <= ends_on (today from X-Now).
+  Claims read/approve/reject additionally allowed to a user who is the delegate of an active delegation whose
+  delegator is the claim employee's direct manager (no chaining since only the direct manager's own
+  delegations count). approve/reject are never allowed on one's own claim (403). State guards unchanged.
+ops:
+  - add_entity:
+      name: delegations
+      fields:
+        delegator: {type: ref, ref: employees, required: true, system: true, default: user}
+        delegate: {type: ref, ref: employees, required: true}
+        starts_on: {type: date, required: true}
+        ends_on: {type: date, required: true}
+      rules:
+        read: "record.delegator == user or record.delegate == user or user.role == 'finance'"
+        create: "user.role == 'manager'"
+        update: "False"
+        delete: "record.delegator == user"
+      constraints:
+        delegate_is_other_manager:
+          expr: "record.delegate != record.delegator and record.delegate.role == 'manager'"
+          message: "the delegate must be another employee with role manager"
+          field: delegate
+        ends_not_before_starts:
+          expr: "record.ends_on >= record.starts_on"
+          message: "ends_on must not be before starts_on"
+          field: ends_on
+  - set_rule:
+      entity: claims
+      rule: read
+      expr: "record.employee == user or record.employee.manager == user or user.role == 'finance' or any(d.delegate == user and d.delegator == record.employee.manager and d.starts_on <= today and today <= d.ends_on for d in delegations)"
+  - change_action:
+      entity: claims
+      name: approve
+      allow: "record.employee != user and (record.employee.manager == user or any(d.delegate == user and d.delegator == record.employee.manager and d.starts_on <= today and today <= d.ends_on for d in delegations))"
+  - change_action:
+      entity: claims
+      name: reject
+      allow: "record.employee != user and (record.employee.manager == user or any(d.delegate == user and d.delegator == record.employee.manager and d.starts_on <= today and today <= d.ends_on for d in delegations))"
+expect:
+  # creation rules
+  - {as: priya, do: "POST /api/delegations", body: {delegate: 2, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 403}
+  - {as: fiona, do: "POST /api/delegations", body: {delegate: 2, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 403}
+  - {as: marco, do: "POST /api/delegations", body: {delegate: 4, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 201, json: {delegator: 2, delegate: 4}}
+  - {as: marco, do: "POST /api/delegations", body: {delegate: 2, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 400}
+  - {as: marco, do: "POST /api/delegations", body: {delegate: 5, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 400}
+  - {as: marco, do: "POST /api/delegations", body: {delegate: 1, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 400}
+  - {as: marco, do: "POST /api/delegations", body: {delegate: 999, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 400}
+  - {as: marco, do: "POST /api/delegations", body: {starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 400}
+  - {as: marco, do: "POST /api/delegations", body: {delegate: 4, starts_on: "2026-10-10", ends_on: "2026-10-01"}, status: 400}
+  - {as: marco, do: "POST /api/delegations", body: {delegate: 4, starts_on: "2026-10-10", ends_on: "2026-10-10"}, status: 201}
+  - {as: marco, do: "POST /api/delegations", body: {delegator: 3, delegate: 4, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 400}
+  - name: "visibility, patch and delete"
+    steps:
+      - {as: marco, do: "POST /api/delegations", body: {delegate: 4, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 201}
+      - {as: marco, do: "GET /api/delegations", count: 1}
+      - {as: omar, do: "GET /api/delegations", count: 1}
+      - {as: fiona, do: "GET /api/delegations", count: 1}
+      - {as: nadia, do: "GET /api/delegations", count: 0}
+      - {as: priya, do: "GET /api/delegations", count: 0}
+      - {as: nadia, do: "GET /api/delegations/1", status: 403}
+      - {as: omar, do: "GET /api/delegations/1", status: 200}
+      - {as: marco, do: "PATCH /api/delegations/1", body: {ends_on: "2026-10-20"}, status: 403}
+      - {as: omar, do: "DELETE /api/delegations/1", status: 403}
+      - {as: fiona, do: "DELETE /api/delegations/1", status: 403}
+      - {as: marco, do: "DELETE /api/delegations/1", status: 204}
+  - name: "active delegate approves for delegator's reports"
+    steps:
+      - {as: omar, do: "POST /api/delegations", body: {delegate: 3, starts_on: "2026-10-01", ends_on: "2026-10-10"}, now: "2026-10-01T09:00:00", status: 201}
+      - {as: nadia, do: "GET /api/claims/2", now: "2026-10-05T09:00:00", status: 200}
+      - {as: nadia, do: "GET /api/claims/2", now: "2026-09-30T09:00:00", status: 403}
+      - {as: nadia, do: "GET /api/claims/2", now: "2026-10-11T09:00:00", status: 403}
+      - {as: nadia, do: "POST /api/claims/2/approve", now: "2026-09-30T23:59:00", status: 403}
+      - {as: nadia, do: "POST /api/claims/2/approve", now: "2026-10-11T00:00:00", status: 403}
+      - {as: nadia, do: "POST /api/claims/20/approve", now: "2026-10-05T09:00:00", status: 409}
+      - {as: nadia, do: "POST /api/claims/2/approve", now: "2026-10-10T23:00:00", status: 200, json: {status: approved, decided_by: 3}}
+      - {as: nadia, do: "POST /api/claims/5/reject", body: {reason: ""}, now: "2026-10-01T00:00:00", status: 400}
+      - {as: nadia, do: "POST /api/claims/5/reject", body: {reason: "no"}, now: "2026-10-01T00:00:00", status: 200, json: {status: rejected, decided_by: 3, rejection_reason: "no"}}
+      - {as: omar, do: "POST /api/claims/15/approve", now: "2026-10-05T09:00:00", status: 200, json: {decided_by: 4}}
+      - {as: nadia, do: "POST /api/claims/25/approve", now: "2026-10-05T09:00:00", status: 403}
+      - {as: nadia, do: "POST /api/claims/43/approve", now: "2026-10-05T09:00:00", status: 403}
+      - {as: nadia, do: "GET /api/claims?employee=11", now: "2026-10-05T09:00:00", count: 13}
+  - name: "no self approval via delegation and no chaining"
+    steps:
+      - {as: marco, do: "POST /api/delegations", body: {delegate: 4, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 201}
+      - {as: omar, do: "GET /api/claims/25", now: "2026-10-05T09:00:00", status: 200}
+      - {as: omar, do: "POST /api/claims/43/approve", now: "2026-10-05T09:00:00", status: 403}
+      - {as: omar, do: "POST /api/claims/43/reject", body: {reason: "x"}, now: "2026-10-05T09:00:00", status: 403}
+      - {as: omar, do: "POST /api/delegations", body: {delegate: 3, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 201}
+      - {as: nadia, do: "GET /api/claims/25", now: "2026-10-05T09:00:00", status: 403}
+      - {as: nadia, do: "POST /api/claims/25/approve", now: "2026-10-05T09:00:00", status: 403}
+      - {as: nadia, do: "POST /api/claims/43/approve", now: "2026-10-05T09:00:00", status: 403}
+      - {as: omar, do: "POST /api/claims/25/approve", now: "2026-10-05T09:00:00", status: 200, json: {decided_by: 4}}
+      - {as: marco, do: "POST /api/claims/53/approve", now: "2026-10-05T09:00:00", status: 200, json: {decided_by: 2}}
+      - {as: marco, do: "POST /api/claims/43/approve", now: "2026-10-05T09:00:00", status: 200, json: {decided_by: 2}}
+  - name: "deleted delegation gives no rights"
+    steps:
+      - {as: omar, do: "POST /api/delegations", body: {delegate: 3, starts_on: "2026-10-01", ends_on: "2026-10-10"}, status: 201}
+      - {as: omar, do: "DELETE /api/delegations/1", status: 204}
+      - {as: nadia, do: "POST /api/claims/2/approve", now: "2026-10-05T09:00:00", status: 403}
+      - {as: nadia, do: "GET /api/claims/2", now: "2026-10-05T09:00:00", status: 403}

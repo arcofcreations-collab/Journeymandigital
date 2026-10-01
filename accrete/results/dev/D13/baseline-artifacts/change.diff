@@ -1,0 +1,824 @@
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,7 @@
+ # Expense claims
+ 
+ Employees submit expense claims, their manager approves or rejects them, finance pays them.
++Managers on leave can delegate their approval duties to another manager for a date range.
+ Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External behaviour follows `spec/CONTRACT.md`
+ and `spec/apps/expenses.md`.
+ 
+@@ -58,6 +59,22 @@
+ | fields clients may set / never set | `validation.CLAIM_WRITABLE`, `validation.CLAIM_READ_ONLY` |
+ | amount range, categories, roles | `validation.MAX_CLAIM_AMOUNT`, `CLAIM_CATEGORIES`, `EMPLOYEE_ROLES` |
+ | actions shown on detail pages | `services.claim_actions` |
++| approval delegation (who stands in for whom, today) | `services.active_delegators` → `permissions.acts_as_manager_of` |
++
++### Approval delegation
++
++`delegations` (`delegator`, `delegate`, `starts_on`, `ends_on`) lets a manager hand their
++approval duties to another manager. A delegation is active on every date from `starts_on` to
++`ends_on` inclusive (the request's `X-Now` date). While active, the delegate can read, approve
++and reject the claims of the delegator's *direct reports*, exactly as the delegator can
++(`decided_by` = the delegate); the delegator keeps all rights. Rules:
++
++* only managers create delegations; `delegator` is the creator (sending it → 400); `delegate`
++  must be another existing employee with role `manager`; `ends_on` ≥ `starts_on` (else 400)
++* readable by delegator, delegate and finance; only the delegator can DELETE; PATCH → 403 for everyone
++* nobody approves or rejects their own claim, also not through a delegation (403)
++* delegations do not chain: rights come from the delegator's own direct reports only
++* an employee referenced by a delegation cannot be deleted (409), like one with claims or reports
+ 
+ ## Running the tests
+ 
+@@ -112,3 +129,6 @@
+   Deleting an employee who has claims, decided claims or reports → 409.
+ * The detail page's `data-field` elements cover the record's fields; the `id` is shown in the heading.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
++* Delegations: the delegate's `manager` role is checked when the delegation is created; later
++  role changes don't revoke it (delete it instead). Dates must be real `YYYY-MM-DD` dates;
++  start dates in the past are allowed. Overlapping delegations are allowed.
+--- a/expenses_app/migrations/0002_add_delegations.sql
++++ b/expenses_app/migrations/0002_add_delegations.sql
+@@ -0,0 +1,15 @@
++-- Approval delegation: a manager hands their approval duties to another manager for a
++-- date range (inclusive on both ends). No delegations exist initially.
++
++CREATE TABLE delegations (
++    id           INTEGER PRIMARY KEY AUTOINCREMENT,
++    delegator_id INTEGER NOT NULL REFERENCES employees (id),
++    delegate_id  INTEGER NOT NULL REFERENCES employees (id),
++    starts_on    TEXT    NOT NULL,  -- YYYY-MM-DD
++    ends_on      TEXT    NOT NULL,  -- YYYY-MM-DD
++    CHECK (delegate_id <> delegator_id),
++    CHECK (ends_on >= starts_on)
++);
++
++CREATE INDEX delegations_delegator_id ON delegations (delegator_id);
++CREATE INDEX delegations_delegate_id ON delegations (delegate_id);
+--- a/expenses_app/permissions.py
++++ b/expenses_app/permissions.py
+@@ -1,6 +1,9 @@
+ """Who may do what. Pure functions of the calling employee and the records involved.
+ 
+ ``claimant`` is the employee record a claim belongs to (needed to find their manager).
++``delegators`` is the set of employee ids whose approval duties ``user`` holds today through
++an active delegation (see ``services.active_delegators``). Rights held only through a
++delegation are never passed on: they come from the delegators' own direct reports only.
+ These answer only "is this user allowed?"; state rules (409) live in ``services``.
+ """
+ 
+@@ -9,9 +12,18 @@
+     return user["role"] == "finance"
+ 
+ 
++def is_manager(user):
++    return user["role"] == "manager"
++
++
+ def is_manager_of(user, employee):
+     """Direct manager only: the employee's ``manager`` reference points at ``user``."""
+     return employee["manager"] == user["id"]
++
++
++def acts_as_manager_of(user, employee, delegators=frozenset()):
++    """The employee's direct manager, or a delegate of that manager while the delegation is active."""
++    return is_manager_of(user, employee) or employee["manager"] in delegators
+ 
+ 
+ # --- employees ------------------------------------------------------------------------
+@@ -31,8 +43,9 @@
+     return True
+ 
+ 
+-def can_read_claim(user, claim, claimant):
+-    return claim["employee"] == user["id"] or is_manager_of(user, claimant) or is_finance(user)
++def can_read_claim(user, claim, claimant, delegators=frozenset()):
++    return (claim["employee"] == user["id"] or acts_as_manager_of(user, claimant, delegators)
++            or is_finance(user))
+ 
+ 
+ def can_edit_claim(user, claim):
+@@ -44,10 +57,25 @@
+     return claim["employee"] == user["id"]
+ 
+ 
+-def can_decide_claim(user, claimant):
+-    """Approve or reject: the claimant's manager."""
+-    return is_manager_of(user, claimant)
++def can_decide_claim(user, claimant, delegators=frozenset()):
++    """Approve or reject: the claimant's manager or their active delegate, never the claimant
++    themselves (segregation of duties)."""
++    return claimant["id"] != user["id"] and acts_as_manager_of(user, claimant, delegators)
+ 
+ 
+ def can_pay_claim(user, claim):
+     return is_finance(user)
++
++
++# --- delegations ----------------------------------------------------------------------
++
++def can_create_delegation(user):
++    return is_manager(user)
++
++
++def can_read_delegation(user, delegation):
++    return user["id"] in (delegation["delegator"], delegation["delegate"]) or is_finance(user)
++
++
++def can_delete_delegation(user, delegation):
++    return delegation["delegator"] == user["id"]
+--- a/expenses_app/repository.py
++++ b/expenses_app/repository.py
+@@ -64,11 +64,12 @@
+ 
+ 
+ def employee_is_referenced(employee_id):
+-    """True if the employee has claims, decided claims or reports (rows that point at them)."""
++    """True if the employee has claims, decided claims, reports or delegations (rows that point at them)."""
+     row = get_db().execute(
+         """
+         SELECT EXISTS (SELECT 1 FROM claims WHERE employee_id = :id OR decided_by_id = :id)
+             OR EXISTS (SELECT 1 FROM employees WHERE manager_id = :id)
++            OR EXISTS (SELECT 1 FROM delegations WHERE delegator_id = :id OR delegate_id = :id)
+         """,
+         {"id": employee_id},
+     ).fetchone()
+@@ -145,6 +146,53 @@
+     get_db().execute("UPDATE claims SET status = 'paid' WHERE id = ?", (claim_id,))
+ 
+ 
++# --- delegations ----------------------------------------------------------------------
++
++_DELEGATION_SELECT = "SELECT id, delegator_id, delegate_id, starts_on, ends_on FROM delegations"
++
++
++def _delegation(row):
++    if row is None:
++        return None
++    return {
++        "id": row["id"],
++        "delegator": row["delegator_id"],
++        "delegate": row["delegate_id"],
++        "starts_on": row["starts_on"],
++        "ends_on": row["ends_on"],
++    }
++
++
++def list_delegations():
++    return [_delegation(row) for row in get_db().execute(f"{_DELEGATION_SELECT} ORDER BY id")]
++
++
++def get_delegation(delegation_id):
++    return _delegation(get_db().execute(f"{_DELEGATION_SELECT} WHERE id = ?", (delegation_id,)).fetchone())
++
++
++def insert_delegation(delegator_id, values):
++    cur = get_db().execute(
++        "INSERT INTO delegations (delegator_id, delegate_id, starts_on, ends_on) VALUES (?, ?, ?, ?)",
++        (delegator_id, values["delegate"], values["starts_on"], values["ends_on"]),
++    )
++    return cur.lastrowid
++
++
++def delete_delegation(delegation_id):
++    get_db().execute("DELETE FROM delegations WHERE id = ?", (delegation_id,))
++
++
++def active_delegator_ids(delegate_id, day):
++    """Ids of the employees who delegated to ``delegate_id`` with a delegation active on ``day``
++    (``YYYY-MM-DD``; ``starts_on`` and ``ends_on`` are inclusive)."""
++    rows = get_db().execute(
++        "SELECT DISTINCT delegator_id FROM delegations WHERE delegate_id = ? AND starts_on <= ? AND ends_on >= ?",
++        (delegate_id, day, day),
++    )
++    return frozenset(row[0] for row in rows)
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def add_outbox_message(channel, payload, created_at):
+--- a/expenses_app/routes_api.py
++++ b/expenses_app/routes_api.py
+@@ -105,6 +105,34 @@
+     return services.pay_claim(current_context(), claim_id, _body())
+ 
+ 
++# --- delegations ----------------------------------------------------------------------
++
++@bp.get("/delegations")
++def list_delegations():
++    return _items(services.list_delegations(current_context(), _filters()))
++
++
++@bp.post("/delegations")
++def create_delegation():
++    return services.create_delegation(current_context(), _body()), 201
++
++
++@bp.get("/delegations/<int:delegation_id>")
++def get_delegation(delegation_id):
++    return services.get_delegation(current_context(), delegation_id)
++
++
++@bp.patch("/delegations/<int:delegation_id>")
++def update_delegation(delegation_id):
++    return services.update_delegation(current_context(), delegation_id, _body())
++
++
++@bp.delete("/delegations/<int:delegation_id>")
++def delete_delegation(delegation_id):
++    services.delete_delegation(current_context(), delegation_id)
++    return "", 204
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ @bp.get("/_outbox")
+--- a/expenses_app/routes_ui.py
++++ b/expenses_app/routes_ui.py
+@@ -8,7 +8,7 @@
+ """
+ from flask import Blueprint, redirect, render_template, request, url_for
+ 
+-from . import services, validation
++from . import permissions, services, validation
+ from .auth import current_context
+ 
+ bp = Blueprint("ui", __name__, url_prefix="/ui")
+@@ -30,6 +30,11 @@
+ 
+ def _text(value):
+     return value
++
++
++def _optional_text(value):
++    value = value.strip()
++    return value or None
+ 
+ 
+ def _optional_int(value):
+@@ -134,3 +139,40 @@
+ def pay_claim(claim_id):
+     services.pay_claim(current_context(), claim_id, {})
+     return redirect(url_for("ui.show_claim", claim_id=claim_id), 303)
++
++
++# --- delegations ----------------------------------------------------------------------
++
++@bp.get("/delegations")
++def list_delegations():
++    delegations = services.list_delegations(current_context(), request.args.to_dict())
++    return render_template("delegations/list.html", delegations=delegations)
++
++
++@bp.get("/delegations/new")
++def new_delegation():
++    ctx = current_context()
++    services.ensure_can_create_delegation(ctx)
++    managers = [e for e in services.list_employees(ctx, {"role": "manager"}) if e["id"] != ctx.user["id"]]
++    return render_template("delegations/new.html", managers=managers)
++
++
++@bp.post("/delegations")
++def create_delegation():
++    data = _form_values({"delegate": _optional_int, "starts_on": _optional_text, "ends_on": _optional_text})
++    delegation = services.create_delegation(current_context(), data)
++    return redirect(url_for("ui.show_delegation", delegation_id=delegation["id"]), 303)
++
++
++@bp.get("/delegations/<int:delegation_id>")
++def show_delegation(delegation_id):
++    ctx = current_context()
++    delegation = services.get_delegation(ctx, delegation_id)
++    return render_template("delegations/detail.html", delegation=delegation,
++                           can_delete=permissions.can_delete_delegation(ctx.user, delegation))
++
++
++@bp.post("/delegations/<int:delegation_id>/delete")
++def delete_delegation(delegation_id):
++    services.delete_delegation(current_context(), delegation_id)
++    return redirect(url_for("ui.list_delegations"), 303)
+--- a/expenses_app/services.py
++++ b/expenses_app/services.py
+@@ -8,6 +8,9 @@
+ 
+     draft --submit--> submitted --approve--> approved --pay--> paid
+                                 \\--reject--> rejected
++
++Approve/reject (and reading the claim) belong to the claimant's direct manager and, while a
++delegation is active, to that manager's delegate.
+ """
+ from . import permissions, repository, validation
+ from .db import transaction
+@@ -17,6 +20,7 @@
+ EMPLOYEE_FIELDS = ("id", "username", "name", "role", "manager", "department")
+ CLAIM_FIELDS = ("id", "employee", "amount", "category", "description", "status",
+                 "submitted_at", "decided_at", "decided_by", "rejection_reason")
++DELEGATION_FIELDS = ("id", "delegator", "delegate", "starts_on", "ends_on")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -106,16 +110,17 @@
+ 
+ def list_claims(ctx, filters=None):
+     employees = {e["id"]: e for e in repository.list_employees()}
++    delegators = active_delegators(ctx)
+     claims = [
+         c for c in repository.list_claims()
+-        if permissions.can_read_claim(ctx.user, c, employees[c["employee"]])
++        if permissions.can_read_claim(ctx.user, c, employees[c["employee"]], delegators)
+     ]
+     return apply_filters(claims, filters or {}, CLAIM_FIELDS)
+ 
+ 
+ def get_claim(ctx, claim_id):
+     claim = _load_claim(claim_id)
+-    if not permissions.can_read_claim(ctx.user, claim, _claimant(claim)):
++    if not permissions.can_read_claim(ctx.user, claim, _claimant(claim), active_delegators(ctx)):
+         raise Forbidden()
+     return claim
+ 
+@@ -168,8 +173,8 @@
+ def approve_claim(ctx, claim_id, params):
+     with transaction():
+         claim = _load_claim(claim_id)
+-        if not permissions.can_decide_claim(ctx.user, _claimant(claim)):
+-            raise Forbidden("Only the employee's manager can approve the claim.")
++        if not permissions.can_decide_claim(ctx.user, _claimant(claim), active_delegators(ctx)):
++            raise Forbidden("Only the employee's manager (or their delegate) can approve the claim.")
+         _require_status(claim, "submitted", "Only submitted claims can be approved.")
+         validation.clean_no_params(params)
+         repository.mark_claim_decided(claim_id, "approved", ctx.now_text, ctx.user["id"])
+@@ -179,8 +184,8 @@
+ def reject_claim(ctx, claim_id, params):
+     with transaction():
+         claim = _load_claim(claim_id)
+-        if not permissions.can_decide_claim(ctx.user, _claimant(claim)):
+-            raise Forbidden("Only the employee's manager can reject the claim.")
++        if not permissions.can_decide_claim(ctx.user, _claimant(claim), active_delegators(ctx)):
++            raise Forbidden("Only the employee's manager (or their delegate) can reject the claim.")
+         _require_status(claim, "submitted", "Only submitted claims can be rejected.")
+         reason = validation.clean_reject_params(params)
+         repository.mark_claim_decided(claim_id, "rejected", ctx.now_text, ctx.user["id"], reason)
+@@ -207,7 +212,7 @@
+     actions = []
+     if status == "draft" and permissions.can_submit_claim(user, claim):
+         actions.append("submit")
+-    if status == "submitted" and permissions.can_decide_claim(user, _claimant(claim)):
++    if status == "submitted" and permissions.can_decide_claim(user, _claimant(claim), active_delegators(ctx)):
+         actions += ["approve", "reject"]
+     if status == "approved" and permissions.can_pay_claim(user, claim):
+         actions.append("pay")
+@@ -230,6 +235,75 @@
+         raise Conflict(message)
+ 
+ 
++# --- delegations ----------------------------------------------------------------------
++
++def active_delegators(ctx):
++    """Ids of the managers whose approval duties the caller holds today by delegation."""
++    return repository.active_delegator_ids(ctx.user["id"], ctx.today.isoformat())
++
++
++def list_delegations(ctx, filters=None):
++    delegations = [d for d in repository.list_delegations() if permissions.can_read_delegation(ctx.user, d)]
++    return apply_filters(delegations, filters or {}, DELEGATION_FIELDS)
++
++
++def get_delegation(ctx, delegation_id):
++    delegation = _load_delegation(delegation_id)
++    if not permissions.can_read_delegation(ctx.user, delegation):
++        raise Forbidden()
++    return delegation
++
++
++def ensure_can_create_delegation(ctx):
++    if not permissions.can_create_delegation(ctx.user):
++        raise Forbidden("Only managers can delegate their approvals.")
++
++
++def create_delegation(ctx, data):
++    """Create a delegation from the caller (a manager) to another manager."""
++    ensure_can_create_delegation(ctx)
++    with transaction():
++        values = validation.clean_delegation(data)
++        _check_delegate(ctx, values["delegate"])
++        delegation_id = repository.insert_delegation(ctx.user["id"], values)
++    return repository.get_delegation(delegation_id)
++
++
++def update_delegation(ctx, delegation_id, data):
++    """Delegations are immutable: PATCH is forbidden for everyone (after the 404 check)."""
++    _load_delegation(delegation_id)
++    raise Forbidden("Delegations cannot be changed; delete and recreate instead.")
++
++
++def delete_delegation(ctx, delegation_id):
++    with transaction():
++        delegation = _load_delegation(delegation_id)
++        if not permissions.can_delete_delegation(ctx.user, delegation):
++            raise Forbidden("Only the delegator can delete a delegation.")
++        repository.delete_delegation(delegation_id)
++
++
++def _load_delegation(delegation_id):
++    delegation = repository.get_delegation(delegation_id)
++    if delegation is None:
++        raise NotFound("No such delegation.")
++    return delegation
++
++
++def _check_delegate(ctx, delegate_id):
++    """The delegate must be another existing employee whose role is ``manager``."""
++    delegate = repository.get_employee(delegate_id)
++    if delegate is None:
++        problem = "no such employee"
++    elif delegate["id"] == ctx.user["id"]:
++        problem = "cannot delegate to yourself"
++    elif not permissions.is_manager(delegate):
++        problem = "must be a manager"
++    else:
++        return
++    raise ValidationError("Invalid input.", {"delegate": problem})
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def list_outbox(ctx, filters=None):
+--- a/expenses_app/templates/base.html
++++ b/expenses_app/templates/base.html
+@@ -19,6 +19,7 @@
+   <nav>
+     <a href="{{ url_for('ui.list_claims') }}">Claims</a>
+     <a href="{{ url_for('ui.list_employees') }}">Employees</a>
++    <a href="{{ url_for('ui.list_delegations') }}">Delegations</a>
+     {% if ctx %}<span>Signed in as {{ ctx.user.username }} ({{ ctx.user.role }})</span>{% endif %}
+   </nav>
+   <main>
+--- a/expenses_app/templates/delegations/detail.html
++++ b/expenses_app/templates/delegations/detail.html
+@@ -0,0 +1,18 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}Delegation #{{ delegation.id }}{% endblock %}
++{% block content %}
++<h1>Delegation #{{ delegation.id }}</h1>
++<dl>
++  {{ field("delegator", delegation.delegator, href=url_for('ui.show_employee', employee_id=delegation.delegator)) }}
++  {{ field("delegate", delegation.delegate, href=url_for('ui.show_employee', employee_id=delegation.delegate)) }}
++  {{ field("starts_on", delegation.starts_on) }}
++  {{ field("ends_on", delegation.ends_on) }}
++</dl>
++
++{% if can_delete %}
++<form method="post" action="{{ url_for('ui.delete_delegation', delegation_id=delegation.id) }}">
++  <button type="submit">Delete delegation</button>
++</form>
++{% endif %}
++{% endblock %}
+--- a/expenses_app/templates/delegations/list.html
++++ b/expenses_app/templates/delegations/list.html
+@@ -0,0 +1,20 @@
++{% extends "base.html" %}
++{% block title %}Delegations{% endblock %}
++{% block content %}
++<h1>Delegations</h1>
++{% if ctx.role == "manager" %}<p><a href="{{ url_for('ui.new_delegation') }}">New delegation</a></p>{% endif %}
++<table>
++  <thead><tr><th>Delegation</th><th>Delegator</th><th>Delegate</th><th>Starts on</th><th>Ends on</th></tr></thead>
++  <tbody>
++  {% for delegation in delegations %}
++    <tr data-id="{{ delegation.id }}">
++      <td><a href="{{ url_for('ui.show_delegation', delegation_id=delegation.id) }}">#{{ delegation.id }}</a></td>
++      <td>{{ delegation.delegator }}</td>
++      <td>{{ delegation.delegate }}</td>
++      <td>{{ delegation.starts_on }}</td>
++      <td>{{ delegation.ends_on }}</td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/expenses_app/templates/delegations/new.html
++++ b/expenses_app/templates/delegations/new.html
+@@ -0,0 +1,15 @@
++{% extends "base.html" %}
++{% block title %}New delegation{% endblock %}
++{% block content %}
++<h1>New delegation</h1>
++<form data-create="delegations" method="post" action="{{ url_for('ui.create_delegation') }}">
++  <label>Delegate
++    <select name="delegate">
++      {% for manager in managers %}<option value="{{ manager.id }}">{{ manager.name }} ({{ manager.username }})</option>{% endfor %}
++    </select>
++  </label>
++  <label>Starts on <input name="starts_on" type="date" required></label>
++  <label>Ends on <input name="ends_on" type="date" required></label>
++  <button type="submit">Create</button>
++</form>
++{% endblock %}
+--- a/expenses_app/validation.py
++++ b/expenses_app/validation.py
+@@ -7,7 +7,9 @@
+ Field checkers raise ``FieldInvalid``; ``collect`` records that message against a field.
+ """
+ import math
++import re
+ from contextlib import contextmanager
++from datetime import date
+ 
+ from .errors import ValidationError
+ 
+@@ -63,6 +65,28 @@
+     return value
+ 
+ 
++def required_record_id(value):
++    if value is None:
++        raise FieldInvalid("required")
++    return optional_record_id(value)
++
++
++_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
++
++
++def required_date(value):
++    """A ``YYYY-MM-DD`` string naming a real calendar date; returned unchanged."""
++    if value is None:
++        raise FieldInvalid("required")
++    if not isinstance(value, str) or not _DATE.fullmatch(value):
++        raise FieldInvalid("must be a date (YYYY-MM-DD)")
++    try:
++        date.fromisoformat(value)
++    except ValueError:
++        raise FieldInvalid("must be a date (YYYY-MM-DD)")
++    return value
++
++
+ def optional_record_id(value):
+     if value is None:
+         return None
+@@ -88,6 +112,11 @@
+ CLAIM_WRITABLE = ("amount", "category", "description")
+ # Maintained by the workflow actions; clients sending them get a 400.
+ CLAIM_READ_ONLY = ("id", "employee", "status", "submitted_at", "decided_at", "decided_by", "rejection_reason")
++
++
++DELEGATION_WRITABLE = ("delegate", "starts_on", "ends_on")
++# ``delegator`` is always the creator.
++DELEGATION_READ_ONLY = ("id", "delegator")
+ 
+ 
+ def clean_employee(data, *, partial):
+@@ -125,6 +154,22 @@
+     return values
+ 
+ 
++def clean_delegation(data):
++    """Body of a new delegation. The ``delegate`` reference is checked in ``services``."""
++    data = require_object(data)
++    errors = unknown_field_errors(data, DELEGATION_WRITABLE, read_only=DELEGATION_READ_ONLY)
++    values = {}
++    with collect(errors, "delegate"):
++        values["delegate"] = required_record_id(data.get("delegate"))
++    for name in ("starts_on", "ends_on"):
++        with collect(errors, name):
++            values[name] = required_date(data.get(name))
++    if "starts_on" not in errors and "ends_on" not in errors and values["ends_on"] < values["starts_on"]:
++        errors["ends_on"] = "must not be before starts_on"
++    raise_if_errors(errors)
++    return values
++
++
+ def clean_reject_params(data):
+     data = require_object(data)
+     errors = unknown_field_errors(data, ("reason",))
+--- a/tests/test_expenses_delegations.py
++++ b/tests/test_expenses_delegations.py
+@@ -0,0 +1,225 @@
++"""Approval delegation: the delegations collection and the rights an active delegation grants.
++
++Seed hierarchy used here: marco (2) manages omar (4), quinn (6), tariq (9), wen (12), zoe (15);
++omar (4, a manager) manages priya (5), sam (8), victor (11), yusuf (14); nadia (3) manages
++rosa (7), uma (10), xena (13). Claim 2 (victor) and claim 43 (omar) are submitted.
++"""
++import io
++import os
++import sqlite3
++import sys
++from urllib.parse import urlencode
++
++from accept_client import parse_ui
++
++NOW = "2026-03-02T09:30:00"
++SPAN = {"starts_on": "2026-03-01", "ends_on": "2026-03-05"}
++
++
++def delegate(app, delegator, delegate_id, span=SPAN):
++    r = app.post("/api/delegations", {"delegate": delegate_id, **span}, user=delegator, now=NOW)
++    assert r.status == 201, r.json
++    return r.json
++
++
++def ids(app, path, user, now=NOW):
++    return [record["id"] for record in app.get(path, user=user, now=now).json["items"]]
++
++
++def actions(app, claim_id, user, now=NOW):
++    return parse_ui(app.get(f"/ui/claims/{claim_id}", user=user, now=now).text).actions
++
++
++# --- the collection -------------------------------------------------------------------
++
++def test_no_delegations_initially(app):
++    assert app.get("/api/delegations", user="fiona").json == {"items": []}
++    conn = sqlite3.connect(os.path.join(app.workdir, "data.db"))
++    assert conn.execute("SELECT COUNT(*) FROM delegations").fetchone()[0] == 0
++    conn.close()
++
++
++def test_manager_creates_delegation_for_themselves(app):
++    r = app.post("/api/delegations", {"delegate": 3, **SPAN}, user="omar", now=NOW)
++    assert r.status == 201
++    assert r.json == {"id": r.json["id"], "delegator": 4, "delegate": 3, **SPAN}
++    assert app.get(f"/api/delegations/{r.json['id']}", user="omar").json == r.json
++
++
++def test_only_managers_create_delegations(app):
++    for user in ("priya", "fiona"):
++        assert app.post("/api/delegations", {"delegate": 3, **SPAN}, user=user).status == 403
++        assert app.post("/api/delegations", {"delegator": 9}, user=user).status == 403  # 403 beats 400
++
++
++def test_delegation_validation(app):
++    def status(body):
++        return app.post("/api/delegations", body, user="omar").status
++
++    r = app.post("/api/delegations", {"delegate": 3, "delegator": 4, **SPAN}, user="omar")
++    assert r.status == 400 and "delegator" in r.json["fields"]
++    assert status({"delegate": 3, "id": 7, **SPAN}) == 400
++    assert status({"delegate": 3, "colour": "red", **SPAN}) == 400
++    for delegate_id in (4, 5, 1, 999, "3", None):  # self, employee, finance, unknown, not an id, missing
++        r = app.post("/api/delegations", {"delegate": delegate_id, **SPAN}, user="omar")
++        assert r.status == 400 and "delegate" in r.json["fields"], delegate_id
++    r = app.post("/api/delegations", {"delegate": 3, "starts_on": "2026-03-05", "ends_on": "2026-03-04"}, user="omar")
++    assert r.status == 400 and "ends_on" in r.json["fields"]
++    for bad in ("2026-02-30", "01/03/2026", "2026-03-01T00:00:00", 20260301, ""):
++        assert status({"delegate": 3, "starts_on": bad, "ends_on": "2026-03-05"}) == 400, bad
++    r = app.post("/api/delegations", {}, user="omar")
++    assert r.status == 400 and set(r.json["fields"]) == {"delegate", "starts_on", "ends_on"}
++    assert status({"delegate": 3, "starts_on": "2026-03-05", "ends_on": "2026-03-05"}) == 201  # one day
++    assert app.get("/api/delegations", user="fiona").json["items"][-1]["delegator"] == 4
++
++
++def test_delegation_visibility(app):
++    first = delegate(app, "omar", 3)  # omar -> nadia
++    second = delegate(app, "marco", 4)  # marco -> omar
++    assert ids(app, "/api/delegations", "fiona") == [first["id"], second["id"]]
++    assert ids(app, "/api/delegations", "omar") == [first["id"], second["id"]]  # delegator of 1, delegate of 2
++    assert ids(app, "/api/delegations", "nadia") == [first["id"]]
++    assert ids(app, "/api/delegations", "marco") == [second["id"]]
++    assert ids(app, "/api/delegations", "priya") == []
++    assert ids(app, "/api/delegations?delegate=4", "fiona") == [second["id"]]
++    assert app.get(f"/api/delegations/{first['id']}", user="nadia").status == 200
++    assert app.get(f"/api/delegations/{first['id']}", user="marco").status == 403
++    assert app.get(f"/api/delegations/{first['id']}", user="priya").status == 403
++    assert app.get("/api/delegations/999", user="fiona").status == 404
++    assert app.get("/api/delegations?colour=red", user="fiona").status == 400
++
++
++def test_nobody_patches_delegations(app):
++    d = delegate(app, "omar", 3)
++    for user in ("omar", "nadia", "fiona", "priya"):
++        assert app.patch(f"/api/delegations/{d['id']}", {"ends_on": "2026-03-09"}, user=user).status == 403
++    assert app.patch("/api/delegations/999", {}, user="omar").status == 404
++    assert app.get(f"/api/delegations/{d['id']}", user="omar").json == d
++
++
++def test_only_delegator_deletes(app):
++    d = delegate(app, "omar", 3)
++    path = f"/api/delegations/{d['id']}"
++    for user in ("nadia", "fiona", "marco"):
++        assert app.delete(path, user=user).status == 403
++    assert app.delete(path, user="omar").status == 204
++    assert app.get(path, user="omar").status == 404
++    assert app.delete(path, user="omar").status == 404
++
++
++def test_employee_in_a_delegation_cannot_be_deleted(app):
++    new = app.post("/api/employees", {"username": "mia", "name": "Mia", "role": "manager", "manager": None,
++                                      "department": "Ops"}, user="fiona").json
++    d = delegate(app, "omar", new["id"])
++    assert app.delete(f"/api/employees/{new['id']}", user="fiona").status == 409
++    assert app.delete(f"/api/delegations/{d['id']}", user="omar").status == 204
++    assert app.delete(f"/api/employees/{new['id']}", user="fiona").status == 204
++
++
++# --- rights granted by an active delegation -------------------------------------------
++
++def test_active_delegate_reads_and_decides_delegators_claims(app):
++    delegate(app, "omar", 3)  # nadia stands in for omar, 2026-03-01 .. 2026-03-05
++    all_claims = app.get("/api/claims", user="fiona").json["items"]
++    by_employee = lambda *emps: [c["id"] for c in all_claims if c["employee"] in emps]  # noqa: E731
++    # own + own reports + omar's direct reports (not omar's own claims: those are marco's to decide)
++    assert ids(app, "/api/claims", "nadia") == by_employee(3, 7, 10, 13, 5, 8, 11, 14)
++    assert app.get("/api/claims/2", user="nadia", now=NOW).status == 200
++    assert actions(app, 2, "nadia") == ["approve", "reject"]
++    r = app.post("/api/claims/2/approve", {}, user="nadia", now=NOW)
++    assert r.status == 200 and (r.json["status"], r.json["decided_by"], r.json["decided_at"]) == ("approved", 3, NOW)
++    assert app.post("/api/claims/2/approve", {}, user="nadia", now=NOW).status == 409  # same state rules
++    assert app.post("/api/claims/5/reject", {}, user="nadia", now=NOW).status == 400
++    r = app.post("/api/claims/5/reject", {"reason": "No receipt"}, user="nadia", now=NOW)
++    assert r.status == 200 and r.json["decided_by"] == 3 and r.json["rejection_reason"] == "No receipt"
++    assert app.post("/api/claims/4/pay", {}, user="nadia", now=NOW).status == 403  # nothing else is delegated
++
++
++def test_delegator_keeps_all_rights(app):
++    delegate(app, "omar", 3)
++    assert app.get("/api/claims/2", user="omar", now=NOW).status == 200
++    assert actions(app, 2, "omar") == ["approve", "reject"]
++    r = app.post("/api/claims/2/reject", {"reason": "Duplicate"}, user="omar", now=NOW)
++    assert r.status == 200 and r.json["decided_by"] == 4
++
++
++def test_delegation_is_active_only_within_its_dates(app):
++    d = delegate(app, "omar", 3)
++    for now, readable in (("2026-02-28T23:59:59", False), ("2026-03-01T00:00:00", True),
++                          ("2026-03-05T23:59:59", True), ("2026-03-06T00:00:00", False)):
++        assert (app.get("/api/claims/2", user="nadia", now=now).status == 200) is readable, now
++        assert (2 in ids(app, "/api/claims", "nadia", now)) is readable, now
++        assert actions(app, 2, "nadia", now) == (["approve", "reject"] if readable else []), now
++    assert app.post("/api/claims/2/approve", {}, user="nadia", now="2026-03-06T00:00:00").status == 403
++    assert app.post("/api/claims/2/reject", {"reason": "x"}, user="nadia", now="2026-02-28T12:00:00").status == 403
++    assert app.delete(f"/api/delegations/{d['id']}", user="omar").status == 204
++    assert app.get("/api/claims/2", user="nadia", now=NOW).status == 403
++    assert app.post("/api/claims/2/approve", {}, user="nadia", now=NOW).status == 403
++    assert app.get("/ui/claims/2", user="nadia", now=NOW).status == 403
++
++
++def test_nobody_decides_their_own_claim_through_a_delegation(app):
++    delegate(app, "marco", 4)  # omar stands in for marco, who manages omar
++    assert app.get("/api/claims/43", user="omar", now=NOW).status == 200  # own claim
++    assert actions(app, 43, "omar") == []
++    assert app.post("/api/claims/43/approve", {}, user="omar", now=NOW).status == 403
++    assert app.post("/api/claims/43/reject", {"reason": "x"}, user="omar", now=NOW).status == 403
++    assert app.post("/api/claims/3/approve", {}, user="omar", now=NOW).status == 200  # quinn's claim: allowed
++    assert app.post("/api/claims/43/approve", {}, user="marco", now=NOW).json["decided_by"] == 2
++
++
++def test_delegations_do_not_chain(app):
++    delegate(app, "marco", 4)  # marco -> omar
++    delegate(app, "omar", 3)  # omar -> nadia
++    assert app.get("/api/claims/3", user="nadia", now=NOW).status == 403  # quinn reports to marco
++    assert app.get("/api/claims/43", user="nadia", now=NOW).status == 403  # omar's own claim (marco decides)
++    assert app.post("/api/claims/3/approve", {}, user="nadia", now=NOW).status == 403
++    assert app.post("/api/claims/43/approve", {}, user="nadia", now=NOW).status == 403
++    assert app.post("/api/claims/2/approve", {}, user="nadia", now=NOW).status == 200  # omar's report: allowed
++
++
++def test_delegation_to_someone_else_grants_nothing_to_others(app):
++    delegate(app, "omar", 3)
++    assert app.get("/api/claims/2", user="marco", now=NOW).status == 403  # still only the indirect manager
++    assert app.post("/api/claims/2/approve", {}, user="marco", now=NOW).status == 403
++
++
++# --- UI -------------------------------------------------------------------------------
++
++def _post_form(app, path, form, user):
++    data = urlencode(form).encode()
++    environ = {
++        "REQUEST_METHOD": "POST", "PATH_INFO": path, "QUERY_STRING": "", "SERVER_NAME": "test",
++        "SERVER_PORT": "80", "SERVER_PROTOCOL": "HTTP/1.1", "wsgi.version": (1, 0), "wsgi.url_scheme": "http",
++        "wsgi.input": io.BytesIO(data), "wsgi.errors": sys.stderr, "wsgi.multithread": False,
++        "wsgi.multiprocess": False, "wsgi.run_once": False, "CONTENT_LENGTH": str(len(data)),
++        "CONTENT_TYPE": "application/x-www-form-urlencoded", "HTTP_X_USER": user, "HTTP_X_NOW": NOW,
++    }
++    captured = {}
++
++    def start_response(status, headers, exc_info=None):
++        captured.update(status=int(status.split()[0]), headers=dict(headers))
++
++    b"".join(app.wsgi(environ, start_response))
++    return captured["status"], captured["headers"]
++
++
++def test_delegation_pages(app):
++    page = parse_ui(app.get("/ui/delegations/new", user="omar").text)
++    assert page.creates == ["delegations"] and sorted(page.inputs) == ["delegate", "ends_on", "starts_on"]
++    assert app.get("/ui/delegations/new", user="priya").status == 403
++    assert app.get("/ui/delegations/new", user="fiona").status == 403
++
++    status, headers = _post_form(app, "/ui/delegations", {"delegate": "3", **SPAN}, "omar")
++    assert status == 303 and headers["Location"].endswith("/ui/delegations/1")
++    assert _post_form(app, "/ui/delegations", {"delegate": "3", "starts_on": "", "ends_on": ""}, "omar")[0] == 400
++
++    detail = parse_ui(app.get("/ui/delegations/1", user="nadia").text)
++    assert detail.fields == {"delegator": "4", "delegate": "3", **SPAN} and detail.actions == []
++    assert app.get("/ui/delegations/1", user="marco").status == 403
++    assert parse_ui(app.get("/ui/delegations", user="nadia").text).rows == [1]
++    assert parse_ui(app.get("/ui/delegations", user="marco").text).rows == []
++
++    assert _post_form(app, "/ui/delegations/1/delete", {}, "nadia")[0] == 403
++    assert _post_form(app, "/ui/delegations/1/delete", {}, "omar")[0] == 303
++    assert app.get("/api/delegations/1", user="omar").status == 404

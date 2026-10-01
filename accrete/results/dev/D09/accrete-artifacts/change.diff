@@ -1,0 +1,58 @@
+--- a/changes/0003-withdraw-second-approval.yaml
++++ b/changes/0003-withdraw-second-approval.yaml
+@@ -0,0 +1,55 @@
++request: "Withdraw the second-approval rule: every claim needs exactly one approval by the employee's manager, whatever the amount. Status awaiting_second_approval and fields first_approved_by / first_approved_at no longer exist; the second approver's extra read access is removed. Existing awaiting_second_approval claims become approved with decided_by = first_approved_by and decided_at = first_approved_at; already decided claims keep their status, decided_by, decided_at and rejection_reason."
++interpretation: >-
++  Restore the pre-D08 approve/reject actions (allow: employee's manager; guard: status submitted;
++  approve sets approved/decided_at/decided_by for any amount) and the original read rule. Migrate
++  awaiting_second_approval claims to approved with decided_* taken from first_approved_*, then
++  remove the first_approved_by / first_approved_at fields and the awaiting_second_approval enum value.
++  Other claims are untouched apart from losing the removed fields.
++ops:
++  - update_records:
++      entity: claims
++      where: "record.status == 'awaiting_second_approval'"
++      set: {status: "'approved'", decided_by: record.first_approved_by, decided_at: record.first_approved_at}
++  - set_rule:
++      entity: claims
++      rule: read
++      expr: "record.employee == user or record.employee.manager == user or user.role == 'finance'"
++  - change_action:
++      entity: claims
++      name: approve
++      allow: "record.employee.manager == user"
++      guard: "record.status == 'submitted'"
++      effects:
++        - set: {status: "'approved'", decided_at: now, decided_by: user}
++  - change_action:
++      entity: claims
++      name: reject
++      allow: "record.employee.manager == user"
++      guard: "record.status == 'submitted'"
++  - remove_field: {entity: claims, name: first_approved_by}
++  - remove_field: {entity: claims, name: first_approved_at}
++  - change_field: {entity: claims, name: status, values: [draft, submitted, approved, rejected, paid]}
++expect:
++  # migration
++  - {as: fiona, do: "GET /api/claims/21", status: 200, json: {status: approved, decided_by: 4, decided_at: "2026-01-28T08:00:00", rejection_reason: null}}
++  - {as: fiona, do: "GET /api/claims/22", status: 200, json: {status: approved, decided_by: 4, decided_at: "2026-01-11T13:00:00"}}
++  - {as: fiona, do: "GET /api/claims/44", status: 200, json: {status: approved, decided_by: 4, decided_at: "2026-01-19T14:00:00"}}
++  - {as: fiona, do: "GET /api/claims?status=awaiting_second_approval", count: 0}
++  - {as: fiona, do: "GET /api/claims/50", status: 200, json: {status: approved, decided_by: 2}}
++  - {as: fiona, do: "GET /api/claims/17", status: 200, json: {status: paid}}
++  # read access back to original
++  - {as: marco, do: "GET /api/claims/21", status: 403}
++  - {as: omar, do: "GET /api/claims/21", status: 200}
++  # migrated claims can be paid
++  - {as: fiona, do: "POST /api/claims/21/pay", body: {}, status: 200, json: {status: paid}}
++  # single approval for large claims
++  - {as: omar, do: "POST /api/claims/36/approve", body: {}, now: "2026-03-02T09:00:00", status: 200, json: {status: approved, decided_by: 4, decided_at: "2026-03-02T09:00:00"}}
++  - {as: marco, do: "POST /api/claims/36/approve", body: {}, status: 403}
++  - {as: marco, do: "POST /api/claims/36/reject", body: {reason: "x"}, status: 403}
++  - {as: omar, do: "POST /api/claims/36/reject", body: {reason: "no"}, now: "2026-03-02T09:00:00", status: 200, json: {status: rejected, decided_by: 4, rejection_reason: "no"}}
++  - {as: omar, do: "POST /api/claims/36/reject", body: {}, status: 400}
++  - {as: omar, do: "POST /api/claims/21/approve", body: {}, status: 409}
++  - {as: marco, do: "POST /api/claims/21/approve", body: {}, status: 403}
++  - {as: omar, do: "POST /api/claims/2/approve", body: {}, status: 200, json: {status: approved, decided_by: 4}}
++  # removed fields cannot be sent
++  - {as: priya, do: "POST /api/claims", body: {amount: 10, category: travel, description: "x", first_approved_by: 4}, status: 400}

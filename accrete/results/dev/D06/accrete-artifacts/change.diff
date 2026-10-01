@@ -1,0 +1,89 @@
+--- a/changes/0002-bulk-checkout.yaml
++++ b/changes/0002-bulk-checkout.yaml
+@@ -0,0 +1,86 @@
++request: >-
++  Bulk checkout at the desk. New action POST /api/members/{id}/checkout with body
++  {"books": [<book id>, ...]} lends every listed book to member {id}. Librarians only
++  (members, also for themselves -> 403). books must be a non-empty list of distinct ids of
++  existing books, otherwise 400. 409 if the member is inactive, any listed book is not
++  available, or the member's unreturned loans plus the number of listed books would exceed 3;
++  409 wins over 400. All or nothing. On success one loan per book in list order, exactly as a
++  single borrow (borrowed_at = now, due_at = today + 14 days), one loan_created message per
++  loan in the same order with payload {loan, book, member}. Returns the member record. The
++  member detail page shows a checkout form to librarians.
++interpretation: >-
++  Add action members.checkout(books) allowed to librarians only. The guard (409) holds when the
++  member is active and, if books is a list, every listed existing book is available and
++  unreturned loans + len(books) <= 3 (the number of listed entries; unknown ids are ignored by
++  the availability check so they fall through to 400). If books is not a list, only the
++  inactive check can produce a 409. Validation effects then fail with 400 for a missing /
++  non-list / empty list, duplicate ids or ids that are not ids of existing books (exact integer
++  match). Since the guard caps the total at 3, at most 3 books can be listed on success, so the
++  loan creation + loan_created emit is unrolled for list positions 0..2, in list order. Effects
++  run atomically, so any failure leaves no loan, status change or outbox message.
++ops:
++  - add_action:
++      entity: members
++      name: checkout
++      params: {books: list}
++      allow: "user.role == 'librarian'"
++      guard: >-
++        record.active
++        and (not (params.books is not None and str(params.books)[:1] == '[' and params.books == [x for x in params.books])
++             or (all([b.status == 'available' for b in books if b.id in params.books])
++                 and count(loans, member=record, returned_at=None) + len(params.books) <= 3))
++      guard_message: "'member is inactive, a listed book is not available, or the member would exceed 3 unreturned loans'"
++      effects:
++        - fail: "'books must be a non-empty list of book ids'"
++          status: 400
++          when: >-
++            not (params.books is not None and str(params.books)[:1] == '[' and params.books == [x for x in params.books])
++            or len(params.books) == 0
++        - fail: "'books must not contain duplicate ids'"
++          status: 400
++          when: "any([len([y for y in params.books if y == x]) > 1 for x in params.books])"
++        - fail: "'books must contain only ids of existing books'"
++          status: 400
++          when: "not all([any([b.id == x and str(b.id) == str(x) for b in books]) for x in params.books])"
++        - fail: "'too many books'"
++          status: 409
++          when: "len(params.books) > 3"
++        - create: loans
++          as: loan1
++          values: {book: "first(books, id=params.books[0])", member: record, borrowed_at: now, due_at: "today + days(14)"}
++        - emit: loan_created
++          payload: {loan: loan1, book: "first(books, id=params.books[0])", member: record}
++        - if: "len(params.books) >= 2"
++          then:
++            - create: loans
++              as: loan2
++              values: {book: "first(books, id=params.books[1])", member: record, borrowed_at: now, due_at: "today + days(14)"}
++            - emit: loan_created
++              payload: {loan: loan2, book: "first(books, id=params.books[1])", member: record}
++        - if: "len(params.books) >= 3"
++          then:
++            - create: loans
++              as: loan3
++              values: {book: "first(books, id=params.books[2])", member: record, borrowed_at: now, due_at: "today + days(14)"}
++            - emit: loan_created
++              payload: {loan: loan3, book: "first(books, id=params.books[2])", member: record}
++expect:
++  - name: "librarian lends two books in one step"
++    steps:
++      - {as: ada, do: "POST /api/members/3/checkout", body: {books: [3, 2]}, now: "2026-03-01T10:00:00", status: 200, json: {id: 3, username: chen}}
++      - {as: ada, do: "GET /api/books/3", json: {status: on_loan}}
++      - {as: ada, do: "GET /api/books/2", json: {status: on_loan}}
++  - {as: chen, do: "POST /api/members/3/checkout", body: {books: [2]}, status: 403}
++  - {as: chen, do: "POST /api/members/4/checkout", body: {books: [2]}, status: 403}
++  - {as: ada, do: "POST /api/members/999/checkout", body: {books: [2]}, status: 404}
++  - {as: ada, do: "POST /api/members/3/checkout", body: {}, status: 400}
++  - {as: ada, do: "POST /api/members/3/checkout", body: {books: []}, status: 400}
++  - {as: ada, do: "POST /api/members/3/checkout", body: {books: 2}, status: 400}
++  - {as: ada, do: "POST /api/members/3/checkout", body: {books: "2"}, status: 400}
++  - {as: ada, do: "POST /api/members/3/checkout", body: {books: [2, 2]}, status: 400}
++  - {as: ada, do: "POST /api/members/3/checkout", body: {books: [2, 9999]}, status: 400}
++  - {as: ada, do: "POST /api/members/3/checkout", body: {books: [2, 1]}, status: 409}
++  - {as: ada, do: "POST /api/members/3/checkout", body: {books: [2, 3, 6]}, status: 409}
++  - {as: ada, do: "POST /api/members/12/checkout", body: {books: [2]}, status: 409}
++  - {as: ada, do: "POST /api/members/12/checkout", body: {}, status: 409}
++  - {as: ada, do: "POST /api/members/3/checkout", body: {books: [1, 9999]}, status: 409}
