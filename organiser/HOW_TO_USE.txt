@@ -1,5 +1,14 @@
 MESSAGE ORGANISER - runs only on your own computer. Nothing is uploaded anywhere.
 
+QUICK START (Windows)
+ 1. Phone, once: install "SMS Backup & Restore" (SyncTech) -> Back up now -> save to "Your phone".
+ 2. Plug the phone in, unlock it, tap the USB notification -> "File transfer".
+ 3. Double-click start_organiser_windows.bat. It finds the newest backup on the phone, copies it, imports it
+    (never twice) and opens the organiser in your browser.
+ Later: tap "Back up now" on the phone again, plug in, double-click - only new messages are added.
+
+Detailed steps (and Mac) below.
+
 A. ON YOUR SAMSUNG PHONE (one time, ~5 minutes)
  1. Open the Play Store (or Galaxy Store), install "SMS Backup & Restore" by SyncTech.
  2. Open it -> "Set up a backup" -> switch ON "Messages" (Call logs optional) -> Next.

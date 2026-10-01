@@ -9,7 +9,7 @@ def _t(ms): return dt.datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M
 def main(argv=None):
     p = argparse.ArgumentParser(prog="organiser"); p.add_argument("--db", default=DB)
     sp = p.add_subparsers(dest="cmd", required=True)
-    s = sp.add_parser("import"); s.add_argument("file"); s.add_argument("--month-first", action="store_true")
+    s = sp.add_parser("import"); s.add_argument("file"); s.add_argument("--month-first", action="store_true"); s.add_argument("--skip-if-imported", action="store_true")
     sp.add_parser("coverage"); sp.add_parser("contacts")
     s = sp.add_parser("search"); s.add_argument("text", nargs="?"); s.add_argument("--contact"); s.add_argument("--from", dest="start")
     s.add_argument("--to", dest="end"); s.add_argument("--job"); s.add_argument("--sent", action="store_true"); s.add_argument("--received", action="store_true")
@@ -24,6 +24,10 @@ def main(argv=None):
         S.delete_all(a.db); print("deleted the archive, its search index and all interpretations:", a.db); return 0
     db = S.open_db(a.db)
     if a.cmd == "import":
+        import hashlib
+        sha = hashlib.sha256(open(a.file, "rb").read()).hexdigest()
+        if a.skip_if_imported and db.execute("select 1 from imports where file_sha256=?", (sha,)).fetchone():
+            print("this backup was already imported; nothing to do"); return 0
         r = S.import_file(db, a.file); A.recompute_absences(db, day_first=not a.month_first)
         print(f"parsed {r['parsed']} (declared by backup: {r['declared']}), added {r['added']}, duplicates skipped {r['duplicates']}, errors {r['errors']}")
         print(f"sms {r['sms']}, mms {r['mms']} (of which RCS-like {r['rcs_like']}); range {r['first_ms'] and _t(r['first_ms'])} .. {r['last_ms'] and _t(r['last_ms'])}")
