@@ -3,7 +3,7 @@
  "tests": "/home/user/Journeymandigital/accrete/challenges/base/test_maintenance_base.py",
  "passed": 50,
  "total": 50,
- "seconds": 2.82,
+ "seconds": 1.99,
  "results": [
   {
    "test": "challenges.base.test_maintenance_base::test_missing_and_unknown_user_are_401",

@@ -3,7 +3,7 @@
  "tests": "/home/user/Journeymandigital/accrete/challenges/base/test_library_base.py",
  "passed": 59,
  "total": 59,
- "seconds": 0.91,
+ "seconds": 0.74,
  "results": [
   {
    "test": "challenges.base.test_library_base::test_missing_user_is_401_with_error_shape",
