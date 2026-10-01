@@ -1,0 +1,25 @@
+{
+ "id": "D08",
+ "system": "accrete",
+ "app": "expenses",
+ "categories": [
+  "rule_change",
+  "permissions",
+  "data_migration",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 12,
+ "hidden_total": 12,
+ "hidden_failures": [],
+ "base_checked": 39,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "t_start": 1790818679.7826319,
+ "t_end": 1790818761.2052438,
+ "self_timed_s": 81.4,
+ "duration_ms": 93416,
+ "tool_uses": 14,
+ "tokens": 71769
+}
