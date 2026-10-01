@@ -66,3 +66,47 @@ patched engine, pass:
 This shows the engine-level nature of these failures. It also shows a property of the design:
 a fix in the engine reaches every application built on it, with no change to the applications.
 The flip side is C1: the change pipeline does not check engine upgrades.
+
+# v2 (second phase; v1 preserved in archive/v1/)
+
+Evidence used for v2 design:
+- the v1 agents' tool-call traces (`results/v1_step_analysis.txt`);
+- the planted-bug study rounds 1–3 (`results/v2/planted/`; development evidence);
+- the 28 original challenges, rerun as development comparisons.
+
+| # | Change | Evidence | Notes |
+|---|---|---|---|
+| V1 | `accrete context`: one-screen overview (model, users by role, two sample API records per collection, ledger, exact request semantics) | v1 agents spent about 4 calls per change reading files and probing data with `accrete call` | |
+| V2 | `expect` supports UI pages (`ui:` fields, actions, inputs, rows) | v1 agents spent about 2.7 calls per change writing ad-hoc UI check scripts | |
+| V3 | `apply --notes` writes CHANGE_NOTES.md from the change and its report; `NEXT:` hints on every rejection | notes and post-rejection diagnosis took about 2 calls per change | |
+| V4 | Engine-upgrade gate: every commit stores probes, responses and data; `accrete upgrade-check` replays them on the installed engine | v1 finding C1 (an engine change broke an app silently) | |
+| V5 | Escape hatch: `add_function` / `change_function` / `remove_function` (sandboxed pure Python). Static name/attribute checks; calls treated as reading everything (conservative); renames a body still uses are rejected | gaps that change files cannot express | guarantees and limits in GUIDE.md; 8 interaction tests |
+| V6 | PE1/PE2 (unknown filters 400, required text non-empty) carried into v2 | v1 evaluation failures | |
+| P1 | Probes also compare the records a request **writes** (not only its response) | planted engine bugs `days+1`/`count+1` changed stored loans that no response showed | write differences are explained by field labels, or by the operation's effects label |
+| P2 | Footprint labels split: action `allow` (403) / `guard` (409) / `params` (400) / `effects`; rule vs `*_guard` | planted round 1: a change that legitimately edited an action's `allow` made every behaviour of that action "intended", hiding planted guard bugs | old labels (e.g. `books.action:borrow`) still cover their parts |
+| P3 | Probe additions (filters incl. unknown field, empty create, fractional numbers, duplicate unique values, PATCH of each writable field, users editing their own record); engine-upgrade snapshots use every user and up to 40 records | planted engine round 1 misses | see below |
+| P4 | Scope warnings: edits to elements the request/interpretation never mention are flagged (not rejected) | planted rounds: "stray" edits declared by operators are invisible to replay by design | measured hit rate and false-alarm rate |
+
+**Coverage regression in P3, and the fix.** Round 2 of the engine study lost detections that
+round 1 had: `unique-skipped` 31/31 → 0/31 and `write-if-ignored`. The cause: P3 had *replaced*
+the v1 PATCH probe instead of adding to it. The v1 probe wrote the *last* record's value into the
+*first* record, which by accident violated uniqueness and exercised field permissions. Fix:
+- `generate_probes` now returns every v1 probe verbatim (the v1 function is kept as `_probes_v1`)
+  followed by the additions, so the requests compared can only grow;
+- `harness/coverage_guard.py` checks after each round that nothing an earlier round detected is
+  now missed.
+
+**Round 2 vs round 1 for change mutants:** 14 gained, 9 lost. All 9 losses were explained:
+- 8 E03 mutants had been "detected" in round 1 only because the **unmutated** E03 change was also
+  rejected. Round 1 replayed at a fixed date (2026-03-01), where E03 really does alter `overdue`.
+  From round 2 on, each change is replayed at its original run time.
+- 1 E04 mutant was detected in round 1 only through the same time-dependent `overdue`
+  difference.
+
+Neither was a loss of real coverage. Both show a real limitation: **replay observes behaviour at
+one point in time**, so time-dependent consequences can be missed.
+
+**No tuning on reported numbers.** The dev rounds above are development evidence. The reported
+reliability (`docs/RELIABILITY.md`) is measured once, after the v2 freeze, on held-out bugs:
+- engine regressions written by an independent agent who never saw the development mutants;
+- change mutants generated from the fresh evaluation set's changes with a new seed.

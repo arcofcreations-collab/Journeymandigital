@@ -1,0 +1,16 @@
+{
+ "id": "D02",
+ "set": "dev",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "library",
+ "categories": [
+  "new_concept",
+  "cross_cutting",
+  "rule_change"
+ ],
+ "expect_rejection": false,
+ "version": "fe1610b+dirty",
+ "attempts": [],
+ "extra": []
+}

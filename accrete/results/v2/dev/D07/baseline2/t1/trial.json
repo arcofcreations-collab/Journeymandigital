@@ -1,0 +1,15 @@
+{
+ "id": "D07",
+ "set": "dev",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "version": "fe1610b+dirty",
+ "attempts": [],
+ "extra": []
+}

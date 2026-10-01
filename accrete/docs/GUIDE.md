@@ -94,6 +94,40 @@ replay they are the verification of a change; `accrete call` answers ad hoc ques
 5. **Expectations** run. Then the change is committed with its report and its inverse in
    the ledger.
 
+## How far to trust the checks (measured)
+
+The pipeline was tested with deliberately planted bugs: about 300 mutants of 26 real changes,
+plus planted engine regressions. Details are in `docs/RELIABILITY.md`.
+
+**What you can rely on.** If a change of this kind is wrong, `apply` rejects it:
+- **An expression that no longer resolves**: static check, about 100%.
+- **Existing records that would violate the new model** (required, enum, reference,
+  uniqueness, constraints): data check, about 100% of the violations it is told about.
+- **A request that now crashes (500)**: replay.
+- **Behaviour that changed only through dependencies**: something your operators did not
+  touch, but which reads what they changed. Replay rejects it as a CONSEQUENCE with examples.
+  This is caught *when the probes exercise it*, which happened for only part of the planted
+  cases. Probes sample a few records and users per role, at one point in time, so consequences
+  that only show for other records, other users, or other dates can be missed.
+
+**What the checks do NOT tell you.** In the planted-bug study:
+- **Your operators being right.** If an operator itself is wrong (a flipped condition, wrong
+  constant, wrong permission, wrong backfill), the pipeline treats the difference as intended.
+  Automatic checks caught under 15% of such slips. The implementers' own `expect` entries caught
+  about 90%. **Your expectations are the test of the request.** Write one per acceptance
+  criterion, per role the request mentions, plus at least one for behaviour that must stay the
+  same, and include UI expectations when the request mentions the UI.
+- **Edits outside the request.** An operator that changes something the request does not ask for
+  is also "intended" as far as replay knows. `SCOPE` warnings flag edits to elements that the
+  request and interpretation never mention. Read every SCOPE line before you finish.
+
+**What follows for your workflow:**
+- You do not need separate test scripts, test-client sessions or a dry run before applying.
+  `apply` runs everything, and a rejected change alters nothing.
+- Spend that effort on good `expect` entries.
+- Read the report's `direct footprint` and `SCOPE` lines once: they list everything your change
+  alters on purpose.
+
 ## Model semantics (what the runtime does for you)
 
 - Collections are entities, at `/api/<entity>`; records have an integer `id`.

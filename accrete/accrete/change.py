@@ -358,6 +358,76 @@ def _close(mdl, fp, seeds_fields, seeds_colls):
 
 # ------------------------------------------------------------------ probes & replay
 def generate_probes(model, world, now, per_entity=3, focus=None, thorough=False):
+    """The probe set = every v1 probe, unchanged, followed by the v2 additions.
+
+    Keeping the v1 set verbatim makes coverage monotonic: a behaviour difference that v1 probes
+    exposed is still exposed (the same requests are still sent and compared). See REVISIONS P3."""
+    seen, out = set(), []
+    for p in _probes_v1(model, world, now, per_entity=per_entity, focus=focus) + _probes_extra(
+            model, world, now, per_entity=per_entity, focus=focus, thorough=thorough):
+        key = json.dumps(p, sort_keys=True, default=str)
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
+
+
+def _probes_v1(model, world, now, per_entity=3, focus=None):
+    """v1 probe set, kept verbatim (see generate_probes). Requests that exercise every collection, record operation and action as several users.
+
+    ``focus`` maps entity id -> record ids whose stored data the change touched; those records
+    are always probed, because their dependent behaviour is where consequences show up."""
+    probes = []
+    ue = M.user_entity(model)
+    users = [None]
+    if ue:
+        key = model["users"]["key"]
+        recs = R.records(world, ue["id"])
+        groups = {}
+        enum_fields = [f["id"] for f in ue["fields"].values() if f["type"] in ("enum", "bool") and not f.get("computed")]
+        for rid in sorted(recs):
+            sig = tuple(recs[rid].get(f) for f in enum_fields)
+            groups.setdefault(sig, []).append(recs[rid].get(key))
+        for names in groups.values():
+            users += names[:2]
+    t = now.isoformat()
+    for e in model["entities"].values():
+        coll = e["name"]
+        ids = sorted(R.records(world, e["id"]))
+        sample = ids[:per_entity] + ids[-per_entity:] if len(ids) > 2 * per_entity else list(ids)
+        for rid in sorted((focus or {}).get(e["id"], ()))[:40]:
+            if rid not in sample and rid in R.records(world, e["id"]):
+                sample.append(rid)
+        for u in users:
+            probes.append({"method": "GET", "path": f"/api/{coll}", "query": {}, "body": None, "user": u, "now": t})
+            for rid in sample:
+                probes.append({"method": "GET", "path": f"/api/{coll}/{rid}", "query": {}, "body": None, "user": u, "now": t})
+                for a in e["actions"].values():
+                    probes.append({"method": "POST", "path": f"/api/{coll}/{rid}/{a['name']}", "query": {},
+                                   "body": {}, "user": u, "now": t})
+            if ids:
+                src = R.records(world, e["id"])[ids[-1]]
+                body = {}
+                for f in e["fields"].values():
+                    if f.get("computed") or f.get("system"):
+                        continue
+                    v = src.get(f["id"])
+                    if f.get("unique") and isinstance(v, str):
+                        v = v + "-probe"
+                    if v is not None:
+                        body[f["name"]] = v
+                probes.append({"method": "POST", "path": f"/api/{coll}", "query": {}, "body": body, "user": u, "now": t})
+                first = next((f for f in M.ordered_fields(e) if not f.get("computed") and not f.get("system")), None)
+                if first is not None:
+                    probes.append({"method": "PATCH", "path": f"/api/{coll}/{ids[0]}", "query": {},
+                                   "body": {first["name"]: src.get(first["id"]) if first["type"] != "ref" else src.get(first["id"])},
+                                   "user": u, "now": t})
+                probes.append({"method": "DELETE", "path": f"/api/{coll}/{ids[-1]}", "query": {}, "body": None, "user": u, "now": t})
+    probes.append({"method": "GET", "path": "/api/_outbox", "query": {}, "body": None, "user": users[-1], "now": t})
+    return probes
+
+
+def _probes_extra(model, world, now, per_entity=3, focus=None, thorough=False):
     """Requests that exercise every collection, record operation and action as several users.
 
     ``focus`` maps entity id -> record ids whose stored data the change touched; those records
@@ -421,14 +491,25 @@ def generate_probes(model, world, now, per_entity=3, focus=None, thorough=False)
                     if v is not None:
                         body[f["name"]] = v
                 probes.append({"method": "POST", "path": f"/api/{coll}", "query": {}, "body": body, "user": u, "now": t})
-                frac = {k: (v + 0.125 if isinstance(v, float) else v) for k, v in body.items()}
+                numeric = {f["name"] for f in writable if f["type"] == "number"}
+                frac = {k: (float(v) + 0.125 if k in numeric and isinstance(v, (int, float)) and not isinstance(v, bool) else v)
+                        for k, v in body.items()}
                 if frac != body:
                     probes.append({"method": "POST", "path": f"/api/{coll}", "query": {}, "body": frac, "user": u, "now": t})
+                dup = {f["name"]: src.get(f["id"]) for f in writable if src.get(f["id"]) is not None}
+                if any(f.get("unique") for f in writable) and dup != body:
+                    probes.append({"method": "POST", "path": f"/api/{coll}", "query": {}, "body": dup, "user": u, "now": t})
                 probes.append({"method": "POST", "path": f"/api/{coll}", "query": {}, "body": {}, "user": u, "now": t})
                 for f in writable:
                     probes.append({"method": "PATCH", "path": f"/api/{coll}/{ids[0]}", "query": {},
                                    "body": {f["name"]: first_rec.get(f["id"])}, "user": u, "now": t})
                 probes.append({"method": "DELETE", "path": f"/api/{coll}/{ids[-1]}", "query": {}, "body": None, "user": u, "now": t})
+            if ue and e["id"] == ue["id"] and u is not None:
+                own = next((rid for rid, d in R.records(world, e["id"]).items() if d.get(model["users"]["key"]) == u), None)
+                if own is not None:
+                    for f in writable:
+                        probes.append({"method": "PATCH", "path": f"/api/{coll}/{own}", "query": {},
+                                       "body": {f["name"]: R.records(world, e["id"])[own].get(f["id"])}, "user": u, "now": t})
     probes.append({"method": "GET", "path": "/api/_outbox", "query": {}, "body": None, "user": users[-1], "now": t})
     return probes
 

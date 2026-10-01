@@ -1,0 +1,305 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D07/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/base/test_library_base.py",
+ "passed": 59,
+ "total": 59,
+ "seconds": 0.69,
+ "results": [
+  {
+   "test": "challenges.base.test_library_base::test_missing_user_is_401_with_error_shape",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_unknown_user_is_401",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_401_takes_precedence_over_404",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_unknown_collection_record_and_action_are_404",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_404_takes_precedence_over_403",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_any_user_reads_all_books_ascending",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_book_fields_and_derived_status",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_book_status_for_whole_catalogue",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_books_filter_by_text_and_integer",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_sees_only_own_member_record",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_librarian_sees_all_members_and_boolean_filter",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_sees_only_own_loans",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_librarian_sees_all_loans_and_reference_filter",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_list_filter_respects_read_permission",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_cannot_read_other_members_loan",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_overdue_derived_field",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_overdue_uses_now_date_boundary",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_borrows_for_self",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_borrow_due_date_crosses_month_end",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_borrow_book_on_loan_is_409",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_borrow_member_with_three_open_loans_is_409",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_borrow_allowed_again_after_return_drops_below_limit",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_with_two_open_loans_may_borrow_third",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_librarian_lends_to_member",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_lending_to_inactive_member_is_409",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_lending_to_reactivated_member_succeeds",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_lending_to_deactivated_member_is_409",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_borrowing_for_someone_else_is_403",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_passing_own_id_may_borrow",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_failed_borrows_emit_no_outbox_message",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_outbox_readable_by_any_authenticated_user",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_borrower_returns_loan",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_librarian_returns_overdue_loan",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_returned_book_can_be_borrowed_again",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_return_already_returned_is_409",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_return_by_other_member_is_403",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_loans_cannot_be_created_patched_or_deleted",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_librarian_creates_book",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_book_year_is_optional",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_book_create_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_cannot_write_books",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_librarian_updates_book",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_book_update_duplicate_isbn_is_400",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_delete_book_without_loans",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_delete_book_with_loans_is_409",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_librarian_creates_member_with_default_active",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_create_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_cannot_create_or_delete_members",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_librarian_deletes_member_without_loans",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_updates_own_name_only",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_member_cannot_update_other_member",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_librarian_updates_member_and_role_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_ui_lists_follow_read_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_ui_book_detail_fields_and_borrow_action",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_ui_loan_detail_return_action",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_ui_detail_permissions_and_404",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_ui_member_detail",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_ui_create_forms",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.base.test_library_base::test_ui_create_forms_forbidden",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

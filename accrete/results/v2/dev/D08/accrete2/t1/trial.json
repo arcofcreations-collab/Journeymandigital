@@ -1,0 +1,17 @@
+{
+ "id": "D08",
+ "set": "dev",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "expenses",
+ "categories": [
+  "rule_change",
+  "permissions",
+  "data_migration",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "version": "fe1610b+dirty",
+ "attempts": [],
+ "extra": []
+}

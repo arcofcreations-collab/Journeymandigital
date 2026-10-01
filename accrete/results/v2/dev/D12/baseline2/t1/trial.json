@@ -1,0 +1,17 @@
+{
+ "id": "D12",
+ "set": "dev",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "expenses",
+ "categories": [
+  "new_relationship",
+  "data_migration",
+  "cross_cutting",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "version": "fe1610b+dirty",
+ "attempts": [],
+ "extra": []
+}
