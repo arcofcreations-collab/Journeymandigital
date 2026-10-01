@@ -109,7 +109,8 @@ replay they are the verification of a change; `accrete call` answers ad hoc ques
 - Deleting a record still referenced by another record gives 409 automatically. A reference
   field may say otherwise with `on_delete: cascade` (delete the referencing records too, running
   their delete triggers) or `on_delete: nullify` (clear the reference, or drop the id from a list).
-- `GET /api/_outbox?channel=x` filters messages like any list.
+- `GET /api/_outbox?channel=x` filters messages like any list. Filtering a collection on a field it does not have is a 400.
+- A `required` text field rejects empty and whitespace-only input (400).
 - Error precedence: 401, 404, 403, 409, 400. Unknown or missing `X-User`: 401.
 
 ## Expression language (safe Python subset)

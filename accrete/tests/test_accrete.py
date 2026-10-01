@@ -168,3 +168,10 @@ def test_on_delete_policies(lib):
 
 def test_restrict_is_default(lib):
     assert call(lib, "DELETE", "/api/members/3", "ada")[0] == 409  # chen has loans
+
+
+def test_unknown_filter_and_blank_required_text(lib):
+    assert call(lib, "GET", "/api/books", "ada", query={"bogus": "1"})[0] == 400
+    assert call(lib, "GET", "/api/books", "ada", query={"year": "2005"})[0] == 200
+    st, out = call(lib, "POST", "/api/books", "ada", {"title": "  ", "author": "A", "isbn": "x-9"})
+    assert st == 400 and "title" in out["fields"]
