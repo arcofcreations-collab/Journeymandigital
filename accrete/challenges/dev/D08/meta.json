@@ -1,0 +1,23 @@
+{
+ "id": "D08",
+ "app": "expenses",
+ "categories": [
+  "rule_change",
+  "permissions",
+  "data_migration",
+  "conflict_or_ambiguity"
+ ],
+ "depends_on": null,
+ "expect_rejection": false,
+ "brief": "Second approval for large claims\n\nAudit wants a second sign-off on high-value claims.\n\nRule: a claim with `amount` greater than 1000.00 needs two approvals when the employee's manager has a manager: first the employee's manager, then that manager's own manager (the \"second approver\"). Claims of 1000.00 or less, and claims whose employee's manager has no manager, keep the single approval exactly as today.\n\nNew claim status `awaiting_second_approval`. New claim fields `first_approved_by` (reference to employees, or null) and `first_approved_at` (datetime, or null). Clients cannot set them (sending them on create or PATCH -> 400), like the other workflow fields.\n\n- `POST /api/claims/{id}/approve` by the employee's manager on a `submitted` claim that needs two approvals: `status` = `awaiting_second_approval`, `first_approved_by` = that manager, `first_approved_at` = now; `decided_at` and `decided_by` stay null.\n- On a claim in `awaiting_second_approval`, the second approver may `approve` (-> `approved`, `decided_at` = now, `decided_by` = the second approver) or `reject` with a reason (-> `rejected`, with `decided_at`, `decided_by`, `rejection_reason` set). `first_approved_by` / `first_approved_at` are kept in both cases.\n- Who gets which error on approve/reject: a caller who is neither the employee's manager nor - for a claim currently in `awaiting_second_approval` - its second approver -> 403. In particular the second approver has no rights on the claim at any other stage (403). The employee's manager acting on a claim that is not `submitted` - including one awaiting second approval - -> 409. The reject reason rule is unchanged (400 when missing/empty, checked after 403 and 409).\n- Single-approval claims keep `first_approved_by` / `first_approved_at` null.\n- `pay` still requires `approved`; `awaiting_second_approval` -> 409.\n- Reading: a claim whose `first_approved_by` is not null is also readable (directly and in lists) by its second approver, in addition to the existing readers, also after it has been decided.\n- UI: on a claim awaiting second approval, the second approver sees `approve` and `reject` forms; the first approver sees neither; nobody sees `pay`.\n\nExisting data (required): claims that are currently `approved` (not yet paid), with an amount over 1000.00, whose employee's manager has a manager, must now also get the second approval. Change each of them to `awaiting_second_approval` with `first_approved_by` = its current `decided_by`, `first_approved_at` = its current `decided_at`, and `decided_by` / `decided_at` set to null. All other claims keep their values, with `first_approved_by` / `first_approved_at` null.",
+ "superseded_base_tests": [
+  "test_claim_lists_per_role",
+  "test_claim_list_filters",
+  "test_delete_rules",
+  "test_approve_wrong_state_is_409",
+  "test_finance_pays_approved_claim_and_emits_payment",
+  "test_pay_permissions_and_state",
+  "test_outbox_readable_by_any_user",
+  "test_ui_claim_detail_manager_and_finance_actions"
+ ]
+}

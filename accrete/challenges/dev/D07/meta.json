@@ -1,0 +1,15 @@
+{
+ "id": "D07",
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "conflict_or_ambiguity"
+ ],
+ "depends_on": null,
+ "expect_rejection": false,
+ "brief": "Borrowing restrictions\n\n1. A member who has an overdue loan (an unreturned loan whose `due_at` is before today) cannot borrow: `POST /api/books/{id}/borrow` -> 409. Returning the overdue loan(s) lifts the block.\n2. New releases have a shorter loan period: a book whose `year` is the current year or the previous year is lent for 7 days (`due_at` = today + 7 days). All other books, including books without a `year`, keep 14 days.\n\nOur answers to the questions the team raised (follow these):\n- \"Today\" and \"current year\" come from the request time (`X-Now`, UTC). Example: on 2026-03-01 books from 2025 and 2026 are new releases; on 2025-12-31 books from 2024 and 2025 are.\n- A loan due today is not overdue (it becomes overdue tomorrow), consistent with the existing `overdue` field.\n- The block applies equally when a librarian lends to the member; there is no override.\n- Returns are never blocked.\n- Existing loans keep their due dates; nothing is recalculated.\n\nEverything else is unchanged (3-loan limit, inactive members, the `loan_created` message).",
+ "superseded_base_tests": [
+  "test_member_with_two_open_loans_may_borrow_third",
+  "test_member_borrows_for_self"
+ ]
+}

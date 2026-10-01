@@ -109,10 +109,8 @@ def prepare(cset, cid, system):
 
 
 def _superseded(cset, cid):
-    out = set()
-    for m in chain(cset, cid) + [load_meta(cset, cid)]:
-        out |= set(m.get("superseded_base_tests", []))
-    return out
+    # each challenge lists every base test that is false in the state after it (cumulative over its chain)
+    return set(load_meta(cset, cid).get("superseded_base_tests", []))
 
 
 def verify(cset, cid, system):

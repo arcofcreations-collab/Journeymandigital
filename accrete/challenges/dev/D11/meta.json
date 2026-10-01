@@ -1,0 +1,15 @@
+{
+ "id": "D11",
+ "app": "expenses",
+ "categories": [
+  "failure_atomicity",
+  "new_concept",
+  "new_relationship",
+  "interaction",
+  "sequence"
+ ],
+ "depends_on": "D10",
+ "expect_rejection": false,
+ "brief": "Payment runs\n\n(This change is made on top of the claim history feature: collection `claim_events`, one event per successful submit/approve/reject/pay.)\n\nFinance wants to pay several approved claims in one operation.\n\nNew collection `payment_runs` with fields: `claims` (list of claim ids, in the order given), `total` (number: the sum of those claims' amounts, rounded to 2 decimals), `created_by` (reference to employees, set to the caller), `created_at` (datetime, set to now). Claims get a new field `payment_run` (reference to payment_runs or null): null for all existing claims and for claims paid with the single `pay` action. Clients cannot set `payment_run` on claims (400).\n\n`POST /api/payment_runs` with `{\"claims\": [<claim id>, ...]}`:\n- Finance users only (others -> 403, also with an invalid body).\n- 400 if `claims` is missing, not a list, empty, contains a duplicate or the id of a claim that does not exist, or if the total would exceed 10000.00.\n- 409 if any listed claim is not `approved`. When both a 409 and a 400 condition apply, the 409 wins.\n- On success (201, returns the run): every listed claim becomes `paid` with `payment_run` = the run's id. For each claim, in list order, a `payment` outbox message is emitted with the same payload as the `pay` action and a `pay` claim event is recorded (`actor` = the caller, `at` = now, `approved` -> `paid`). After these, one outbox message on channel `payment_run` with payload `{\"run\": <run id>, \"claims\": [<ids in order>], \"total\": <total>}`.\n- All or nothing: if the request fails for any reason, no claim changes, no outbox message is emitted, no claim event is recorded and no run is created.\n\nRuns are readable only by finance users (others get an empty list and 403 on a single run). Runs cannot be changed or deleted (PATCH / DELETE -> 403 for everyone).\n\nThe single `pay` action is unchanged.",
+ "superseded_base_tests": []
+}

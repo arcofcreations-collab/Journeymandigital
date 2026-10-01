@@ -1,0 +1,13 @@
+{
+ "id": "D10",
+ "app": "expenses",
+ "categories": [
+  "cross_cutting",
+  "new_concept",
+  "data_migration"
+ ],
+ "depends_on": null,
+ "expect_rejection": false,
+ "brief": "Claim history\n\nWe need an audit trail of every status change of a claim.\n\nNew read-only collection `claim_events` with fields: `claim` (reference to claims), `action` (`\"submit\"`, `\"approve\"`, `\"reject\"` or `\"pay\"`), `actor` (reference to employees, or null), `at` (datetime, or null), `from_status` and `to_status` (claim status values).\n\n- Every successful `submit`, `approve`, `reject` and `pay` action records exactly one event: `actor` = the caller, `at` = now, `from_status` / `to_status` = the claim's status before and after the action. A failed action (any error) records nothing. Creating, editing and deleting draft claims record nothing.\n- An event is readable by exactly the users who can read its claim; lists contain only those, and direct access to another event -> 403. `GET /api/claim_events?claim=<id>` lists one claim's events (all fields filter as usual).\n- Nobody can create, PATCH or DELETE events (403 for everyone).\n- Event ids increase in the order events are recorded.\n- This change adds no outbox messages.\n\nExisting data (required): backfill the history of the existing claims from their fields:\n- each claim with a `submitted_at` gets a `submit` event: `actor` = the claim's employee, `at` = `submitted_at`, `draft` -> `submitted`;\n- each claim with a `decided_at` gets an `approve` event (`submitted` -> `approved`) if the claim is now `approved` or `paid`, or a `reject` event (`submitted` -> `rejected`) if it is `rejected`; `actor` = `decided_by`, `at` = `decided_at`;\n- each `paid` claim gets a `pay` event (`approved` -> `paid`) with `actor` = null and `at` = null, because who paid and when was never recorded.\nBackfilled events have lower ids than any event recorded afterwards, and a claim's backfilled events are in the order submit, decision, pay.",
+ "superseded_base_tests": []
+}

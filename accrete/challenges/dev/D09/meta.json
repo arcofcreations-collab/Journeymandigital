@@ -1,0 +1,14 @@
+{
+ "id": "D09",
+ "app": "expenses",
+ "categories": [
+  "reversal",
+  "data_migration",
+  "sequence",
+  "permissions"
+ ],
+ "depends_on": "D08",
+ "expect_rejection": false,
+ "brief": "Withdraw the second-approval rule\n\nThe second-approval rule for large claims (status `awaiting_second_approval`, claim fields `first_approved_by` and `first_approved_at`, extra read access for the second approver) is withdrawn. From now on every claim needs exactly one approval by the employee's manager, whatever the amount - exactly as before that rule was introduced.\n\n- `approve` by the employee's manager on a `submitted` claim sets `status` = `approved`, `decided_at` = now and `decided_by` = the manager, for any amount.\n- The status `awaiting_second_approval` and the fields `first_approved_by` / `first_approved_at` no longer exist: they are not returned on claims and not shown in the UI.\n- A claim is again readable only by its employee, the employee's manager and finance users; the second approver's extra read access is removed.\n\nExisting data (required): every claim currently in `awaiting_second_approval` becomes `approved`, with `decided_by` = its `first_approved_by` and `decided_at` = its `first_approved_at` (the first approval stands). Claims that were already decided (approved or rejected by a second approver, or paid) keep their `status`, `decided_by`, `decided_at` and `rejection_reason`.",
+ "superseded_base_tests": []
+}

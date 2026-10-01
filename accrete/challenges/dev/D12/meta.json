@@ -1,0 +1,14 @@
+{
+ "id": "D12",
+ "app": "expenses",
+ "categories": [
+  "new_relationship",
+  "data_migration",
+  "cross_cutting",
+  "conflict_or_ambiguity"
+ ],
+ "depends_on": null,
+ "expect_rejection": false,
+ "brief": "Itemised claims\n\nA claim can now consist of several line items.\n\nNew collection `claim_lines` with fields: `claim` (reference to claims, required), `amount` (number, required, greater than 0), `description` (text, required).\n\nA claim's `amount` becomes the total of its lines (derived, rounded to 2 decimals).\n- Creating a claim works exactly as before (`amount`, `category`, `description`, same validation) and also creates the claim's first line with that `amount` and `description`.\n- `POST /api/claim_lines` adds a line to a claim; `PATCH /api/claim_lines/{id}` may change `amount` and `description` (changing `claim` -> 400); `DELETE /api/claim_lines/{id}` removes a line. Only the claim's employee may do this (anyone else -> 403), and only while the claim is `draft` (otherwise 409). Missing/invalid fields or an unknown claim id -> 400. A claim's total may never exceed 5000 (-> 400). Deleting a claim's last remaining line -> 409.\n- Backwards compatibility: PATCHing a claim's `amount` is still allowed when the claim has exactly one line, and then sets that line's amount (same validation as before). When the claim has more than one line, PATCHing the claim's `amount` -> 409. PATCHing `category`/`description` of the claim works as before.\n- Lines are readable by exactly the users who can read their claim (lists contain only those; direct access otherwise 403). `GET /api/claim_lines?claim=<id>` lists one claim's lines.\n- Deleting a draft claim also deletes its lines.\n- Everything that uses a claim's amount (the claim's `amount` field, validation, the `payment` message) uses the total.\n\nExisting data (required): every existing claim gets exactly one line whose `id` equals the claim's id, with the claim's current `amount` and `description`. No existing claim's amount changes. New lines get ids above 80.",
+ "superseded_base_tests": []
+}

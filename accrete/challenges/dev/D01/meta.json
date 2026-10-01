@@ -1,0 +1,20 @@
+{
+ "id": "D01",
+ "app": "library",
+ "categories": [
+  "data_migration",
+  "new_relationship",
+  "new_concept",
+  "cross_cutting"
+ ],
+ "depends_on": null,
+ "expect_rejection": false,
+ "brief": "Authors as records\n\nToday a book's `author` is free text. We want authors to be records of their own, and every book to point to one.\n\nNew collection `authors` with fields:\n- `name` (text, required, unique). Missing or duplicate name (on create or update) -> 400.\n- `book_count` (derived, read-only): the number of books whose `author` is this author.\nPermissions: any authenticated user can read all authors. Only librarians can create, update or delete authors (others -> 403). Deleting an author who still has at least one book -> 409.\n\nBooks:\n- `books.author` becomes a reference to `authors` (serialised as the author's integer id). On create and update, `author` must be the id of an existing author; anything else (missing, null, a text name, an unknown id) -> 400.\n- Books get a new derived, read-only field `author_name`: the referenced author's current `name` (it follows renames).\n- `GET /api/books?author=<author id>` filters by author.\n- HTML UI: on the book detail page the `author` field displays the author's name (not the id). The book create form still has an input named `author`. `/ui/authors` lists authors like any other collection.\n\nExisting data (required): every distinct author text found in the existing books becomes exactly one author record whose `name` is that text. Author ids are 1, 2, 3, ... in order of first appearance when the existing books are read in ascending book id order. Every existing book's `author` must reference the author whose `name` equals its previous author text. Book ids, titles, ISBNs, years, loans and members do not change.\n\nEverything else (borrowing, returning, loans, members, who may write books) behaves exactly as before.",
+ "superseded_base_tests": [
+  "test_book_fields_and_derived_status",
+  "test_books_filter_by_text_and_integer",
+  "test_librarian_creates_book",
+  "test_book_year_is_optional",
+  "test_librarian_updates_book"
+ ]
+}

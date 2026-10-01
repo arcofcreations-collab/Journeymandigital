@@ -1,0 +1,13 @@
+{
+ "id": "D06",
+ "app": "library",
+ "categories": [
+  "failure_atomicity",
+  "new_concept",
+  "cross_cutting"
+ ],
+ "depends_on": null,
+ "expect_rejection": false,
+ "brief": "Bulk checkout at the desk\n\nLibrarians want to lend a stack of books to one member in one step.\n\nNew action `POST /api/members/{id}/checkout` with body `{\"books\": [<book id>, ...]}` lends every listed book to member `{id}`.\n- Librarians only; members (also for themselves) -> 403.\n- `books` must be a non-empty list of distinct ids of existing books; otherwise -> 400 (missing, empty, not a list, duplicate ids, unknown book id).\n- 409 if the member is inactive, if any listed book is not `available`, or if the member's unreturned loans plus the number of listed books would exceed 3.\n- When both a 409 and a 400 condition apply, the 409 wins (as everywhere in the API).\n- All or nothing: if the request fails for any reason, no loan is created, no book changes status and no outbox message is emitted.\n- On success: one loan per book is created, in the order listed (ascending loan ids in list order), exactly as a single borrow would create it (`borrowed_at` = now, `due_at` = today + 14 days, `returned_at` = null), and one `loan_created` message per loan is emitted, in the same order, with the usual payload `{\"loan\", \"book\", \"member\"}`. Returns the member record.\n- UI: the member detail page shows a `checkout` form to librarians.\n\nNewly created members can authenticate with their `username`. Single borrowing and returning are unchanged.",
+ "superseded_base_tests": []
+}

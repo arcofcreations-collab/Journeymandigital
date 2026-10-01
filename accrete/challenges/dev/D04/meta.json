@@ -1,0 +1,17 @@
+{
+ "id": "D04",
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "sequence",
+  "interaction",
+  "data_migration",
+  "cross_cutting"
+ ],
+ "depends_on": "D03",
+ "expect_rejection": false,
+ "brief": "Late-return fines\n\n(This change is made on top of holds and loan renewals: `holds`, `POST /api/books/{id}/hold`, `POST /api/holds/{id}/cancel`, `POST /api/loans/{id}/renew`, loan field `renewals`.)\n\nLoans get two new fields:\n- `fine` (derived, read-only number): 0.50 for each day the loan is late, capped at 5.00. For a returned loan, days late = (calendar date of `returned_at`) - `due_at`, or 0 if that is not positive. For an unreturned loan, days late = today - `due_at`, or 0 if not positive (so it grows daily until the cap). Always computed from the loan's current `due_at`, i.e. after any renewals.\n- `fine_paid` (boolean).\n\nMembers get a new derived, read-only field `fines_due`: the sum of `fine` over that member's returned loans whose `fine_paid` is false. Fines on loans that are still out do not count until the book is returned.\n\nRules:\n- While a member's `fines_due` is greater than 0, that member cannot borrow (neither for themselves nor through a librarian lending to them), renew a loan, or place a hold: 409. This also applies to a member whose hold is `ready`; their hold stays `ready`.\n- Returning a loan whose `fine` is greater than 0 emits an outbox message on channel `fine_charged` with payload `{\"loan\": <loan id>, \"member\": <member id>, \"amount\": <fine>}`.\n- New action `POST /api/loans/{id}/pay_fine` (body `{}`), librarians only (members -> 403). 409 if the loan is not returned, its `fine` is 0, or `fine_paid` is already true. Sets `fine_paid` = true, emits exactly one outbox message on channel `fine_paid` with payload `{\"loan\": <loan id>, \"member\": <member id>, \"amount\": <fine>}`, and returns the loan.\n- UI: the loan detail page shows a `pay_fine` form exactly when the caller may pay that loan's fine right now.\n\nExisting data (required): existing loans that were returned late carry their computed fine and are treated as already settled: `fine_paid` = true. Every other existing loan has `fine_paid` = false. So no existing member owes anything when this change ships.\n\nHolds and renewals keep working as before, subject to the new rule.",
+ "superseded_base_tests": [
+  "test_unknown_collection_record_and_action_are_404"
+ ]
+}

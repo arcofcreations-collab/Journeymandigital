@@ -1,0 +1,13 @@
+{
+ "id": "D13",
+ "app": "expenses",
+ "categories": [
+  "new_concept",
+  "permissions",
+  "conflict_or_ambiguity"
+ ],
+ "depends_on": null,
+ "expect_rejection": false,
+ "brief": "Approval delegation\n\nManagers going on leave want to hand over their approval duties.\n\nNew collection `delegations` with fields: `delegator` (reference to employees; set automatically to the creator; sending it -> 400), `delegate` (reference to employees, required), `starts_on` (date, required), `ends_on` (date, required).\n- Only employees with role `manager` can create delegations (others -> 403). `delegate` must be a different employee whose role is `manager` (themselves, a non-manager or an unknown id -> 400). `ends_on` must not be before `starts_on` (-> 400).\n- A delegation is readable by its delegator, its delegate and finance users; lists contain only those. Only the delegator can delete it (others -> 403). Nobody can PATCH a delegation (403).\n- A delegation is active on every date from `starts_on` to `ends_on` inclusive (today = the date of the request).\n- While a delegation is active, the delegate can read every claim of the delegator's direct reports and can approve and reject those claims under the same state rules as the delegator (`decided_by` = the delegate). The delegator keeps all rights.\n- Segregation of duties: nobody may approve or reject their own claim, also not through a delegation (-> 403).\n- Delegations do not chain: a delegate does not pass on rights they hold only through a delegation.\n- When no delegation is active (before `starts_on`, after `ends_on`, or deleted), the delegate has no extra rights (403 as before).\n- UI: a claim's detail page shows `approve` / `reject` to an active delegate exactly when they may use them.\n\nExisting data: there are no delegations initially; nothing else changes.",
+ "superseded_base_tests": []
+}
