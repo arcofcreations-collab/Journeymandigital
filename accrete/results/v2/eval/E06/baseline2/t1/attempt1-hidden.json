@@ -1,0 +1,60 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/eval/E06/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E06/test_E06.py",
+ "passed": 10,
+ "total": 10,
+ "seconds": 1.47,
+ "results": [
+  {
+   "test": "challenges.eval.E06.test_E06::test_sofia_becomes_manager",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E06.test_E06::test_supervisors_read_only_their_site",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E06.test_E06::test_supervisor_order_rights_limited_to_site",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E06.test_E06::test_supervisor_creates_orders_only_for_own_site",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E06.test_E06::test_assets_are_site_scoped_for_supervisors",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E06.test_E06::test_parts_are_site_scoped_for_supervisors",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E06.test_E06::test_only_managers_write_staff",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E06.test_E06::test_promoted_supervisor_gets_global_rights",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E06.test_E06::test_ui_follows_new_rights",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E06.test_E06::test_earlier_rules_preserved",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

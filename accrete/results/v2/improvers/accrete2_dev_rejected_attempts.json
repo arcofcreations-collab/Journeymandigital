@@ -1,0 +1,312 @@
+[
+ {
+  "run": "dev/D01",
+  "ledger_seq": 2,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "dev/D03",
+  "ledger_seq": 3,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "loans action renew (guard_message): syntax error in expression 'this loan cannot be renewed': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "dev/D04",
+  "ledger_seq": 3,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "loans action renew (guard_message): syntax error in expression 'this loan cannot be renewed': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "dev/D04",
+  "ledger_seq": 5,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "dev/D06",
+  "ledger_seq": 2,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "members action checkout (guard_message): syntax error in expression 'member inactive, a book is not available, or the loan limit of 3 would be exceeded': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "dev/D08",
+  "ledger_seq": 2,
+  "reason": "this change also alters other behaviour through dependencies: claims.action:pay.guard (see replay.examples). If that is intended, list them under `consequences:`; otherwise adjust the change",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "dev/D09",
+  "ledger_seq": 2,
+  "reason": "this change also alters other behaviour through dependencies: claims.action:pay.guard (see replay.examples). If that is intended, list them under `consequences:`; otherwise adjust the change",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "dev/D09",
+  "ledger_seq": 4,
+  "reason": "this change also alters other behaviour through dependencies: claims.action:pay.guard (see replay.examples). If that is intended, list them under `consequences:`; otherwise adjust the change",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "dev/D09",
+  "ledger_seq": 5,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E02",
+  "ledger_seq": 3,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "work_orders action claim (guard_message): syntax error in expression 'only open orders can be claimed, and only by a technician with fewer than 3 active orders': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E02",
+  "ledger_seq": 4,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E03",
+  "ledger_seq": 3,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "work_orders action claim (guard_message): syntax error in expression 'only open orders can be claimed, and only by a technician with fewer than 3 active orders': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E03",
+  "ledger_seq": 4,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E03",
+  "ledger_seq": 6,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E04",
+  "ledger_seq": 3,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "work_orders action claim (guard_message): syntax error in expression 'only open orders can be claimed, and only by a technician with fewer than 3 active orders': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E04",
+  "ledger_seq": 4,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E04",
+  "ledger_seq": 6,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E04",
+  "ledger_seq": 8,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E05",
+  "ledger_seq": 3,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "work_orders action claim (guard_message): syntax error in expression 'only open orders can be claimed, and only by a technician with fewer than 3 active orders': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E05",
+  "ledger_seq": 4,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E05",
+  "ledger_seq": 6,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E05",
+  "ledger_seq": 8,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E06",
+  "ledger_seq": 3,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "work_orders action claim (guard_message): syntax error in expression 'only open orders can be claimed, and only by a technician with fewer than 3 active orders': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E06",
+  "ledger_seq": 4,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E06",
+  "ledger_seq": 6,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E06",
+  "ledger_seq": 8,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E07",
+  "ledger_seq": 3,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "work_orders action claim (guard_message): syntax error in expression 'only open orders can be claimed, and only by a technician with fewer than 3 active orders': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E07",
+  "ledger_seq": 4,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E07",
+  "ledger_seq": 6,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E07",
+  "ledger_seq": 8,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E07",
+  "ledger_seq": 12,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "schedules action generate (guard_message): syntax error in expression 'schedule is inactive, its asset is retired, an unfinished generated order exists, or it is not yet due': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E07",
+  "ledger_seq": 13,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E08",
+  "ledger_seq": 2,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E11",
+  "ledger_seq": 2,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "claims action approve (guard_message): syntax error in expression \"the claim must be submitted and fit within its cost centre's remaining budget\": unterminated string literal (detected at line 1)"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E11",
+  "ledger_seq": 3,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E12",
+  "ledger_seq": 2,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "employees action offboard (guard_message): syntax error in expression 'the employee is already inactive or has submitted or approved claims': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E12",
+  "ledger_seq": 4,
+  "reason": "operator 1 (add_field) failed: employees already has a field 'active'",
+  "static_problems": null,
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E13",
+  "ledger_seq": 2,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "claims action withdraw (guard_message): syntax error in expression 'only a submitted claim can be withdrawn, within 7 days of submission': invalid syntax",
+   "claims action revise (guard_message): syntax error in expression 'only a rejected claim with fewer than 2 revisions can be revised': invalid syntax"
+  ],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E14",
+  "ledger_seq": 2,
+  "reason": "stated expectations fail on the changed application (see expectations)",
+  "static_problems": [],
+  "failed_expectations": null
+ },
+ {
+  "run": "eval/E14",
+  "ledger_seq": 4,
+  "reason": "the change leaves parts of the application inconsistent (see static_check); update or remove the dependents in the same change",
+  "static_problems": [
+   "loans action declare_lost (guard_message): syntax error in expression 'only an open loan can be declared lost': invalid syntax",
+   "copies action found (guard_message): syntax error in expression 'only a lost copy can be found': invalid syntax"
+  ],
+  "failed_expectations": null
+ }
+]
