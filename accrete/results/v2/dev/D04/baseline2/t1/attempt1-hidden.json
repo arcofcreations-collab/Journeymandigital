@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D04/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D04/test_D04.py",
+ "passed": 11,
+ "total": 11,
+ "seconds": 0.82,
+ "results": [
+  {
+   "test": "challenges.dev.D04.test_D04::test_historic_fines_computed_and_settled",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_no_member_owes_anything_initially",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_open_loan_fine_accrues_and_is_capped",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_late_return_charges_fine_and_blocks_member",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_pay_fine_unblocks_member",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_pay_fine_permissions_and_state",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_unpaid_fine_blocks_renewal",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_fine_uses_renewed_due_date",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_on_time_return_charges_nothing",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_ready_hold_member_with_fine_cannot_borrow_until_paid",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D04.test_D04::test_ui_pay_fine_form",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
