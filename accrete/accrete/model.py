@@ -135,7 +135,7 @@ def tenv_for(model, ent=None, params=None, extra=None):
         variables["params"] = ("params", None)
     for k, v in (extra or {}).items():
         variables[k] = v
-    return E.TypeEnv(schema, variables, params or {})
+    return E.TypeEnv(schema, variables, params or {}, functions=(model.get("functions") or {}).keys())
 
 
 # ------------------------------------------------------------------ walking all expressions
@@ -268,6 +268,18 @@ def check(model) -> list[str]:
             for p, spec in a["params"].items():
                 if spec.get("type") == "ref" and spec.get("ref") not in names and spec.get("ref") not in model["entities"]:
                     pass
+    known_attrs = {"id"} | E.SAFE_METHODS
+    for e in model["entities"].values():
+        known_attrs |= {f["name"] for f in e["fields"].values()}
+    for fn in (model.get("functions") or {}).values():
+        try:
+            tree = E.validate_function(fn["name"], fn["params"], fn["body"], (model.get("functions") or {}).keys())
+        except E.ExprError as exc:
+            errors.append(f"function {fn['name']}: {exc}")
+            continue
+        for attr in sorted(E.attributes_read(tree) - known_attrs):
+            errors.append(f"function {fn['name']} reads .{attr}, which is not a field of any entity "
+                          f"(renamed or removed?); update it with change_function in the same change")
     for loc, ent, src, kw in expressions(model):
         try:
             an = E.analyse(src, tenv_for_location(model, ent, kw))
@@ -303,9 +315,26 @@ def describe(model, loc) -> str:
 def dependencies(model):
     """Map each expression location to the (entity name, field name) pairs and collections it reads."""
     deps = {}
+    known_attrs = {"id"} | E.SAFE_METHODS
+    for e in model["entities"].values():
+        known_attrs |= {f["name"] for f in e["fields"].values()}
+    for fn in (model.get("functions") or {}).values():
+        try:
+            tree = E.validate_function(fn["name"], fn["params"], fn["body"], (model.get("functions") or {}).keys())
+        except E.ExprError as exc:
+            errors.append(f"function {fn['name']}: {exc}")
+            continue
+        for attr in sorted(E.attributes_read(tree) - known_attrs):
+            errors.append(f"function {fn['name']} reads .{attr}, which is not a field of any entity "
+                          f"(renamed or removed?); update it with change_function in the same change")
     for loc, ent, src, kw in expressions(model):
         try:
             an = E.analyse(src, tenv_for_location(model, ent, kw))
+            if an.calls:
+                # a function can follow references anywhere: assume it reads everything
+                allf = {(e["name"], f["name"]) for e in model["entities"].values() for f in e["fields"].values()}
+                deps[loc] = (an.reads | allf, an.collections | {e["name"] for e in model["entities"].values()}, ent["name"])
+                continue
             deps[loc] = (an.reads, an.collections, ent["name"])
         except E.ExprError:
             deps[loc] = (set(), set(), ent["name"])

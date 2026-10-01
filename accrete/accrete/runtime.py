@@ -220,6 +220,19 @@ class Rec:
         return str(self.id)
 
 
+_FUNC_CACHE = {}
+
+
+def _functions(model):
+    key = json.dumps(model["functions"], sort_keys=True)
+    fns = _FUNC_CACHE.get(key)
+    if fns is None:
+        if len(_FUNC_CACHE) > 200:
+            _FUNC_CACHE.clear()
+        fns = _FUNC_CACHE[key] = E.compile_functions(model["functions"])
+    return fns
+
+
 class Params:
     """Action parameters as attributes (missing ones are None)."""
 
@@ -258,6 +271,8 @@ class Ctx:
             for e in self.model["entities"].values():
                 self._collections[e["name"]] = [Rec(self, e, rid) for rid in sorted(records(self.world, e["id"]))]
         scope = dict(self._collections)
+        if self.model.get("functions"):
+            scope.update(_functions(self.model))
         scope.update({"user": self.user, "now": self.now, "today": self.now.date(),
                       "record": None, "old": None, "params": Params({}), "input": {}})
         scope.update(extra)

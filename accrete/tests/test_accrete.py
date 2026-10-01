@@ -175,3 +175,88 @@ def test_unknown_filter_and_blank_required_text(lib):
     assert call(lib, "GET", "/api/books", "ada", query={"year": "2005"})[0] == 200
     st, out = call(lib, "POST", "/api/books", "ada", {"title": "  ", "author": "A", "isbn": "x-9"})
     assert st == 400 and "title" in out["fields"]
+
+
+# ------------------------------------------------------------------ escape hatch: functions
+FN_LATE = {"add_function": {"name": "late_days", "params": ["loan", "today"],
+                            "body": "if loan.returned_at is not None or loan.due_at >= today:\n    return 0\nreturn (today - loan.due_at).days"}}
+
+
+def test_function_in_computed_field_and_revert_is_exact(lib):
+    before = snapshot(lib)
+    rep = apply(lib, {"request": "r", "ops": [FN_LATE, {"add_field": {"entity": "loans", "name": "days_late", "type": "int",
+                                                                   "computed": "late_days(record, today)"}}]})
+    assert rep["verdict"] == "committed", rep.get("reason")
+    loans = call(lib, "GET", "/api/loans", "ada")[1]["items"]
+    assert all((l["days_late"] > 0) == l["overdue"] for l in loans)
+    assert C.revert(lib, rep["seq"])["verdict"] == "committed"
+    assert snapshot(lib) == before
+
+
+def test_function_rejects_unsafe_code(lib):
+    for body in ("import os\nreturn 1", "while True:\n    pass", "return loan.__class__", "return open('x')"):
+        rep = apply(lib, {"request": "r", "ops": [{"add_function": {"name": "bad", "params": ["loan"], "body": body}}]})
+        assert rep["verdict"] == "rejected", body
+
+
+def test_rename_of_field_read_by_function_is_rejected_unless_function_updated(lib):
+    assert apply(lib, {"request": "r", "ops": [FN_LATE, {"add_field": {"entity": "loans", "name": "days_late", "type": "int",
+                                                                    "computed": "late_days(record, today)"}}]})["verdict"] == "committed"
+    rep = apply(lib, {"request": "r", "ops": [{"rename_field": {"entity": "loans", "from": "due_at", "to": "due_on"}}]})
+    assert rep["verdict"] == "rejected" and any("late_days reads .due_at" in p for p in rep["static_check"]["problems"])
+    body = FN_LATE["add_function"]["body"].replace("due_at", "due_on")
+    rep = apply(lib, {"request": "r", "ops": [{"rename_field": {"entity": "loans", "from": "due_at", "to": "due_on"}},
+                                              {"change_function": {"name": "late_days", "body": body}}]})
+    assert rep["verdict"] == "committed", rep.get("reason")
+
+
+def test_removing_a_function_still_in_use_is_rejected(lib):
+    apply(lib, {"request": "r", "ops": [FN_LATE, {"add_field": {"entity": "loans", "name": "days_late", "type": "int",
+                                                             "computed": "late_days(record, today)"}}]})
+    rep = apply(lib, {"request": "r", "ops": [{"remove_function": {"name": "late_days"}}]})
+    assert rep["verdict"] == "rejected" and any("unknown function" in p for p in rep["static_check"]["problems"])
+
+
+def test_function_crash_is_caught_by_replay(lib):
+    rep = apply(lib, {"request": "r", "ops": [
+        {"add_function": {"name": "ratio", "params": ["b"], "body": "return {1: 'a'}[b.id]"}},  # KeyError for most books
+        {"change_action": {"entity": "books", "name": "borrow", "prepend_effects": [{"set": {"title": "ratio(record)"}}]}}],
+        "consequences": ["all"]})
+    assert rep["verdict"] == "rejected" and rep["replay"]["unexplained"] > 0
+
+
+def test_function_dependencies_are_conservative(lib):
+    apply(lib, {"request": "r", "ops": [FN_LATE, {"add_field": {"entity": "loans", "name": "days_late", "type": "int",
+                                                             "computed": "late_days(record, today)"}}]})
+    rep = apply(lib, {"request": "r", "ops": [{"add_field": {"entity": "members", "name": "phone", "type": "text"}}]})
+    assert "loans.field:days_late" in rep["footprint"]["consequences"]  # cannot prove the function ignores members
+    assert rep["verdict"] == "committed"  # no observable difference, so nothing to acknowledge
+
+
+def test_changing_a_function_is_direct_for_its_callers(lib):
+    apply(lib, {"request": "r", "ops": [FN_LATE, {"add_field": {"entity": "loans", "name": "days_late", "type": "int",
+                                                             "computed": "late_days(record, today)"}}]})
+    body = FN_LATE["add_function"]["body"].replace("return (today - loan.due_at).days", "return 2 * (today - loan.due_at).days")
+    rep = apply(lib, {"request": "r", "ops": [{"change_function": {"name": "late_days", "body": body}}]})
+    assert rep["verdict"] == "committed", rep.get("reason")
+    assert "loans.field:days_late" in rep["footprint"]["direct"]
+
+
+def test_upgrade_check_detects_engine_behaviour_change(lib, monkeypatch):
+    C.snapshot(lib)
+    assert C.upgrade_check(lib)["verdict"] == "same"
+    from accrete import expr as E
+    monkeypatch.setitem(E.BUILTINS, "any", lambda xs: False)  # planted engine bug: any() always false
+    E._CODE_CACHE.clear()
+    rep = C.upgrade_check(lib)
+    assert rep["verdict"] == "DIFFERENT" and rep["differences"] > 0
+
+
+def test_ui_expectations(lib):
+    rep = apply(lib, {"request": "r", "ops": [{"set_rule": {"entity": "books", "rule": "update", "expr": "user.role == 'librarian'"}}],
+                      "expect": [{"as": "chen", "do": "GET /ui/books/2", "status": 200, "ui": {"actions": ["borrow"], "fields": {"status": "available"}}},
+                                 {"as": "chen", "do": "GET /ui/books/new", "status": 403}]})
+    assert rep["verdict"] == "committed", [e for e in rep["expectations"] if not e["passed"]]
+    rep = apply(lib, {"request": "r", "ops": [{"set_rule": {"entity": "books", "rule": "update", "expr": "user.role == 'librarian'"}}],
+                      "expect": [{"as": "chen", "do": "GET /ui/books/2", "ui": {"actions": []}}]})
+    assert rep["verdict"] == "rejected"

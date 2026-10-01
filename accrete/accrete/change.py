@@ -49,7 +49,30 @@ def _elements(model):
         for t in e["triggers"].values():
             out[("trigger", e["id"], t["id"])] = json.dumps(t, sort_keys=True)
     out[("users",)] = json.dumps(model.get("users"))
+    for name, fn in (model.get("functions") or {}).items():
+        out[("function", name)] = json.dumps(fn, sort_keys=True)
     return out
+
+
+def _loc_labels(mdl, loc):
+    """Footprint labels for the behaviour an expression location controls."""
+    ent = mdl["entities"][loc[1]]
+    n = ent["name"]
+    kind = loc[0]
+    if kind == "field":
+        f = ent["fields"][loc[2]]
+        if loc[3] in ("computed", "read_if"):
+            return {f"{n}.field:{f['name']}"}
+        return {f"{n}.create", f"{n}.update"}
+    if kind == "rule":
+        return {f"{n}.read" if loc[2] == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete', 'create_guard': 'create'}.get(loc[2], loc[2])}"}
+    if kind == "constraint":
+        return {f"{n}.create", f"{n}.update"}
+    if kind == "action":
+        return {f"{n}.action:{ent['actions'][loc[2]]['name']}"}
+    if kind == "trigger":
+        return {f"{n}.{ent['triggers'][loc[2]]['on']}"}
+    return set()
 
 
 def _touched_ids(old_world, new_world):
@@ -200,6 +223,17 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
             fp.reasons.append(f"trigger on {n} changed")
         elif kind == "display":
             fp.reasons.append(f"how {ename(k[1])} records are shown in the UI changed (no API effect)")
+        elif kind == "function":
+            # every expression that calls the function changes with it: those behaviours are direct
+            for mdl in (new_model, old_model):
+                for loc, ent, src, kw in M.expressions(mdl):
+                    try:
+                        an = E.analyse(src, M.tenv_for_location(mdl, ent, kw))
+                    except E.ExprError:
+                        continue
+                    if k[1] in an.calls:
+                        D.update(_loc_labels(mdl, loc))
+            fp.reasons.append(f"function {k[1]} changed")
         elif kind == "users":
             D.add("*.any")
             fp.reasons.append("the user directory changed")
@@ -454,9 +488,12 @@ def classify(fp, acknowledged, method, path, old, new):
 def replay(old_model, old_world, new_model, new_world, probes, fp, acknowledged=(), limit_examples=8):
     stats = {"probes": len(probes), "identical": 0, "direct": 0, "acknowledged": 0, "consequence": 0,
              "unexplained": 0, "consequence_labels": {}, "examples": [], "direct_examples": []}
+    stats["_golden"] = []
     for p in probes:
         old = _run_probe(old_model, old_world, p)
-        new = _run_probe(new_model, new_world, _rename_probe(fp, p))
+        np_ = _rename_probe(fp, p)
+        new = _run_probe(new_model, new_world, np_)
+        stats["_golden"].append([np_, list(new)])
         if _same(old, new, fp, p):
             stats["identical"] += 1
             continue
@@ -514,6 +551,19 @@ def run_expectations(model, world, expects, default_now):
             path, _, qs = path.partition("?")
             from urllib.parse import parse_qsl
             now = dt.datetime.fromisoformat(st.get("now") or ex.get("now") or default_now)
+            if path.startswith("/ui/"):
+                from . import ui as U
+                from . import uicheck
+                status, html = U.handle(model, w, path, st.get("as") or ex.get("as"), now)
+                if "status" in st and status != st["status"]:
+                    ok, detail = False, f"{st['do']}: expected status {st['status']}, got {status}"
+                    break
+                if st.get("ui"):
+                    problem = uicheck.check(uicheck.parse(html), st["ui"])
+                    if problem:
+                        ok, detail = False, f"{st['do']}: {problem}"
+                        break
+                continue
             status, out = R.handle(model, w, method.upper(), path, dict(parse_qsl(qs)), st.get("body", {} if method.upper() in ("POST", "PATCH") else None),
                                    st.get("as") or ex.get("as"), now)
             if "status" in st and status != st["status"]:
@@ -651,13 +701,20 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
 
         report["inverse"] = inverse
         report["verdict"] = "dry-run passed" if dry_run else "committed"
+        golden = (report.get("replay") or {}).pop("_golden", None)
         timings["total_ms"] = _ms(t0)
         report["timings"] = timings
         if not dry_run:
             store.save_all(model1, world1)
             report["seq"] = store.append_ledger(report)
+            if golden is None:
+                golden = [[p, list(_run_probe(model1, copy.deepcopy(world1), p))]
+                          for p in generate_probes(model1, world1, now)]
+            store.save_golden({"engine": engine_version(), "seq": report["seq"], "world": world1,
+                               "probes": golden})
         return report
     except ChangeRejected as exc:
+        (report.get("replay") or {}).pop("_golden", None)
         report["verdict"] = "rejected"
         report["reason"] = str(exc)
         timings["total_ms"] = _ms(t0)
@@ -667,6 +724,51 @@ def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="cha
         return report
     finally:
         store.close()
+
+
+def engine_version():
+    """Hash of the engine's source files (what an upgrade check compares against)."""
+    import hashlib
+    h = hashlib.sha256()
+    here = os.path.dirname(os.path.abspath(__file__))
+    for f in sorted(os.listdir(here)):
+        if f.endswith(".py"):
+            with open(os.path.join(here, f), "rb") as fh:
+                h.update(f.encode() + fh.read())
+    return h.hexdigest()[:16]
+
+
+def snapshot(directory):
+    """Record golden responses for the current state (also done automatically on every commit)."""
+    store = Store(directory)
+    model, world = store.load()
+    now = dt.datetime.utcnow().replace(microsecond=0)
+    probes = store.requests() + generate_probes(model, world, now)
+    golden = [[p, list(_run_probe(model, copy.deepcopy(world), p))] for p in probes]
+    store.save_golden({"engine": engine_version(), "seq": None, "world": world, "probes": golden})
+    store.close()
+    return len(golden)
+
+
+def upgrade_check(directory, limit_examples=10):
+    """Replay the golden probes against the installed engine, on the data as it was when they were
+    recorded. Any difference is a behaviour change caused by the engine, not by the application."""
+    store = Store(directory)
+    model, _ = store.load()
+    g = store.golden()
+    store.close()
+    if not g:
+        return {"verdict": "no snapshot", "reason": "no golden snapshot yet: run `accrete snapshot APP` with the old engine"}
+    world = g["world"]
+    world["records"] = {eid: {int(k): v for k, v in recs.items()} for eid, recs in world["records"].items()}
+    diffs = []
+    for p, want in g["probes"]:
+        got = _run_probe(model, copy.deepcopy(world), p)
+        if json.loads(json.dumps(list(got), default=str)) != json.loads(json.dumps(want, default=str)):
+            diffs.append({"request": f"{p['method']} {p['path']} as {p.get('user')}" + (f" {json.dumps(p.get('body'))}" if p.get("body") else ""),
+                          "before": [want[0], _short(want[1])], "after": [got[0], _short(got[1])]})
+    return {"verdict": "same" if not diffs else "DIFFERENT", "probes": len(g["probes"]), "differences": len(diffs),
+            "recorded_with_engine": g["engine"], "current_engine": engine_version(), "examples": diffs[:limit_examples]}
 
 
 def revert(directory, seq, dry_run=False, force=False):

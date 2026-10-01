@@ -142,6 +142,66 @@ def _compiled(src):
     return code
 
 
+# ---------------------------------------------------------------------------
+# Escape hatch: user-defined pure functions (statements allowed, still sandboxed)
+# ---------------------------------------------------------------------------
+FUNCTION_NODES = ALLOWED_NODES + (
+    ast.Module, ast.FunctionDef, ast.arguments, ast.arg, ast.Return, ast.Assign, ast.AugAssign,
+    ast.If, ast.For, ast.Break, ast.Continue, ast.Pass, ast.Expr, ast.AnnAssign,
+)
+FUNCTION_BUILTINS = dict(BUILTINS, range=range, enumerate=enumerate, zip=zip, list=list, dict=dict, set=set,
+                         tuple=tuple, isinstance=isinstance, reversed=reversed, ValueError=ValueError)
+
+
+def function_source(name, params, body):
+    lines = str(body).rstrip().splitlines() or ["return None"]
+    return f"def {name}({', '.join(params)}):\n" + "\n".join("    " + ln for ln in lines)
+
+
+def validate_function(name, params, body, known_functions=()):
+    """Parse and check a function against the allow-list (no imports, no while loops, no private
+    names, no global state; every name must be a parameter, a local, a built-in or another
+    function). Returns the AST; raises ExprError."""
+    if not name.isidentifier() or name.startswith("_") or name in BUILTINS:
+        raise ExprError(f"invalid function name {name!r}")
+    for p in params:
+        if not str(p).isidentifier() or str(p).startswith("_"):
+            raise ExprError(f"invalid parameter name {p!r}")
+    try:
+        tree = ast.parse(function_source(name, params, body))
+    except SyntaxError as exc:
+        raise ExprError(f"syntax error in function {name}: {exc.msg} (line {exc.lineno})") from None
+    for node in ast.walk(tree):
+        if not isinstance(node, FUNCTION_NODES):
+            raise ExprError(f"{type(node).__name__} is not allowed in functions ({name})")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+            raise ExprError(f"private attribute {node.attr!r} in function {name}")
+        if isinstance(node, ast.Name) and node.id.startswith("_"):
+            raise ExprError(f"private name {node.id!r} in function {name}")
+    local = set(params) | {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+    allowed = local | set(FUNCTION_BUILTINS) | set(known_functions) | {name}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id not in allowed:
+            raise ExprError(f"function {name} uses unknown name {n.id!r} (functions see only their parameters, "
+                            f"locals, built-ins and other functions)")
+    return tree
+
+
+def compile_functions(functions):
+    """{name: callable} for a model's functions. Functions see each other, the built-ins and
+    nothing else: no collections, no user, no now (pass what they need as arguments)."""
+    scope = dict(FUNCTION_BUILTINS)
+    scope["__builtins__"] = {}
+    for f in functions.values():
+        tree = validate_function(f["name"], f["params"], f["body"], functions.keys())
+        exec(compile(tree, f"<function {f['name']}>", "exec"), scope)  # noqa: S102 - validated AST
+    return {name: scope[name] for name in functions}
+
+
+def attributes_read(tree):
+    return {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+
+
 class Undefined(Exception):
     pass
 
@@ -173,10 +233,11 @@ class TypeEnv:
     A type is ("entity", name), ("list", name), ("params", action), or None (unknown).
     """
 
-    def __init__(self, entities: dict, variables: dict, params: dict | None = None):
+    def __init__(self, entities: dict, variables: dict, params: dict | None = None, functions=()):
         self.entities = entities  # name -> {"fields": {fname: {"type","ref"(entity name)}}}
         self.variables = variables
         self.params = params or {}
+        self.functions = set(functions)  # user-defined function names (escape hatch)
 
 
 class Analysis:
@@ -186,6 +247,7 @@ class Analysis:
         self.errors = []          # unresolved names
         self.unknown_attrs = set()  # attribute names read on values of unknown type
         self.type = None            # inferred type of the whole expression
+        self.calls = set()          # user-defined functions called
 
 
 def field_type(f):
@@ -258,8 +320,10 @@ def _infer(node, tenv, scope, a):
         fname = node.func.id if isinstance(node.func, ast.Name) else None
         if not isinstance(node.func, ast.Name):
             _infer(node.func, tenv, scope, a)
-        elif fname not in BUILTINS:
+        elif fname not in BUILTINS and fname not in tenv.functions:
             a.errors.append(f"unknown function {fname!r}")
+        elif fname in tenv.functions:
+            a.calls.add(fname)
         args = [_infer(x, tenv, scope, a) for x in node.args]
         if fname in ("find", "first", "count") and args and args[0] and args[0][0] == "list":
             ent = tenv.entities.get(args[0][1], {"fields": {}})

@@ -3,10 +3,12 @@
   accrete init DIR                      create an empty application instance
   accrete apply DIR CHANGE.yaml [--dry-run] [--json]
   accrete revert DIR SEQ [--dry-run] [--force]
+  accrete context DIR                   one-screen overview: model, users, sample records, ledger, semantics
   accrete show DIR [ENTITY]             compact summary of the current model
   accrete log DIR [SEQ]                 ledger: every change, its verdict and report
   accrete call DIR METHOD PATH [--as USER] [--body JSON] [--now ISO]   run one request
   accrete check DIR                     re-validate the model and all data
+  accrete snapshot DIR / upgrade-check DIR   engine-upgrade gate (golden responses; also recorded on every commit)
   accrete serve DIR [--port 8000]       run the application (API + UI)
   accrete demo                          live demonstration (real changes and checks)
 """
@@ -75,10 +77,68 @@ def print_report(rep, out=sys.stdout):
             print(f"    {ex['kind'].upper()} {ex['request']}: {ex['before'][0]} -> {ex['after'][0]} [{', '.join(ex['labels'])}]", file=out)
             print(f"        before: {ex['before'][1][:160]}", file=out)
             print(f"        after:  {ex['after'][1][:160]}", file=out)
-    for e in rep.get("expectations", []) or []:
-        print(f"  expect {'ok  ' if e['passed'] else 'FAIL'} {e['name']} {e['detail']}", file=out)
+    exps = rep.get("expectations", []) or []
+    for e in exps:
+        if not e["passed"]:
+            print(f"  expect FAIL {e['name']} {e['detail']}", file=out)
+    if exps:
+        print(f"  expectations: {sum(1 for e in exps if e['passed'])}/{len(exps)} passed", file=out)
     if rep.get("timings"):
         print(f"  timings (ms): {rep['timings']}", file=out)
+    for h in next_steps(rep):
+        print(f"NEXT: {h}", file=out)
+
+
+def next_steps(rep):
+    """Concrete advice for the most likely next action after a report."""
+    v = rep.get("verdict")
+    if v in ("committed", "dry-run passed"):
+        return [] if v == "committed" else ["all checks passed; run the same command without --dry-run to commit"]
+    out = []
+    reason = rep.get("reason", "")
+    if reason.startswith("operator"):
+        out.append("fix that operator (names: `accrete context APP`; operator keys: GUIDE.md 'Operator reference'); nothing was changed")
+    if (rep.get("static_check") or {}).get("problems"):
+        out.append("each 'static:' line names an expression that no longer resolves; change or remove it in the same change file")
+    for p in (rep.get("data_check") or {}).get("violations") or []:
+        out.append(f"{p['count']} existing {p['entity']} record(s) fail `{p['field_or_rule']}`: add `backfill:` to the add_field, an "
+                   f"`update_records` op, a `convert:`/`map:` on change_field, or `existing: exempt` on the constraint")
+    rp = rep.get("replay") or {}
+    if rp.get("consequence"):
+        labs = sorted(rp.get("consequence_labels", {}))
+        out.append(f"if these side-effects are intended (see CONSEQUENCE examples), add: consequences: [{', '.join(labs)}]; "
+                   f"if not, change the operators so those features keep their behaviour")
+    if rp.get("unexplained"):
+        out.append("UNEXPLAINED differences: behaviour changed somewhere the operators do not touch; inspect the examples "
+                   "(a crash 500 means an expression fails at runtime for those records)")
+    if any(not e["passed"] for e in rep.get("expectations") or []):
+        out.append("an expectation failed: either the change does not do what the example says, or the example is wrong")
+    return out or ["read the reason above; a rejected change alters nothing"]
+
+
+def write_notes(rep, path):
+    """CHANGE_NOTES.md from the change and its pipeline report (what the change was, what was checked)."""
+    rp = rep.get("replay") or {}
+    exps = rep.get("expectations") or []
+    lines = [f"# {rep.get('request', '').strip()}", "",
+             f"Interpretation: {rep.get('interpretation') or '(as requested)'}", "",
+             f"Applied with `accrete apply` as ledger change #{rep.get('seq')} ({rep.get('verdict')}).", "",
+             "What changed:"]
+    lines += [f"- {n}" for n in rep.get("what_happened", [])]
+    fp = rep.get("footprint") or {}
+    if fp.get("declared"):
+        lines += ["", f"Acknowledged consequences: {', '.join(fp['declared'])}"]
+    lines += ["", "Verification (accrete pipeline):",
+              f"- static check: {len((rep.get('static_check') or {}).get('problems') or [])} problems",
+              f"- data check: {(rep.get('data_check') or {}).get('records', '?')} existing records re-validated, "
+              f"{len((rep.get('data_check') or {}).get('violations') or [])} violations"]
+    if "probes" in rp:
+        lines.append(f"- replay: {rp['probes']} requests on old and new versions: {rp['identical']} identical, {rp['direct']} changed as "
+                     f"intended, {rp['acknowledged']} acknowledged consequences, {rp['unexplained']} unexplained")
+    lines.append(f"- expectations: {sum(1 for e in exps if e['passed'])}/{len(exps)} passed")
+    lines += [f"  - {e['name']}" for e in exps]
+    with open(path, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
 
 
 def cmd_apply(a):
@@ -86,6 +146,8 @@ def cmd_apply(a):
     now = dt.datetime.fromisoformat(a.now) if a.now else None
     rep = C.apply_change(a.dir, doc, dry_run=a.dry_run, base_dir=base, now=now)
     _save_report(a.dir, rep, a.change)
+    if a.notes and rep["verdict"] == "committed":
+        write_notes(rep, a.notes)
     if a.json:
         print(json.dumps(rep, indent=1, default=str))
     else:
@@ -149,6 +211,86 @@ def cmd_show(a):
         for t in e["triggers"].values():
             print(f"  trigger {t['name']} on {t['on']} when {t.get('when')}: {json.dumps(t['effects'])}")
     return 0
+
+
+def cmd_context(a):
+    """Everything an implementer needs to start a change, in one screen: the model (as `show`),
+    the users by role, two sample records per entity as the API returns them, the recent
+    ledger, and the exact request semantics."""
+    st = Store(a.dir)
+    model, world = st.load()
+    ledger = st.ledger()
+    st.close()
+    if model is None:
+        print("empty application (accrete init was run, nothing applied yet)")
+        return 0
+    cmd_show(argparse.Namespace(dir=a.dir, entity=None))
+    now = R.parse_now(a.now)
+    ue = M.user_entity(model)
+    users = []
+    if ue:
+        key = ue["fields"][model["users"]["key"]]["name"]
+        groups = {}
+        for rid in sorted(R.records(world, ue["id"])):
+            ctx = R.Ctx(model, world, None, now)
+            rec = R.Rec(ctx, ue, rid)
+            sig = []
+            for f in M.ordered_fields(ue):
+                if f["type"] in ("enum", "bool") and not f.get("computed"):
+                    try:
+                        sig.append(f"{f['name']}={R.to_json(getattr(rec, f['name']))}")
+                    except Exception:  # noqa: BLE001
+                        pass
+            groups.setdefault(", ".join(sig), []).append(f"{getattr(rec, key)}(id {rid})")
+        print("\nusers (X-User = " + key + ") grouped by their enum/bool fields:")
+        for sig, names in groups.items():
+            print(f"  [{sig}] {', '.join(names[:8])}" + (f" ... +{len(names) - 8}" if len(names) > 8 else ""))
+            users.append(names[0].split("(")[0])
+    print("\nsample records (as the API returns them to the first user who may read them):")
+    for e in model["entities"].values():
+        ids = sorted(R.records(world, e["id"]))
+        for rid in ids[:2]:
+            shown = None
+            for u in users or [None]:
+                status, body = R.handle(model, world, "GET", f"/api/{e['name']}/{rid}", {}, None, u, now)
+                if status == 200:
+                    shown = (u, body)
+                    break
+            if shown:
+                print(f"  {e['name']} {rid} (as {shown[0]}): {json.dumps(shown[1])[:300]}")
+    print("\nrecent ledger:")
+    for e in ledger[-5:]:
+        print(f"  #{e['seq']} {e['verdict']:9} {e.get('request', '')[:100]}")
+    print("""
+request semantics (exact):
+  list: GET /api/E -> records the caller may read, ?field=value exact match (refs by id, true/false, null); unknown field -> 400
+  create: 401 user, 404 E, 403 create rule / write_if, 409 create_guard, 400 input errors / defaults / constraints
+  update: 404 record, 403 read+update rule / write_if, 409 update_guard, 400 input / constraints
+  delete: 404, 403 read+delete rule, 409 delete_guard / still referenced (on_delete restrict)
+  action: 404, 403 allow, 409 guard, 400 params; effects run atomically (any failure undoes everything)
+  UI: /ui/E list, /ui/E/ID detail (action forms only where allow AND guard hold), /ui/E/new (403 if create rule false)
+next: write changes/NNNN-name.yaml with request, interpretation, ops, expect (API and ui: checks), then
+      accrete apply APP FILE --notes APP/CHANGE_NOTES.md   (atomic: a rejected change alters nothing)""")
+    return 0
+
+
+def cmd_snapshot(a):
+    n = C.snapshot(a.dir)
+    print(f"recorded {n} golden responses with engine {C.engine_version()}")
+    return 0
+
+
+def cmd_upgrade_check(a):
+    rep = C.upgrade_check(a.dir)
+    print(f"upgrade check: {rep['verdict']}" + (f" ({rep.get('differences')} of {rep.get('probes')} responses differ; "
+          f"recorded with engine {rep.get('recorded_with_engine')}, now {rep.get('current_engine')})" if "probes" in rep else ""))
+    if rep.get("reason"):
+        print(rep["reason"])
+    for ex in rep.get("examples", []):
+        print(f"  {ex['request']}: {ex['before'][0]} -> {ex['after'][0]}")
+        print(f"      before: {ex['before'][1][:160]}")
+        print(f"      after:  {ex['after'][1][:160]}")
+    return 0 if rep["verdict"] == "same" else 2
 
 
 def cmd_log(a):
@@ -221,6 +363,7 @@ def main(argv=None):
     s.add_argument("--dry-run", action="store_true")
     s.add_argument("--json", action="store_true")
     s.add_argument("--now", help="current time for evaluating defaults during the change")
+    s.add_argument("--notes", help="on commit, write a CHANGE_NOTES.md-style summary to this path")
     s = sub.add_parser("revert")
     s.add_argument("dir")
     s.add_argument("seq", type=int)
@@ -229,6 +372,13 @@ def main(argv=None):
     s = sub.add_parser("show")
     s.add_argument("dir")
     s.add_argument("entity", nargs="?")
+    s = sub.add_parser("context", help="one-screen overview for starting a change")
+    s.add_argument("dir")
+    s.add_argument("--now")
+    s = sub.add_parser("snapshot", help="record golden responses for the engine-upgrade check")
+    s.add_argument("dir")
+    s = sub.add_parser("upgrade-check", help="replay golden responses against the installed engine")
+    s.add_argument("dir")
     s = sub.add_parser("log")
     s.add_argument("dir")
     s.add_argument("seq", type=int, nargs="?")
@@ -250,7 +400,8 @@ def main(argv=None):
     s.add_argument("--pause", action="store_true")
     a = p.parse_args(argv)
     return {"init": cmd_init, "apply": cmd_apply, "revert": cmd_revert, "show": cmd_show, "log": cmd_log,
-            "call": cmd_call, "check": cmd_check, "serve": cmd_serve, "demo": cmd_demo}[a.cmd](a) or 0
+            "call": cmd_call, "check": cmd_check, "serve": cmd_serve, "demo": cmd_demo,
+            "context": cmd_context, "snapshot": cmd_snapshot, "upgrade-check": cmd_upgrade_check}[a.cmd](a) or 0
 
 
 if __name__ == "__main__":

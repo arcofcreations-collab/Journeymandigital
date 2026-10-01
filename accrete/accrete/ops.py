@@ -792,6 +792,47 @@ def op_set_display(cx, a):
     return [{"set_display": {"entity": ent["name"], "field": ent["fields"][old]["name"] if old in ent["fields"] else None}}]
 
 
+# ------------------------------------------------------------------ escape hatch: functions
+def op_add_function(cx, a):
+    fns = cx.model.setdefault("functions", {})
+    name, params = a["name"], list(a.get("params") or [])
+    if name in fns:
+        raise OpError(f"function {name} already exists (use change_function)")
+    try:
+        E.validate_function(name, params, a["body"], fns.keys())
+    except E.ExprError as exc:
+        raise OpError(str(exc)) from None
+    fns[name] = {"name": name, "params": params, "body": str(a["body"]), "doc": a.get("doc")}
+    cx.notes.append(f"added function {name}({', '.join(params)}) [escape hatch: opaque to static analysis]")
+    return [{"remove_function": {"name": name}}]
+
+
+def op_change_function(cx, a):
+    fns = cx.model.setdefault("functions", {})
+    if a["name"] not in fns:
+        raise OpError(f"unknown function {a['name']!r}")
+    old = copy.deepcopy(fns[a["name"]])
+    new = dict(old, **{k: a[k] for k in ("params", "body", "doc") if k in a})
+    try:
+        E.validate_function(new["name"], new["params"], new["body"], fns.keys())
+    except E.ExprError as exc:
+        raise OpError(str(exc)) from None
+    fns[a["name"]] = new
+    cx.notes.append(f"changed function {a['name']}")
+    return [{"change_function": {k: old[k] for k in ("name", "params", "body", "doc")}}]
+
+
+def op_remove_function(cx, a):
+    fns = cx.model.setdefault("functions", {})
+    if a["name"] not in fns:
+        raise OpError(f"unknown function {a['name']!r}")
+    old = fns.pop(a["name"])
+    if not fns:
+        del cx.model["functions"]  # keep a model without functions identical to one that never had any
+    cx.notes.append(f"removed function {a['name']}")
+    return [{"add_function": {k: old[k] for k in ("name", "params", "body", "doc")}}]
+
+
 MACROS = {"promote_field": expand_promote_field}
 
 OPERATORS = {
@@ -806,7 +847,8 @@ OPERATORS = {
     "change_action": op_change_action, "add_trigger": op_add_trigger, "remove_trigger": op_remove_trigger,
     "change_trigger": op_change_trigger, "restore_element": op_restore_element,
     "replace_element": op_replace_element, "set_users": op_set_users, "restore_users": op_restore_users,
-    "set_display": op_set_display,
+    "set_display": op_set_display, "add_function": op_add_function, "change_function": op_change_function,
+    "remove_function": op_remove_function,
 }
 
 

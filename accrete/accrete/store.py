@@ -6,6 +6,7 @@ Tables:
   outbox(id, json)            integration messages
   requests(seq, json)         recorded API requests and responses (the replay corpus)
   ledger(seq, json)           every applied change: request, operators, report, inverse
+  golden(id, json)            probes + responses + data at the last commit (engine-upgrade check)
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ create table if not exists records(eid text, rid integer, data text, primary key
 create table if not exists outbox(id integer primary key, json text);
 create table if not exists requests(seq integer primary key autoincrement, json text);
 create table if not exists ledger(seq integer primary key autoincrement, json text);
+create table if not exists golden(id integer primary key check (id = 1), json text);
 """
 
 DB_NAME = "app.db"
@@ -89,6 +91,15 @@ class Store:
         with self.db:
             cur = self.db.execute("insert into ledger(json) values (?)", (json.dumps(entry),))
             return cur.lastrowid
+
+    # ---------------------------------------------------------------- engine-upgrade golden snapshot
+    def save_golden(self, snap):
+        with self.db:
+            self.db.execute("insert or replace into golden values (1, ?)", (json.dumps(snap),))
+
+    def golden(self):
+        row = self.db.execute("select json from golden where id = 1").fetchone()
+        return json.loads(row[0]) if row else None
 
     def close(self):
         self.db.close()
