@@ -104,6 +104,11 @@ def prepare(cset, cid, system):
         history = f", as changed by the earlier requests in {ws}/HISTORY.md"
     if system == "accrete":
         shutil.copy(os.path.join(ROOT, "docs", "GUIDE.md"), os.path.join(ws, "GUIDE.md"))
+    # base-suite results of the starting state: a regression is a base test that passed before the change
+    before = os.path.join(os.path.dirname(ws), f"base_before_{system}.json")
+    subprocess.run([sys.executable, os.path.join(ROOT, "harness", "run_acceptance.py"), os.path.join(ws, "app"),
+                    os.path.join(CHALLENGES, "base", f"test_{meta['app']}_base.py"), "--json", before],
+                   env=dict(os.environ, PYTHONPATH=os.path.join(ROOT, "harness")), capture_output=True, text=True)
     rev = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "accrete"], capture_output=True, text=True).stdout.strip()
     with open(os.path.join(ws, "VERSION"), "w") as fh:
@@ -142,7 +147,14 @@ def verify(cset, cid, system):
             runs[name] = json.load(fh)
     sup = _superseded(cset, cid)
     base_results = [r for r in runs["base"]["results"] if r["test"].split("::")[-1] not in sup]
-    regressions = [r["test"].split("::")[-1] for r in base_results if not r["passed"]]
+    before_path = os.path.join(os.path.dirname(ws), f"base_before_{system}.json")
+    passed_before = None
+    if os.path.exists(before_path):
+        with open(before_path) as fh:
+            passed_before = {r["test"].split("::")[-1] for r in json.load(fh)["results"] if r["passed"]}
+        out["base_failing_before"] = sorted({r["test"].split("::")[-1] for r in runs["base"]["results"]} - passed_before)
+    regressions = [r["test"].split("::")[-1] for r in base_results if not r["passed"]
+                   and (passed_before is None or r["test"].split("::")[-1] in passed_before)]
     out["hidden_passed"], out["hidden_total"] = runs["hidden"]["passed"], runs["hidden"]["total"]
     out["hidden_failures"] = [r["test"].split("::")[-1] + ": " + r["message"][:200] for r in runs["hidden"]["results"] if not r["passed"]]
     out["base_checked"] = len(base_results)
