@@ -1,0 +1,24 @@
+{
+ "id": "E10",
+ "system": "baseline",
+ "app": "library",
+ "categories": [
+  "should_reject",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": true,
+ "hidden_passed": 4,
+ "hidden_total": 4,
+ "hidden_failures": [],
+ "base_checked": 59,
+ "regressions": [],
+ "clarification_written": true,
+ "success": true,
+ "accrete_version": "db1c0f1",
+ "t_start": 1790822014.1514251,
+ "t_end": 1790822039.3432994,
+ "self_timed_s": 25.2,
+ "duration_ms": 35550,
+ "tool_uses": 8,
+ "tokens": 51484
+}
