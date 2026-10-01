@@ -45,3 +45,24 @@ challenges that inform a redesign are reclassified as development evidence.
 | # | Problem | Revision |
 |---|---|---|
 | H1 | In the development runs the public test client (`harness/accept_client.py`) was outside the workspaces. The baseline apps' own pytest suites import it from `../../harness`, so baseline agents spent time writing stand-ins. That is a disadvantage for the baseline (accrete agents do not need it). | From the evaluation set on, `prepare` places the public client at `<run>/harness/accept_client.py`, where the apps' tests find it, and the prompt (identical for both systems) allows reading it. Dev-set baseline times are therefore somewhat pessimistic for the baseline; the evaluation set is the fair comparison. |
+
+## After the evaluation (post-freeze; evaluation results are NOT re-scored)
+
+The evaluation used the frozen engine (`FREEZE.md`). Both accrete evaluation failures, and the
+two base-suite failures of the accrete maintenance build, came from two engine gaps. They were
+fixed only after every accrete evaluation run had finished. They are reported here so the
+first-attempt results stand as the measured result.
+
+| # | Problem found | Evidence | Revision |
+|---|---|---|---|
+| PE1 | A filter on a field the collection does not have returned `200 {"items": []}`; there was no way for an application to ask for 400 | maintenance base suite (2 tests, transfer build) and E05 (1 hidden test); both agents identified the cause themselves | unknown filter fields are a 400 (`id` and every field of the collection are known) |
+| PE2 | `required` text accepted `""` and whitespace-only strings | E11 (1 hidden test) | client input for a required text field must contain a non-whitespace character (stored data is not re-validated, so existing records are unaffected) |
+
+After PE1 and PE2 the outputs the agents already produced, re-run unchanged against the
+patched engine, pass:
+- every development and evaluation run (`harness/compat_check.sh dev|eval`), including E05 (7/7) and E11 (9/9);
+- the maintenance base suite (50/50).
+
+This shows the engine-level nature of these failures. It also shows a property of the design:
+a fix in the engine reaches every application built on it, with no change to the applications.
+The flip side is C1: the change pipeline does not check engine upgrades.

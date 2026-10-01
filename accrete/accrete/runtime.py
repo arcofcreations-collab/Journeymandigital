@@ -136,6 +136,8 @@ def parse_input(f, v, ctx):
         if t in ("text",):
             if not isinstance(v, str):
                 return None, "must be text"
+            if f.get("required") and not v.strip():
+                return None, "must not be empty"
             return v, None
         if t == "int":
             if isinstance(v, bool) or not isinstance(v, int):
@@ -522,6 +524,9 @@ def _require_user(ctx):
 def op_list(ctx, coll, query):
     _require_user(ctx)
     ent = _entity_or_404(ctx, coll)
+    unknown = [k for k in query if k != "id" and not M.has_field(ent, k)]
+    if unknown:
+        halt(400, "unknown filter", {k: "no such field" for k in unknown})
     items = []
     for rid in sorted(records(ctx.world, ent["id"])):
         if not can_read(ctx, ent, rid):
