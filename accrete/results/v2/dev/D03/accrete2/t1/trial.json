@@ -1,0 +1,16 @@
+{
+ "id": "D03",
+ "set": "dev",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "sequence",
+  "interaction"
+ ],
+ "expect_rejection": false,
+ "version": "4d9d708",
+ "attempts": [],
+ "extra": []
+}

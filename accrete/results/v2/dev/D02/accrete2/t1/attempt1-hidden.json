@@ -1,0 +1,75 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D02/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D02/test_D02.py",
+ "passed": 13,
+ "total": 13,
+ "seconds": 0.63,
+ "results": [
+  {
+   "test": "challenges.dev.D02.test_D02::test_seed_has_no_holds_and_no_reserved_books",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_member_places_hold_on_loaned_book",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_hold_conflicts_and_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_librarian_places_hold_for_member",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_return_makes_earliest_hold_ready",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_reserved_book_only_borrowable_by_ready_member",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_ready_member_at_loan_limit_keeps_hold",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_cancel_ready_hold_passes_to_next_then_frees_book",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_cancel_permissions_and_state",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_hold_read_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_holds_cannot_be_written_directly",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_return_without_holds_unchanged",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D02.test_D02::test_ui_hold_and_borrow_forms",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

@@ -1,0 +1,162 @@
+[
+  {
+    "id": "delete_skips_read_rule",
+    "description": "DELETE no longer checks the entity's read rule, so a user who cannot read a record (403 on GET) can still delete it whenever the delete rule allows.",
+    "category": "permissions",
+    "file": "runtime.py",
+    "old": "    if not can_read(ctx, ent, rid) or not _safe_test(ctx, ent[\"rules\"].get(\"delete\"), True, record=rec):",
+    "new": "    if not _safe_test(ctx, ent[\"rules\"].get(\"delete\"), True, record=rec):"
+  },
+  {
+    "id": "write_if_fail_open",
+    "description": "A field's write_if that raises while being evaluated (e.g. follows a missing reference on a create candidate) now allows the write instead of denying it with 403.",
+    "category": "permissions",
+    "file": "runtime.py",
+    "old": "if f.get(\"write_if\") and not _safe_test(ctx, f[\"write_if\"], False, record=rec_for_rules, input=body):",
+    "new": "if f.get(\"write_if\") and not _safe_test(ctx, f[\"write_if\"], True, record=rec_for_rules, input=body):"
+  },
+  {
+    "id": "required_text_whitespace_accepted",
+    "description": "Required text fields reject only the empty string; whitespace-only values such as '   ' are now accepted on create/update instead of 400.",
+    "category": "validation",
+    "file": "runtime.py",
+    "old": "            if f.get(\"required\") and not v.strip():",
+    "new": "            if f.get(\"required\") and not v:"
+  },
+  {
+    "id": "unique_checks_first_record_only",
+    "description": "The uniqueness check stops after the first stored record of the entity (break mis-indented), so duplicates of any other record are accepted; on updates of the first record nothing is checked.",
+    "category": "validation",
+    "file": "runtime.py",
+    "old": "                if orid != rid and odata.get(f[\"id\"]) == v:\n                    errors[f[\"name\"]] = \"must be unique\"\n                    break\n",
+    "new": "                if orid != rid and odata.get(f[\"id\"]) == v:\n                    errors[f[\"name\"]] = \"must be unique\"\n                break\n"
+  },
+  {
+    "id": "create_guard_before_field_403",
+    "description": "On create, create_guard (409) is evaluated before write_if field denials (403); a request that sets a forbidden field while the guard fails now gets 409 instead of 403.",
+    "category": "error-precedence",
+    "file": "runtime.py",
+    "old": "    if errs403:\n        halt(403, \"you may not set some fields\", errs403)\n    if not _safe_test(ctx, ent[\"rules\"].get(\"create_guard\"), True, record=cand, input=body):\n        halt(409, ent.get(\"guard_messages\", {}).get(\"create_guard\") or f\"{ent['name']} cannot be created now\")\n",
+    "new": "    if not _safe_test(ctx, ent[\"rules\"].get(\"create_guard\"), True, record=cand, input=body):\n        halt(409, ent.get(\"guard_messages\", {}).get(\"create_guard\") or f\"{ent['name']} cannot be created now\")\n    if errs403:\n        halt(403, \"you may not set some fields\", errs403)\n"
+  },
+  {
+    "id": "action_params_400_before_guard",
+    "description": "Actions report invalid/missing parameters (400) before checking the guard, so an action whose guard fails and whose params are invalid returns 400 instead of 409.",
+    "category": "error-precedence",
+    "file": "runtime.py",
+    "old": "    if not action_possible(ctx, ent, rec, action, params):\n",
+    "new": "    if perrs:\n        halt(400, \"invalid parameters\", perrs)\n    if not action_possible(ctx, ent, rec, action, params):\n"
+  },
+  {
+    "id": "computed_cache_not_invalidated",
+    "description": "Computed fields of stored records are memoised per request and the cache is never invalidated on writes, so a response after an update/action shows the computed value as it was before the change if a rule or guard read it earlier in the same request.",
+    "category": "derived-values",
+    "file": "runtime.py",
+    "old": "        self._computing.add(key)\n        try:\n            return self.eval(f[\"computed\"], record=rec)\n        finally:\n            self._computing.discard(key)\n",
+    "new": "        cache = self.__dict__.setdefault(\"_computed_cache\", {})\n        if rec._override is None and key in cache:\n            return cache[key]\n        self._computing.add(key)\n        try:\n            v = self.eval(f[\"computed\"], record=rec)\n            if rec._override is None:\n                cache[key] = v\n            return v\n        finally:\n            self._computing.discard(key)\n"
+  },
+  {
+    "id": "defaults_applied_in_reverse_order",
+    "description": "Defaults are applied in reverse field order, so a default that reads another defaulted field declared before it (e.g. due = record.start + days(14) with start defaulting to today) sees None and fails or computes a wrong value.",
+    "category": "derived-values",
+    "file": "runtime.py",
+    "old": "    for f in M.ordered_fields(ent):\n        if f.get(\"computed\") or f[\"id\"] in provided:\n",
+    "new": "    for f in reversed(M.ordered_fields(ent)):\n        if f.get(\"computed\") or f[\"id\"] in provided:\n"
+  },
+  {
+    "id": "between_upper_bound_exclusive",
+    "description": "between(x, lo, hi) excludes the upper bound (lo <= x < hi), so values exactly equal to hi are no longer considered in range.",
+    "category": "expressions/builtins",
+    "file": "expr.py",
+    "old": "    return x is not None and lo <= x <= hi",
+    "new": "    return x is not None and lo <= x < hi"
+  },
+  {
+    "id": "round_half_up",
+    "description": "round() switches from Python's round-half-to-even to round-half-up via floor(x*10^n+0.5) and always returns a float: round(2.5) is 3.0 instead of 2, round(0.125, 2) is 0.13, negative halves and integer results change too.",
+    "category": "expressions/builtins",
+    "file": "expr.py",
+    "old": "    return None if x is None else round(x, n)",
+    "new": "    return None if x is None else math.floor(x * 10 ** n + 0.5) / 10 ** n"
+  },
+  {
+    "id": "where_none_matches_falsy",
+    "description": "count/find/first keyword filters treat a missing (None) attribute as equal to any falsy filter value, so count(tasks, done=False) or count(items, qty=0) also counts records whose field is unset.",
+    "category": "expressions/builtins",
+    "file": "expr.py",
+    "old": "def _eq(a, b):\n    return a == b\n",
+    "new": "def _eq(a, b):\n    return a == b or (a is None and not b)\n"
+  },
+  {
+    "id": "fail_effect_default_status_400",
+    "description": "A fail effect without an explicit status now responds 400 instead of the documented default 409.",
+    "category": "effects/actions",
+    "file": "runtime.py",
+    "old": "halt(int(eff.get(\"status\", 409)), str(msg))",
+    "new": "halt(int(eff.get(\"status\", 400)), str(msg))"
+  },
+  {
+    "id": "update_effect_binds_record_to_target",
+    "description": "In {update: ..., set: ...} effects, `record` is bound to each target record instead of the record the action/trigger runs on, so set expressions that read record.x take the target's value.",
+    "category": "effects/actions",
+    "file": "runtime.py",
+    "old": "data[f[\"id\"]] = to_storage(f, ctx.eval(ex, record=rec, it=t, **env_extra))",
+    "new": "data[f[\"id\"]] = to_storage(f, ctx.eval(ex, record=t, it=t, **env_extra))"
+  },
+  {
+    "id": "rollback_keeps_outbox",
+    "description": "A failed request no longer removes the outbox messages it emitted before failing (e.g. emit then a fail effect or constraint violation), so the outbox shows messages for operations that were rolled back.",
+    "category": "atomicity",
+    "file": "runtime.py",
+    "old": "        del self.world[\"outbox\"][self.outbox_mark:]\n        self.world[\"next_id\"] = dict(self.next_id_mark[0])\n",
+    "new": "        self.world[\"next_id\"] = dict(self.next_id_mark[0])\n"
+  },
+  {
+    "id": "bool_filter_python_repr",
+    "description": "List filters compare bool fields using Python's str() ('True'/'False'), so ?done=true no longer matches any record (only ?done=True does).",
+    "category": "filtering/lists",
+    "file": "runtime.py",
+    "old": "            sval = json.dumps(iv) if isinstance(iv, bool) else (\"\" if iv is None else str(iv))",
+    "new": "            sval = \"\" if iv is None else str(iv)"
+  },
+  {
+    "id": "hidden_fields_serialised_as_null",
+    "description": "Fields hidden by read_if are no longer omitted from API records; they are included with the value null (so the key set of a record changes for users who may not read the field).",
+    "category": "serialisation",
+    "file": "runtime.py",
+    "old": "    for f in visible_fields(ctx, ent, rec):\n        try:\n            v = getattr(rec, f[\"name\"])\n",
+    "new": "    shown = visible_fields(ctx, ent, rec)\n    for f in M.ordered_fields(ent):\n        if f not in shown:\n            out[f[\"name\"]] = None\n            continue\n        try:\n            v = getattr(rec, f[\"name\"])\n"
+  },
+  {
+    "id": "ui_shows_guarded_actions",
+    "description": "The detail page shows an action button whenever the user is allowed to run it, even when the guard currently fails (e.g. a borrow button on a book that is on loan).",
+    "category": "ui",
+    "file": "ui.py",
+    "old": "        if R.action_allowed(ctx, ent, rec, a, {}) and R.action_possible(ctx, ent, rec, a, {}):",
+    "new": "        if R.action_allowed(ctx, ent, rec, a, {}):"
+  },
+  {
+    "id": "effect_created_records_skip_create_triggers",
+    "description": "Records created by a create effect (in an action or another trigger) no longer fire their entity's on: create triggers; only records created via POST do.",
+    "category": "triggers",
+    "file": "runtime.py",
+    "old": "            fire_triggers(ctx, tent, nid, \"create\", None)\n",
+    "new": ""
+  },
+  {
+    "id": "update_trigger_old_is_live",
+    "description": "In update triggers `old` is a live view of the record rather than a snapshot taken before the update, so old equals the new values and conditions like `when: record.status != old.status` never fire.",
+    "category": "triggers",
+    "file": "runtime.py",
+    "old": "    old = Rec(ctx, ent, rid, override=copy.deepcopy(records(ctx.world, ent[\"id\"])[rid]))\n    data = _check_input_fields(",
+    "new": "    old = Rec(ctx, ent, rid)\n    data = _check_input_fields("
+  },
+  {
+    "id": "today_from_wall_clock",
+    "description": "`today` in expressions comes from the server's wall-clock date instead of the request's `now`, so it disagrees with now.date() whenever a request is evaluated at a supplied time (or the local date differs from the UTC date).",
+    "category": "dates/time",
+    "file": "runtime.py",
+    "old": "\"today\": self.now.date(),",
+    "new": "\"today\": dt.date.today(),"
+  }
+]

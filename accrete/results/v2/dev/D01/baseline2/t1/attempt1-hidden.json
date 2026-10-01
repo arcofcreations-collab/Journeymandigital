@@ -1,0 +1,70 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D01/baseline2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D01/test_D01.py",
+ "passed": 12,
+ "total": 12,
+ "seconds": 0.83,
+ "results": [
+  {
+   "test": "challenges.dev.D01.test_D01::test_authors_migrated_in_first_appearance_order",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_author_book_counts_after_migration",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_every_existing_book_references_its_migrated_author",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_filter_books_by_author_id",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_create_book_with_author_reference",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_book_author_must_be_existing_author_id",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_reassigning_book_author_updates_counts",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_librarian_manages_authors_and_names_are_unique",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_members_cannot_write_authors",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_delete_author_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_ui_shows_author_name_and_authors_list",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D01.test_D01::test_borrowing_and_loans_unaffected",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}
