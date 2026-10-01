@@ -3,28 +3,28 @@
   "app": "library",
   "requests": {
    "list books (librarian)": {
-    "median_ms": 7.345,
-    "p95_ms": 8.286,
+    "median_ms": 4.696,
+    "p95_ms": 6.011,
     "n": 100
    },
    "list loans (member)": {
-    "median_ms": 3.681,
-    "p95_ms": 5.024,
+    "median_ms": 1.513,
+    "p95_ms": 1.819,
     "n": 100
    },
    "get book": {
-    "median_ms": 1.026,
-    "p95_ms": 1.133,
+    "median_ms": 0.878,
+    "p95_ms": 1.031,
     "n": 100
    },
    "UI list books": {
-    "median_ms": 5.724,
-    "p95_ms": 5.971,
+    "median_ms": 3.398,
+    "p95_ms": 3.605,
     "n": 100
    },
    "borrow + return": {
-    "median_ms": 2.811,
-    "p95_ms": 3.576,
+    "median_ms": 2.451,
+    "p95_ms": 3.586,
     "n": 100
    }
   }
@@ -33,28 +33,28 @@
   "app": "library",
   "requests": {
    "list books (librarian)": {
-    "median_ms": 0.335,
-    "p95_ms": 0.417,
+    "median_ms": 0.374,
+    "p95_ms": 0.471,
     "n": 100
    },
    "list loans (member)": {
-    "median_ms": 0.301,
-    "p95_ms": 0.358,
+    "median_ms": 0.324,
+    "p95_ms": 0.397,
     "n": 100
    },
    "get book": {
-    "median_ms": 0.207,
-    "p95_ms": 0.266,
+    "median_ms": 0.229,
+    "p95_ms": 0.303,
     "n": 100
    },
    "UI list books": {
-    "median_ms": 0.88,
-    "p95_ms": 0.966,
+    "median_ms": 0.894,
+    "p95_ms": 0.986,
     "n": 100
    },
    "borrow + return": {
-    "median_ms": 1.562,
-    "p95_ms": 2.46,
+    "median_ms": 1.594,
+    "p95_ms": 2.733,
     "n": 100
    }
   }
@@ -63,28 +63,28 @@
   "app": "expenses",
   "requests": {
    "list claims (finance)": {
-    "median_ms": 7.72,
-    "p95_ms": 9.045,
+    "median_ms": 3.454,
+    "p95_ms": 4.184,
     "n": 100
    },
    "list claims (manager)": {
-    "median_ms": 6.248,
-    "p95_ms": 7.408,
+    "median_ms": 2.233,
+    "p95_ms": 3.052,
     "n": 100
    },
    "get claim": {
-    "median_ms": 0.995,
-    "p95_ms": 1.617,
+    "median_ms": 0.888,
+    "p95_ms": 1.186,
     "n": 100
    },
    "UI list claims": {
-    "median_ms": 5.519,
-    "p95_ms": 5.917,
+    "median_ms": 2.129,
+    "p95_ms": 2.24,
     "n": 100
    },
    "create claim": {
-    "median_ms": 2.29,
-    "p95_ms": 3.219,
+    "median_ms": 1.921,
+    "p95_ms": 2.372,
     "n": 100
    }
   }
@@ -93,28 +93,28 @@
   "app": "expenses",
   "requests": {
    "list claims (finance)": {
-    "median_ms": 0.637,
-    "p95_ms": 0.726,
+    "median_ms": 0.681,
+    "p95_ms": 0.809,
     "n": 100
    },
    "list claims (manager)": {
-    "median_ms": 0.478,
-    "p95_ms": 0.577,
+    "median_ms": 0.479,
+    "p95_ms": 0.565,
     "n": 100
    },
    "get claim": {
-    "median_ms": 0.215,
-    "p95_ms": 0.276,
+    "median_ms": 0.217,
+    "p95_ms": 0.3,
     "n": 100
    },
    "UI list claims": {
-    "median_ms": 1.689,
-    "p95_ms": 1.794,
+    "median_ms": 1.703,
+    "p95_ms": 1.829,
     "n": 100
    },
    "create claim": {
-    "median_ms": 1.54,
-    "p95_ms": 2.81,
+    "median_ms": 1.695,
+    "p95_ms": 3.297,
     "n": 100
    }
   }

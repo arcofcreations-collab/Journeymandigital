@@ -129,14 +129,29 @@ BUILTINS = {
 }
 
 
+_CODE_CACHE = {}
+
+
+def _compiled(src):
+    """Validated, compiled code for an expression source (cached: expressions are immutable strings)."""
+    code = _CODE_CACHE.get(src)
+    if code is None:
+        if len(_CODE_CACHE) > 20000:
+            _CODE_CACHE.clear()
+        code = _CODE_CACHE[src] = compile(parse(src), "<expr>", "eval")
+    return code
+
+
 class Undefined(Exception):
     pass
 
 
 def evaluate(src_or_tree, env: dict):
     """Evaluate an expression with the given variables (plus built-ins)."""
-    tree = parse(src_or_tree) if isinstance(src_or_tree, str) else src_or_tree
-    code = compile(tree, "<expr>", "eval")
+    if isinstance(src_or_tree, str):
+        code = _compiled(src_or_tree)
+    else:
+        code = compile(src_or_tree, "<expr>", "eval")
     scope = dict(BUILTINS)
     scope.update(env)
     scope["__builtins__"] = {}
