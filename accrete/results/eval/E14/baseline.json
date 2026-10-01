@@ -1,0 +1,37 @@
+{
+ "id": "E14",
+ "system": "baseline",
+ "app": "library",
+ "categories": [
+  "sequence",
+  "interaction",
+  "rule_change",
+  "data_migration",
+  "failure_atomicity"
+ ],
+ "expect_rejection": false,
+ "base_failing_before": [
+  "test_book_status_for_whole_catalogue",
+  "test_borrow_book_on_loan_is_409",
+  "test_failed_borrows_emit_no_outbox_message",
+  "test_librarian_creates_book",
+  "test_librarian_lends_to_member",
+  "test_member_borrows_for_self",
+  "test_returned_book_can_be_borrowed_again",
+  "test_ui_book_detail_fields_and_borrow_action"
+ ],
+ "hidden_passed": 7,
+ "hidden_total": 7,
+ "hidden_failures": [],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": "6561045",
+ "t_start": 1790822397.2515101,
+ "t_end": 1790822635.7124782,
+ "self_timed_s": 238.5,
+ "duration_ms": 252670,
+ "tool_uses": 24,
+ "tokens": 115079
+}
