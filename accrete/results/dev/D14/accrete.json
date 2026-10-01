@@ -1,0 +1,24 @@
+{
+ "id": "D14",
+ "system": "accrete",
+ "app": "expenses",
+ "categories": [
+  "should_reject",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": true,
+ "hidden_passed": 7,
+ "hidden_total": 7,
+ "hidden_failures": [],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": true,
+ "success": true,
+ "accrete_version": "9aa7905",
+ "t_start": 1790819396.933981,
+ "t_end": 1790819413.588953,
+ "self_timed_s": 16.7,
+ "duration_ms": 23683,
+ "tool_uses": 6,
+ "tokens": 51881
+}

@@ -1,0 +1,25 @@
+{
+ "id": "D13",
+ "system": "baseline",
+ "app": "expenses",
+ "categories": [
+  "new_concept",
+  "permissions",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 11,
+ "hidden_total": 11,
+ "hidden_failures": [],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": null,
+ "t_start": 1790819154.5624053,
+ "t_end": 1790819411.363968,
+ "self_timed_s": 256.8,
+ "duration_ms": 270936,
+ "tool_uses": 29,
+ "tokens": 112052
+}
