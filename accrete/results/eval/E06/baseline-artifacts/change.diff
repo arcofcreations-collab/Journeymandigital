@@ -1,0 +1,1234 @@
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,8 @@
+ 
+ A facilities team at three sites tracks its staff, the assets it maintains and the work orders
+ raised against those assets. Requesters raise orders, supervisors assign them to technicians
+-(up to a workload cap per technician), technicians start and complete them, recording the spare parts they use (stock is kept per
++(up to a workload cap per technician) at their own site while one manager has the supervisor
++rights on every site and alone manages staff, technicians start and complete them, recording the spare parts they use (stock is kept per
+ site; part usages are read-only history) and logging their working time (time entries, also
+ read-only history; an order's `labor_minutes` is their sum). Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External
+ behaviour follows `spec/CONTRACT.md` and `spec/apps/maintenance.md`.
+@@ -22,7 +23,7 @@
+   errors.py               ValidationError/Forbidden/NotFound/Conflict/... and their rendering
+   validation.py           vocabulary (roles, statuses, ...) and request-body/action-parameter checks
+   repository.py           all SQL; returns API-shaped dicts (asset_id column -> "asset" field)
+-  permissions.py          who may do what (pure functions of user + record + asset)
++  permissions.py          who may do what (pure functions of user + record + asset; site scoping)
+   services.py             business rules, derived fields and the work order workflow
+   filters.py              ?field=value list filtering
+   routes_api.py           /api/... JSON endpoints (thin: parse, call service, respond)
+@@ -68,7 +69,7 @@
+ ```
+ open --assign--> assigned --start--> in_progress --complete--> completed
+                  assigned --assign--> assigned               (re-assignment)
+-open | assigned | in_progress --cancel--> cancelled          (a non-supervisor requester: only from open)
++open | assigned | in_progress --cancel--> cancelled          (the order's requester without supervisor rights there: only from open)
+ in_progress --use_parts--> in_progress                       (assignee only; consumes stock)
+ in_progress --log_time---> in_progress                       (assignee only; adds a time entry)
+ ```
+@@ -87,8 +88,10 @@
+ | `log_time`: one time entry (caller, now), no message | `services.log_time_on_work_order` (body checks in `validation.clean_log_time_params`, `LOG_TIME_MIN/MAX_MINUTES`) |
+ | `complete` requires a time entry | `services._authorize_complete` (`repository.work_order_has_time_entries`) |
+ | who may read / write time entries | `permissions.can_read_time_entry` (= can read the order), `can_write_time_entries` (nobody) |
+-| who may manage parts / read and write part usages | `permissions.can_manage_parts`, `can_read_part_usage`, `can_write_part_usages` |
++| who may read and write part usages | `permissions.can_read_part_usage`, `can_write_part_usages` |
+ | who can read/create/edit an order | `permissions.can_read_work_order`, `can_create_work_order_for`, `can_edit_work_order` |
++| supervisor rights by site (manager: every site; supervisor: own site) | `permissions.supervises_site`, `supervises_work_order` (site of the order's asset) |
++| who may manage staff / assets / parts | `permissions.can_manage_staff` (managers), `can_create_assets`/`can_manage_assets_at`, `can_create_parts`/`can_manage_parts_at`; site checks in `services._ensure_manages_site` |
+ | PATCH status rules | `services._authorize_edit` |
+ | fields clients may set / never set | `validation.WORK_ORDER_CREATABLE/EDITABLE/READ_ONLY`, `STAFF_WRITABLE`, `ASSET_WRITABLE` |
+ | actions shown on the detail page | `services.work_order_actions` (runs the same `_authorize_<action>` checks) |
+@@ -147,7 +150,22 @@
+ * Optional booleans (`active`, `retired`) default when omitted; an explicit `null` is a 400.
+   `description` accepts any string or `null`.
+ * The requester's PATCH 403 applies to sending `priority` at all (even unchanged). A staff member
+-  who is both a supervisor and the requester follows the supervisor rules (PATCH and cancel).
++  who has the supervisor rights on the order and is also its requester follows the supervisor rules
++  (PATCH and cancel).
++* Roles (E06, migration `0007_manager_role.sql`): `requester`, `technician`, `supervisor`, `manager`.
++  "Supervisor rights" on a site (read every order there, `assign`, `cancel` from
++  open/assigned/in_progress, PATCH of title/description/priority while unfinished, manage assets and
++  parts there) belong to managers on every site and to supervisors on their own `site` only. The
++  site of a work order is its asset's current site; of an asset or a part, its own `site`. On orders
++  of other sites a supervisor has only what any staff member has (as `requested_by`, assignee).
++  Supervisors create work orders only for assets at their own site (like requesters/technicians);
++  managers anywhere. Only managers create/PATCH/DELETE staff.
++* Asset/part writes by a supervisor: a create body whose `site` is set (not missing or `null`) to
++  another site, a PATCH/DELETE of a record whose current `site` is another site, and a PATCH setting
++  `site` to another site are 403, checked before the retire 409 and any 400. A create body without
++  `site` (or with `site: null`) is a 400. The UI create forms preset (read-only) the supervisor's site.
++  The migration rebuilt `staff` (new CHECK) and made sofia (id 1) the manager; `seed.py` does the same
++  (`seed_role`).
+ * Retiring an asset: the 409 check runs when the body sets `retired` to `true` and the asset has
+   unfinished orders, before other validation (409 beats 400).
+ * `start`/`complete` are for the current assignee only (supervisors get 403); an unassigned
+--- a/maintenance_app/migrations/0007_manager_role.sql
++++ b/maintenance_app/migrations/0007_manager_role.sql
+@@ -0,0 +1,31 @@
++-- Site-scoped supervisors and a new 'manager' role. A manager has the supervisor rights on every
++-- site (and is the only role that manages staff); supervisors now run only their own site.
++--
++-- Data: staff sofia (id 1) becomes the company-wide manager and keeps her site (North); tomas
++-- (South) and yara (East) remain supervisors. No other record changes.
++--
++-- The CHECK constraint on role can't be altered in place, so the table is rebuilt
++-- (create-copy-drop-rename; the runner applies migrations with foreign keys off and checks
++-- them before committing). The UNIQUE constraint on username comes back with the table.
++
++CREATE TABLE staff_new (
++    id       INTEGER PRIMARY KEY AUTOINCREMENT,
++    username TEXT    NOT NULL UNIQUE,
++    name     TEXT    NOT NULL,
++    role     TEXT    NOT NULL CHECK (role IN ('requester', 'technician', 'supervisor', 'manager')),
++    site     TEXT    NOT NULL,
++    active   INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
++);
++
++INSERT INTO staff_new (id, username, name, role, site, active)
++SELECT id, username, name, role, site, active
++  FROM staff;
++
++-- Keep the id counter where it was, so new staff continue exactly as before.
++DELETE FROM sqlite_sequence WHERE name = 'staff_new';
++INSERT INTO sqlite_sequence (name, seq) SELECT 'staff_new', seq FROM sqlite_sequence WHERE name = 'staff';
++
++DROP TABLE staff;
++ALTER TABLE staff_new RENAME TO staff;
++
++UPDATE staff SET role = 'manager' WHERE id = 1 AND username = 'sofia';
+--- a/maintenance_app/permissions.py
++++ b/maintenance_app/permissions.py
+@@ -1,18 +1,36 @@
+ """Who may do what. Pure functions of the calling staff member and the records involved.
+ 
+ ``asset`` is the asset record a work order is raised against (its ``site`` decides which
+-technicians may read the order and where requesters/technicians may raise orders).
++technicians may read the order, which supervisor runs it and where requesters, technicians and
++supervisors may raise orders). The relevant site of an asset or a part is its own ``site``.
+ These answer only "is this user allowed?"; state rules (409) live in ``services``.
+ Inactive staff keep all the rights of their role (``active`` only matters for ``assign``).
++
++Supervision: a manager has the supervisor rights on every site; a supervisor only on their own
++site (see ``supervises_site``). Only managers manage staff.
+ """
+ 
+-# Work order fields only a supervisor may change; the requester sending one gets a 403.
++# Work order fields only the order's supervisor may change; the requester sending one gets a 403.
+ # (Other non-editable fields are a 400, reported by validation.)
+ WORK_ORDER_SUPERVISOR_ONLY = {"priority"}
+ 
+ 
++def is_manager(user):
++    return user["role"] == "manager"
++
++
+ def is_supervisor(user):
+     return user["role"] == "supervisor"
++
++
++def supervises_site(user, site):
++    """The supervisor rights at ``site``: managers everywhere, supervisors at their own site."""
++    return is_manager(user) or (is_supervisor(user) and user["site"] == site)
++
++
++def supervises_some_site(user):
++    """Managers and supervisors: may manage assets and parts (at least at one site)."""
++    return is_manager(user) or is_supervisor(user)
+ 
+ 
+ def is_technician(user):
+@@ -34,24 +52,36 @@
+ 
+ 
+ def can_manage_staff(user):
+-    """Create, update and delete staff."""
+-    return is_supervisor(user)
++    """Create, update and delete staff: managers only."""
++    return is_manager(user)
+ 
+ 
+ def can_read_asset(user, asset):
+     return True
+ 
+ 
+-def can_manage_assets(user):
+-    """Create, update and delete assets."""
+-    return is_supervisor(user)
++def can_create_assets(user):
++    """May create assets at all (``can_manage_assets_at`` decides for which site)."""
++    return supervises_some_site(user)
++
++
++def can_manage_assets_at(user, site):
++    """Create, update and delete assets whose ``site`` is ``site`` (also the site an asset is
++    created with or moved to)."""
++    return supervises_site(user, site)
+ 
+ 
+ # --- work orders ----------------------------------------------------------------------
+ 
++def supervises_work_order(user, asset):
++    """The supervisor rights on an order (read, assign, cancel while unfinished, edit priority)
++    belong to whoever supervises the site of its asset."""
++    return supervises_site(user, asset["site"])
++
++
+ def can_read_work_order(user, order, asset):
+     return (
+-        is_supervisor(user)
++        supervises_work_order(user, asset)
+         or is_requester_of(user, order)
+         or is_assignee_of(user, order)
+         or (is_technician(user) and user["site"] == asset["site"])
+@@ -63,13 +93,13 @@
+ 
+ 
+ def can_create_work_order_for(user, asset):
+-    """Requesters and technicians only at their own site; supervisors anywhere."""
+-    return is_supervisor(user) or asset["site"] == user["site"]
++    """Managers anywhere; everyone else (supervisors included) only at their own site."""
++    return is_manager(user) or asset["site"] == user["site"]
+ 
+ 
+-def can_edit_work_order(user, order, fields):
+-    """PATCH: supervisors; or the requester, unless they send a supervisor-only field."""
+-    if is_supervisor(user):
++def can_edit_work_order(user, order, asset, fields):
++    """PATCH: the order's supervisor; or the requester, unless they send a supervisor-only field."""
++    if supervises_work_order(user, asset):
+         return True
+     return is_requester_of(user, order) and not WORK_ORDER_SUPERVISOR_ONLY.intersection(fields)
+ 
+@@ -78,8 +108,8 @@
+     return False
+ 
+ 
+-def can_assign_work_order(user, order):
+-    return is_supervisor(user)
++def can_assign_work_order(user, order, asset):
++    return supervises_work_order(user, asset)
+ 
+ 
+ def can_work_on_work_order(user, order):
+@@ -87,8 +117,8 @@
+     return is_assignee_of(user, order)
+ 
+ 
+-def can_cancel_work_order(user, order):
+-    return is_supervisor(user) or is_requester_of(user, order)
++def can_cancel_work_order(user, order, asset):
++    return supervises_work_order(user, asset) or is_requester_of(user, order)
+ 
+ 
+ def can_use_parts_on_work_order(user, order):
+@@ -107,9 +137,15 @@
+     return True
+ 
+ 
+-def can_manage_parts(user):
+-    """Create, update and delete parts."""
+-    return is_supervisor(user)
++def can_create_parts(user):
++    """May create parts at all (``can_manage_parts_at`` decides for which site)."""
++    return supervises_some_site(user)
++
++
++def can_manage_parts_at(user, site):
++    """Create, update and delete parts whose ``site`` is ``site`` (also the site a part is
++    created with or moved to)."""
++    return supervises_site(user, site)
+ 
+ 
+ def can_read_part_usage(user, order, asset):
+--- a/maintenance_app/routes_ui.py
++++ b/maintenance_app/routes_ui.py
+@@ -62,6 +62,11 @@
+     return {"true": True, "false": False}.get(value.strip().lower(), value)
+ 
+ 
++def _own_site_unless_manager(user):
++    """The only ``site`` a non-manager may give a new asset or part (None: any site)."""
++    return None if permissions.is_manager(user) else user["site"]
++
++
+ def _redirect_to_work_order(work_order_id):
+     return redirect(url_for("ui.show_work_order", work_order_id=work_order_id), 303)
+ 
+@@ -70,8 +75,9 @@
+ 
+ @bp.get("/staff")
+ def list_staff():
+-    staff = services.list_staff(current_context(), request.args.to_dict())
+-    return render_template("staff/list.html", staff=staff)
++    ctx = current_context()
++    staff = services.list_staff(ctx, request.args.to_dict())
++    return render_template("staff/list.html", staff=staff, can_create=permissions.can_manage_staff(ctx.user))
+ 
+ 
+ @bp.get("/staff/new")
+@@ -97,14 +103,17 @@
+ 
+ @bp.get("/assets")
+ def list_assets():
+-    assets = services.list_assets(current_context(), request.args.to_dict())
+-    return render_template("assets/list.html", assets=assets)
++    ctx = current_context()
++    assets = services.list_assets(ctx, request.args.to_dict())
++    return render_template("assets/list.html", assets=assets, can_create=permissions.can_create_assets(ctx.user))
+ 
+ 
+ @bp.get("/assets/new")
+ def new_asset():
+-    services.ensure_can_create_asset(current_context())
+-    return render_template("assets/new.html", criticalities=validation.ASSET_CRITICALITIES)
++    ctx = current_context()
++    services.ensure_can_create_asset(ctx)
++    return render_template("assets/new.html", criticalities=validation.ASSET_CRITICALITIES,
++                           site=_own_site_unless_manager(ctx.user))
+ 
+ 
+ @bp.post("/assets")
+@@ -203,14 +212,16 @@
+ 
+ @bp.get("/parts")
+ def list_parts():
+-    parts = services.list_parts(current_context(), request.args.to_dict())
+-    return render_template("parts/list.html", parts=parts)
++    ctx = current_context()
++    parts = services.list_parts(ctx, request.args.to_dict())
++    return render_template("parts/list.html", parts=parts, can_create=permissions.can_create_parts(ctx.user))
+ 
+ 
+ @bp.get("/parts/new")
+ def new_part():
+-    services.ensure_can_create_part(current_context())
+-    return render_template("parts/new.html")
++    ctx = current_context()
++    services.ensure_can_create_part(ctx)
++    return render_template("parts/new.html", site=_own_site_unless_manager(ctx.user))
+ 
+ 
+ @bp.post("/parts")
+--- a/maintenance_app/services.py
++++ b/maintenance_app/services.py
+@@ -9,6 +9,8 @@
+     open --assign--> assigned --start--> in_progress --complete--> completed
+                      assigned --assign--> assigned               (re-assignment)
+     open | assigned | in_progress --cancel--> cancelled          (requester: only from open)
++    (assign, cancel from assigned/in_progress and editing priority need the supervisor rights for
++    the order's site: managers everywhere, supervisors at their own site)
+     in_progress --use_parts--> in_progress                       (consumes stock, records part usages)
+     in_progress --log_time---> in_progress                       (records a time entry)
+ 
+@@ -70,7 +72,7 @@
+ 
+ def ensure_can_create_staff(ctx):
+     if not permissions.can_manage_staff(ctx.user):
+-        raise Forbidden("Only supervisors can create staff.")
++        raise Forbidden("Only managers can create staff.")
+ 
+ 
+ def create_staff(ctx, data):
+@@ -86,7 +88,7 @@
+     with transaction():
+         _load_staff(staff_id)
+         if not permissions.can_manage_staff(ctx.user):
+-            raise Forbidden("Only supervisors can update staff.")
++            raise Forbidden("Only managers can update staff.")
+         values = validation.clean_staff(data, partial=True)
+         if "username" in values:
+             _ensure_username_free(values["username"], exclude_id=staff_id)
+@@ -98,7 +100,7 @@
+     with transaction():
+         _load_staff(staff_id)
+         if not permissions.can_manage_staff(ctx.user):
+-            raise Forbidden("Only supervisors can delete staff.")
++            raise Forbidden("Only managers can delete staff.")
+         if repository.staff_has_work_orders(staff_id):
+             raise Conflict("Staff who requested or are assigned to work orders cannot be deleted.")
+         repository.delete_staff(staff_id)
+@@ -131,12 +133,14 @@
+ 
+ 
+ def ensure_can_create_asset(ctx):
+-    if not permissions.can_manage_assets(ctx.user):
+-        raise Forbidden("Only supervisors can create assets.")
++    if not permissions.can_create_assets(ctx.user):
++        raise Forbidden("Only managers and supervisors can create assets.")
+ 
+ 
+ def create_asset(ctx, data):
+     ensure_can_create_asset(ctx)
++    # The site rule is a 403 and so wins over any 400 in the same body.
++    _ensure_manages_site(ctx.user, _site_in(data), permissions.can_manage_assets_at, "assets")
+     with transaction():
+         values = validation.clean_asset(data, partial=False)
+         _ensure_tag_free(values["tag"])
+@@ -147,8 +151,8 @@
+ def update_asset(ctx, asset_id, data):
+     with transaction():
+         asset = _load_asset(asset_id)
+-        if not permissions.can_manage_assets(ctx.user):
+-            raise Forbidden("Only supervisors can update assets.")
++        _ensure_manages_site(ctx.user, asset["site"], permissions.can_manage_assets_at, "assets")
++        _ensure_manages_site(ctx.user, _site_in(data), permissions.can_manage_assets_at, "assets")
+         if isinstance(data, dict) and data.get("retired") is True and asset["open_orders"] > 0:
+             raise Conflict("An asset with unfinished work orders cannot be retired.")
+         values = validation.clean_asset(data, partial=True)
+@@ -160,9 +164,8 @@
+ 
+ def delete_asset(ctx, asset_id):
+     with transaction():
+-        _load_asset(asset_id)
+-        if not permissions.can_manage_assets(ctx.user):
+-            raise Forbidden("Only supervisors can delete assets.")
++        asset = _load_asset(asset_id)
++        _ensure_manages_site(ctx.user, asset["site"], permissions.can_manage_assets_at, "assets")
+         if repository.asset_has_work_orders(asset_id):
+             raise Conflict("An asset with work orders cannot be deleted.")
+         repository.delete_asset(asset_id)
+@@ -178,6 +181,19 @@
+ def _ensure_tag_free(tag, exclude_id=None):
+     if repository.tag_taken(tag, exclude_id):
+         raise ValidationError("Tag already in use.", {"tag": "already in use"})
++
++
++def _site_in(data):
++    """The ``site`` a create or PATCH body sets; None when it sets none (a missing or null
++    ``site`` is left to validation)."""
++    return data.get("site") if isinstance(data, dict) else None
++
++
++def _ensure_manages_site(user, site, may_manage_at, records):
++    """403 unless ``user`` may manage ``records`` (assets or parts) at ``site``; ``None`` (no
++    site given) passes. Used for a record's current site and for the site a body sets."""
++    if site is not None and not may_manage_at(user, site):
++        raise Forbidden(f"You can only manage {records} at a site you supervise.")
+ 
+ 
+ # --- work orders: reading -------------------------------------------------------------
+@@ -239,11 +255,12 @@
+     with transaction():
+         order = _load_work_order(work_order_id)
+         fields = data.keys() if isinstance(data, dict) else ()
+-        _authorize_edit(ctx.user, order, fields)
++        asset = repository.get_asset(order["asset"])
++        _authorize_edit(ctx.user, order, asset, fields)
+         values = validation.clean_work_order(data, partial=True)
+         if "priority" in values:
+             # Also when the order already has that priority: the rule refuses *setting* it.
+-            _ensure_priority_allowed(values["priority"], repository.get_asset(order["asset"]))
++            _ensure_priority_allowed(values["priority"], asset)
+         repository.update_work_order(work_order_id, values)
+     return present_work_order(ctx, repository.get_work_order(work_order_id))
+ 
+@@ -264,10 +281,10 @@
+         )
+ 
+ 
+-def _authorize_edit(user, order, fields):
+-    if not permissions.can_edit_work_order(user, order, fields):
+-        raise Forbidden("Only supervisors, or the requester for title and description, can edit this order.")
+-    if permissions.is_supervisor(user):
++def _authorize_edit(user, order, asset, fields):
++    if not permissions.can_edit_work_order(user, order, asset, fields):
++        raise Forbidden("Only the site's supervisor, or the requester for title and description, can edit this order.")
++    if permissions.supervises_work_order(user, asset):
+         _require_status(order, SUPERVISOR_EDITABLE_STATUSES, "Only unfinished work orders can be edited.")
+     else:
+         _require_status(order, REQUESTER_EDITABLE_STATUSES, "Requesters can only edit open work orders.")
+@@ -275,22 +292,22 @@
+ 
+ # --- work orders: actions -------------------------------------------------------------
+ # Each ``_authorize_<action>`` raises Forbidden (403) or Conflict (409) when the caller may
+-# not run the action on the order right now. The API actions and ``work_order_actions``
++# not run the action on the order (whose asset is ``asset``) right now. The API actions and ``work_order_actions``
+ # (the forms shown on the detail page) both use them, so the two always agree.
+ 
+-def _authorize_assign(user, order):
+-    if not permissions.can_assign_work_order(user, order):
+-        raise Forbidden("Only supervisors can assign work orders.")
++def _authorize_assign(user, order, asset):
++    if not permissions.can_assign_work_order(user, order, asset):
++        raise Forbidden("Only the site's supervisor can assign this work order.")
+     _require_status(order, ASSIGNABLE_STATUSES, "Only open or assigned work orders can be assigned.")
+ 
+ 
+-def _authorize_start(user, order):
++def _authorize_start(user, order, asset):
+     if not permissions.can_work_on_work_order(user, order):
+         raise Forbidden("Only the assignee can start the work order.")
+     _require_status(order, STARTABLE_STATUSES, "Only assigned work orders can be started.")
+ 
+ 
+-def _authorize_complete(user, order):
++def _authorize_complete(user, order, asset):
+     if not permissions.can_work_on_work_order(user, order):
+         raise Forbidden("Only the assignee can complete the work order.")
+     _require_status(order, COMPLETABLE_STATUSES, "Only work orders in progress can be completed.")
+@@ -298,22 +315,22 @@
+         raise Conflict("Log the working time (log_time) before completing the work order.")
+ 
+ 
+-def _authorize_cancel(user, order):
+-    if not permissions.can_cancel_work_order(user, order):
+-        raise Forbidden("Only supervisors or the requester can cancel the work order.")
+-    if permissions.is_supervisor(user):
++def _authorize_cancel(user, order, asset):
++    if not permissions.can_cancel_work_order(user, order, asset):
++        raise Forbidden("Only the site's supervisor or the requester can cancel the work order.")
++    if permissions.supervises_work_order(user, asset):
+         _require_status(order, SUPERVISOR_CANCELLABLE_STATUSES, "Only unfinished work orders can be cancelled.")
+     else:
+         _require_status(order, REQUESTER_CANCELLABLE_STATUSES, "Requesters can only cancel open work orders.")
+ 
+ 
+-def _authorize_use_parts(user, order):
++def _authorize_use_parts(user, order, asset):
+     if not permissions.can_use_parts_on_work_order(user, order):
+         raise Forbidden("Only the assignee can use parts on the work order.")
+     _require_status(order, PARTS_USABLE_STATUSES, "Parts can only be used on work orders in progress.")
+ 
+ 
+-def _authorize_log_time(user, order):
++def _authorize_log_time(user, order, asset):
+     if not permissions.can_log_time_on_work_order(user, order):
+         raise Forbidden("Only the assignee can log time on the work order.")
+     _require_status(order, TIME_LOGGABLE_STATUSES, "Time can only be logged on work orders in progress.")
+@@ -331,10 +348,11 @@
+ 
+ def work_order_actions(ctx, order):
+     """Names of the actions the caller may run on ``order`` right now (permission and state)."""
++    asset = repository.get_asset(order["asset"])
+     allowed = []
+     for name, authorize in WORK_ORDER_ACTIONS.items():
+         try:
+-            authorize(ctx.user, order)
++            authorize(ctx.user, order, asset)
+         except (Forbidden, Conflict):
+             continue
+         allowed.append(name)
+@@ -344,9 +362,9 @@
+ def assign_work_order(ctx, work_order_id, params):
+     with transaction():
+         order = _load_work_order(work_order_id)
+-        _authorize_assign(ctx.user, order)
++        asset = repository.get_asset(order["asset"])
++        _authorize_assign(ctx.user, order, asset)
+         technician_id = validation.clean_assign_params(params)
+-        asset = repository.get_asset(order["asset"])
+         _ensure_can_be_assigned(repository.get_staff(technician_id), asset)
+         # Re-assigning an order to its current assignee adds nothing to their workload, so it is
+         # always allowed (even for a technician kept above the cap by existing data).
+@@ -363,7 +381,7 @@
+ def start_work_order(ctx, work_order_id, params):
+     with transaction():
+         order = _load_work_order(work_order_id)
+-        _authorize_start(ctx.user, order)
++        _authorize_start(ctx.user, order, repository.get_asset(order["asset"]))
+         validation.clean_no_params(params)
+         repository.mark_work_order_started(work_order_id, ctx.now_text)
+     return present_work_order(ctx, repository.get_work_order(work_order_id))
+@@ -374,7 +392,7 @@
+     order's derived total at this moment."""
+     with transaction():
+         order = _load_work_order(work_order_id)
+-        _authorize_complete(ctx.user, order)
++        _authorize_complete(ctx.user, order, repository.get_asset(order["asset"]))
+         resolution = validation.clean_complete_params(params)
+         repository.mark_work_order_completed(work_order_id, ctx.now_text, resolution)
+         repository.add_outbox_message(
+@@ -390,7 +408,7 @@
+     """The assignee records working time on an in-progress order (one time entry; no message)."""
+     with transaction():
+         order = _load_work_order(work_order_id)
+-        _authorize_log_time(ctx.user, order)
++        _authorize_log_time(ctx.user, order, repository.get_asset(order["asset"]))
+         values = validation.clean_log_time_params(params)
+         repository.insert_time_entry(work_order_id, ctx.user["id"], values["minutes"], ctx.now_text, values["note"])
+     return present_work_order(ctx, repository.get_work_order(work_order_id))
+@@ -399,7 +417,7 @@
+ def cancel_work_order(ctx, work_order_id, params):
+     with transaction():
+         order = _load_work_order(work_order_id)
+-        _authorize_cancel(ctx.user, order)
++        _authorize_cancel(ctx.user, order, repository.get_asset(order["asset"]))
+         reason = validation.clean_cancel_params(params)
+         repository.mark_work_order_cancelled(work_order_id, reason)
+     return present_work_order(ctx, repository.get_work_order(work_order_id))
+@@ -413,9 +431,10 @@
+     """
+     with transaction():
+         order = _load_work_order(work_order_id)
+-        _authorize_use_parts(ctx.user, order)
++        asset = repository.get_asset(order["asset"])
++        _authorize_use_parts(ctx.user, order, asset)
+         items, errors = validation.clean_use_parts_params(params)
+-        site = repository.get_asset(order["asset"])["site"]
++        site = asset["site"]
+         parts = [_usable_part(item["part"], site, index, errors) for index, item in enumerate(items)]
+         # Not enough stock is a 409 and so wins over any 400 in the same request.
+         for item, part in zip(items, parts):
+@@ -535,12 +554,14 @@
+ 
+ 
+ def ensure_can_create_part(ctx):
+-    if not permissions.can_manage_parts(ctx.user):
+-        raise Forbidden("Only supervisors can create parts.")
++    if not permissions.can_create_parts(ctx.user):
++        raise Forbidden("Only managers and supervisors can create parts.")
+ 
+ 
+ def create_part(ctx, data):
+     ensure_can_create_part(ctx)
++    # The site rule is a 403 and so wins over any 400 in the same body.
++    _ensure_manages_site(ctx.user, _site_in(data), permissions.can_manage_parts_at, "parts")
+     with transaction():
+         values = validation.clean_part(data, partial=False)
+         _ensure_sku_free(values["sku"])
+@@ -550,9 +571,9 @@
+ 
+ def update_part(ctx, part_id, data):
+     with transaction():
+-        _load_part(part_id)
+-        if not permissions.can_manage_parts(ctx.user):
+-            raise Forbidden("Only supervisors can update parts.")
++        part = _load_part(part_id)
++        _ensure_manages_site(ctx.user, part["site"], permissions.can_manage_parts_at, "parts")
++        _ensure_manages_site(ctx.user, _site_in(data), permissions.can_manage_parts_at, "parts")
+         values = validation.clean_part(data, partial=True)
+         if "sku" in values:
+             _ensure_sku_free(values["sku"], exclude_id=part_id)
+@@ -562,9 +583,8 @@
+ 
+ def delete_part(ctx, part_id):
+     with transaction():
+-        _load_part(part_id)
+-        if not permissions.can_manage_parts(ctx.user):
+-            raise Forbidden("Only supervisors can delete parts.")
++        part = _load_part(part_id)
++        _ensure_manages_site(ctx.user, part["site"], permissions.can_manage_parts_at, "parts")
+         if repository.part_has_usages(part_id):
+             raise Conflict("A part that has been used on work orders cannot be deleted.")
+         repository.delete_part(part_id)
+--- a/maintenance_app/templates/assets/list.html
++++ b/maintenance_app/templates/assets/list.html
+@@ -2,7 +2,7 @@
+ {% block title %}Assets{% endblock %}
+ {% block content %}
+ <h1>Assets</h1>
+-{% if ctx.role == "supervisor" %}<p><a href="{{ url_for('ui.new_asset') }}">New asset</a></p>{% endif %}
++{% if can_create %}<p><a href="{{ url_for('ui.new_asset') }}">New asset</a></p>{% endif %}
+ <table>
+   <thead><tr><th>Tag</th><th>Name</th><th>Site</th><th>Criticality</th><th>Retired</th><th>Open orders</th></tr></thead>
+   <tbody>
+--- a/maintenance_app/templates/assets/new.html
++++ b/maintenance_app/templates/assets/new.html
+@@ -5,7 +5,7 @@
+ <form data-create="assets" method="post" action="{{ url_for('ui.create_asset') }}">
+   <label>Tag <input name="tag" required></label>
+   <label>Name <input name="name" required></label>
+-  <label>Site <input name="site" required></label>
++  <label>Site <input name="site" required{% if site %} value="{{ site }}" readonly{% endif %}></label>
+   <label>Criticality
+     <select name="criticality">
+       {% for criticality in criticalities %}<option value="{{ criticality }}">{{ criticality }}</option>{% endfor %}
+--- a/maintenance_app/templates/parts/list.html
++++ b/maintenance_app/templates/parts/list.html
+@@ -2,7 +2,7 @@
+ {% block title %}Parts{% endblock %}
+ {% block content %}
+ <h1>Parts</h1>
+-{% if ctx.role == "supervisor" %}<p><a href="{{ url_for('ui.new_part') }}">New part</a></p>{% endif %}
++{% if can_create %}<p><a href="{{ url_for('ui.new_part') }}">New part</a></p>{% endif %}
+ <table>
+   <thead><tr><th>SKU</th><th>Name</th><th>Site</th><th>Unit cost</th><th>Quantity</th><th>Reorder level</th><th>Low stock</th></tr></thead>
+   <tbody>
+--- a/maintenance_app/templates/parts/new.html
++++ b/maintenance_app/templates/parts/new.html
+@@ -5,7 +5,7 @@
+ <form data-create="parts" method="post" action="{{ url_for('ui.create_part') }}">
+   <label>SKU <input name="sku" required></label>
+   <label>Name <input name="name" required></label>
+-  <label>Site <input name="site" required></label>
++  <label>Site <input name="site" required{% if site %} value="{{ site }}" readonly{% endif %}></label>
+   <label>Unit cost <input name="unit_cost" type="number" min="0" step="0.01" required></label>
+   <label>Quantity <input name="quantity" type="number" min="0" step="1" required></label>
+   <label>Reorder level <input name="reorder_level" type="number" min="0" step="1" required></label>
+--- a/maintenance_app/templates/staff/list.html
++++ b/maintenance_app/templates/staff/list.html
+@@ -2,7 +2,7 @@
+ {% block title %}Staff{% endblock %}
+ {% block content %}
+ <h1>Staff</h1>
+-{% if ctx.role == "supervisor" %}<p><a href="{{ url_for('ui.new_staff') }}">New staff member</a></p>{% endif %}
++{% if can_create %}<p><a href="{{ url_for('ui.new_staff') }}">New staff member</a></p>{% endif %}
+ <table>
+   <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Site</th><th>Active</th></tr></thead>
+   <tbody>
+--- a/maintenance_app/validation.py
++++ b/maintenance_app/validation.py
+@@ -11,7 +11,8 @@
+ 
+ from .errors import ValidationError
+ 
+-STAFF_ROLES = ("requester", "technician", "supervisor")
++# A supervisor runs their own site; a manager has the supervisor rights on every site.
++STAFF_ROLES = ("requester", "technician", "supervisor", "manager")
+ ASSET_CRITICALITIES = ("low", "medium", "high")
+ # p1 is the most urgent. Priorities also reflect the asset's criticality (see ``services``).
+ WORK_ORDER_PRIORITIES = ("p1", "p2", "p3", "p4")
+--- a/seed.py
++++ b/seed.py
+@@ -14,6 +14,8 @@
+ The seed stores ``labor_minutes`` on work orders; since migration ``0005_time_entries.sql`` it is
+ derived from time entries, so each order with a value gets the one time entry that migration
+ gave the existing orders (see ``seed_time_entries``).
++The seed predates the ``manager`` role: sofia (id 1) becomes the manager exactly as migration
++``0007_manager_role.sql`` promoted her (see ``seed_role``).
+ """
+ import json
+ import os
+@@ -26,6 +28,11 @@
+ 
+ DATABASE_PATH = os.path.join(HERE, "data.db")
+ SEED_PATH = os.path.join(HERE, "seed_data.json")
++
++
++def seed_role(member):
++    """``role`` of a seed staff member: as left by migration 0007 (sofia, id 1, became the manager)."""
++    return "manager" if (member["id"], member["username"]) == (1, "sofia") else member["role"]
+ 
+ 
+ def seed_without_self_dispatch(order):
+@@ -63,7 +70,7 @@
+     conn.executemany(
+         "INSERT INTO staff (id, username, name, role, site, active)"
+         " VALUES (:id, :username, :name, :role, :site, :active)",
+-        seed["staff"],
++        [{**member, "role": seed_role(member)} for member in seed["staff"]],
+     )
+     conn.executemany(
+         "INSERT INTO assets (id, tag, name, site, criticality, retired)"
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -31,6 +31,12 @@
+ 
+ 
+ @pytest.fixture(scope="session")
++def migrated_staff(seed):
++    """The seed staff as migration 0007 left them: sofia (id 1) became the manager."""
++    return [{**s, "role": "manager"} if s["id"] == 1 else s for s in seed["staff"]]
++
++
++@pytest.fixture(scope="session")
+ def migrated_priorities(seed):
+     """Expected p1-p4 priority of every seed work order (the seed still uses urgent/normal/low),
+     by the rule of migration 0004: urgent -> p1; normal -> p2 on a high-criticality asset,
+--- a/tests/test_maintenance_actions.py
++++ b/tests/test_maintenance_actions.py
+@@ -21,7 +21,7 @@
+ 
+ def test_reassign_including_same_technician(app):
+     assert app.post("/api/work_orders/77/assign", {"technician": 9}, user="sofia").json["assignee"] == 9
+-    r = app.post("/api/work_orders/77/assign", {"technician": 9}, user="tomas")  # any supervisor
++    r = app.post("/api/work_orders/77/assign", {"technician": 9}, user="sofia")  # same technician again
+     assert r.status == 200 and r.json["status"] == "assigned"
+     assert [m["payload"]["technician"] for m in _outbox(app)] == [9, 9]
+ 
+@@ -115,9 +115,9 @@
+ 
+ # --- cancel ---------------------------------------------------------------------------
+ 
+-def test_supervisor_cancels_unfinished_orders(app):
+-    for order_id in (74, 77, 79):  # open, assigned, in_progress
+-        r = app.post(f"/api/work_orders/{order_id}/cancel", {"reason": "Budget"}, user="yara")
++def test_manager_cancels_unfinished_orders(app):
++    for order_id in (74, 77, 79):  # open, assigned, in_progress (North; sofia's site is North too)
++        r = app.post(f"/api/work_orders/{order_id}/cancel", {"reason": "Budget"}, user="sofia")
+         assert r.status == 200 and (r.json["status"], r.json["cancel_reason"]) == ("cancelled", "Budget")
+     r = app.get("/api/work_orders/79", user="sofia").json
+     assert (r["assignee"], r["started_at"]) == (9, "2026-02-28T16:00:00")  # kept
+--- a/tests/test_maintenance_basics.py
++++ b/tests/test_maintenance_basics.py
+@@ -37,11 +37,12 @@
+     assert app.get("/ui/nothing", user="sofia").status == 404
+ 
+ 
+-def test_seed_data_is_loaded_with_same_ids(app, seed, migrated_work_orders):
++def test_seed_data_is_loaded_with_same_ids(app, seed, migrated_staff, migrated_work_orders):
+     for collection in ("staff", "assets", "work_orders"):
+         items = app.get(f"/api/{collection}", user="sofia").json["items"]
+-        # The seed predates the p1-p4 scale (0004) and the withdrawal of self-dispatch (0006).
+-        expected = migrated_work_orders if collection == "work_orders" else seed[collection]
++        # The seed predates the p1-p4 scale (0004), the withdrawal of self-dispatch (0006) and the
++        # manager role (0007).
++        expected = {"staff": migrated_staff, "work_orders": migrated_work_orders}.get(collection, seed[collection])
+         assert _without_derived(collection, items) == expected
+ 
+ 
+--- a/tests/test_maintenance_parts.py
++++ b/tests/test_maintenance_parts.py
+@@ -219,7 +219,9 @@
+ def test_part_usages_follow_work_order_read_rules(app):
+     _use(app, 79, [{"part": 3, "quantity": 1}])  # North order requested by sofia
+     _use(app, 80, [{"part": 4, "quantity": 1}], user="wade")  # South order requested by lina
+-    assert [u["id"] for u in app.get("/api/part_usages", user="tomas").json["items"]] == [1, 2]
++    assert [u["id"] for u in app.get("/api/part_usages", user="sofia").json["items"]] == [1, 2]  # manager
++    assert [u["id"] for u in app.get("/api/part_usages", user="tomas").json["items"]] == [2]  # South supervisor
++    assert app.get("/api/part_usages/1", user="tomas").status == 403
+     assert [u["id"] for u in app.get("/api/part_usages", user="nils").json["items"]] == [1]
+     assert [u["id"] for u in app.get("/api/part_usages", user="lina").json["items"]] == [2]
+     assert app.get("/api/part_usages", user="ruth").json["items"] == []
+--- a/tests/test_maintenance_sites.py
++++ b/tests/test_maintenance_sites.py
+@@ -0,0 +1,273 @@
++"""Site-scoped supervisors and the company-wide manager (migration 0007).
++
++sofia (id 1, North) is the manager: the former supervisor rights on every site, and the only
++one who manages staff. tomas (id 2, South) and yara (id 16, East) supervise their own site only.
++Orders used here: 74 open, 77 assigned, 79 in_progress (North); 76 open, 61 in_progress (South).
++"""
++import os
++import shutil
++import sqlite3
++import sys
++
++from accept_client import parse_ui
++
++APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++NEW_STAFF = {"username": "ada", "name": "Ada Byrne", "role": "technician", "site": "East"}
++NEW_ASSET = {"tag": "S-NEW-01", "name": "New pump", "site": "South", "criticality": "low"}
++NEW_PART = {"sku": "S-NEW", "name": "Gasket", "site": "South", "unit_cost": 2.5, "quantity": 4, "reorder_level": 1}
++
++
++def _ids(app, path, user):
++    return [item["id"] for item in app.get(path, user=user).json["items"]]
++
++
++# --- roles and data -------------------------------------------------------------------
++
++def test_sofia_is_the_manager_and_the_supervisors_keep_their_sites(app):
++    leads = app.get("/api/staff?active=true", user="ruth").json["items"]
++    assert [(s["username"], s["role"], s["site"]) for s in leads if s["role"] in ("manager", "supervisor")] == [
++        ("sofia", "manager", "North"), ("tomas", "supervisor", "South"), ("yara", "supervisor", "East")]
++    assert _ids(app, "/api/staff?role=manager", "mei") == [1]
++
++
++def test_manager_is_a_valid_role(app):
++    r = app.post("/api/staff", {**NEW_STAFF, "role": "manager"}, user="sofia")
++    assert r.status == 201 and r.json["role"] == "manager"
++    assert app.patch("/api/staff/2", {"role": "manager"}, user="sofia").json["role"] == "manager"
++    for role in ("Manager", "admin", "", None):
++        assert app.post("/api/staff", {**NEW_STAFF, "username": "bea", "role": role}, user="sofia").status == 400
++        assert app.patch("/api/staff/3", {"role": role}, user="sofia").status == 400
++
++
++def test_new_manager_has_rights_everywhere(app):
++    app.post("/api/staff", {**NEW_STAFF, "username": "max", "role": "manager", "site": "East"}, user="sofia")
++    assert app.get("/api/work_orders/74", user="max").status == 200
++    assert app.post("/api/work_orders/76/assign", {"technician": 11}, user="max").status == 200
++    assert app.post("/api/assets", {**NEW_ASSET, "site": "North"}, user="max").status == 201
++
++
++# --- staff: managers only -------------------------------------------------------------
++
++def test_only_the_manager_manages_staff(app):
++    for user in ("tomas", "yara"):
++        assert app.post("/api/staff", NEW_STAFF, user=user).status == 403
++        assert app.post("/api/staff", {"bogus": 1}, user=user).status == 403  # 403 beats 400
++        assert app.patch("/api/staff/12", {"name": "T"}, user=user).status == 403  # tess, East
++        assert app.patch("/api/staff/12", {"role": "boss"}, user=user).status == 403
++        assert app.delete("/api/staff/12", user=user).status == 403
++    new_id = app.post("/api/staff", NEW_STAFF, user="sofia").json["id"]
++    assert app.patch(f"/api/staff/{new_id}", {"site": "South"}, user="sofia").status == 200
++    assert app.delete(f"/api/staff/{new_id}", user="sofia").status == 204
++
++
++# --- work orders ----------------------------------------------------------------------
++
++def test_supervisors_read_their_own_sites_orders(app):
++    all_ids = _ids(app, "/api/work_orders", "sofia")
++    assert len(all_ids) == 82
++    south = _ids(app, "/api/work_orders?asset=16", "tomas")
++    assert south == _ids(app, "/api/work_orders?asset=16", "sofia")
++    assert app.get("/api/work_orders/74", user="tomas").status == 403
++    assert app.get("/api/work_orders/76", user="tomas").status == 200
++    assert app.get("/api/work_orders/76", user="yara").status == 403
++    assert app.get("/api/work_orders/81", user="yara").status == 200
++
++
++def test_supervisor_reads_orders_they_requested_at_another_site(app):
++    order = app.post("/api/work_orders", {"asset": 14, "title": "Draught", "priority": "p3"}, user="tomas").json
++    app.patch("/api/staff/2", {"site": "North"}, user="sofia")  # tomas moves to North
++    assert app.get(f"/api/work_orders/{order['id']}", user="tomas").status == 200  # requester
++    assert app.get("/api/work_orders/76", user="tomas").status == 403  # South, not his
++    assert app.get("/api/work_orders/74", user="tomas").status == 200  # now his site
++
++
++def test_supervisor_assigns_only_at_own_site(app):
++    assert app.post("/api/work_orders/76/assign", {"technician": 11}, user="tomas").status == 200
++    assert app.post("/api/work_orders/74/assign", {"technician": 9}, user="tomas").status == 403
++    assert app.post("/api/work_orders/74/assign", {}, user="tomas").status == 403  # 403 beats 400
++    assert app.post("/api/work_orders/79/assign", {"technician": 9}, user="tomas").status == 403  # beats 409
++    assert app.post("/api/work_orders/74/assign", {"technician": 9}, user="yara").status == 403
++    assert app.post("/api/work_orders/74/assign", {"technician": 9}, user="sofia").status == 200  # North
++    assert app.post("/api/work_orders/78/assign", {"technician": 15}, user="sofia").status == 200  # South
++    assert [m["payload"]["work_order"] for m in app.get("/api/_outbox", user="ruth").json["items"]] == [76, 74, 78]
++
++
++def test_workload_cap_still_applies_to_site_supervisors(app):
++    # ravi (10, South) is the assignee of 4 assigned/in_progress orders.
++    assert app.post("/api/work_orders/76/assign", {"technician": 10}, user="tomas").status == 409
++    assert app.post("/api/work_orders/76/assign", {"technician": 8}, user="tomas").status == 400  # North tech
++
++
++def test_supervisor_cancels_and_edits_only_at_own_site(app):
++    assert app.post("/api/work_orders/61/cancel", {"reason": "Budget"}, user="tomas").status == 200  # in_progress
++    assert app.post("/api/work_orders/77/cancel", {"reason": "Budget"}, user="tomas").status == 403
++    assert app.post("/api/work_orders/77/cancel", {}, user="tomas").status == 403  # 403 beats 400
++    assert app.post("/api/work_orders/2/cancel", {"reason": "x"}, user="tomas").status == 403  # beats 409
++    r = app.patch("/api/work_orders/76", {"title": "Belt", "priority": "p2"}, user="tomas")
++    assert r.status == 200 and (r.json["title"], r.json["priority"]) == ("Belt", "p2")
++    assert app.patch("/api/work_orders/74", {"title": "x"}, user="tomas").status == 403
++    assert app.patch("/api/work_orders/2", {"title": "x"}, user="tomas").status == 403  # beats 409
++    assert app.patch("/api/work_orders/74", {"title": "x"}, user="yara").status == 403
++    assert app.patch("/api/work_orders/76", {"priority": "p3"}, user="sofia").status == 200  # manager anywhere
++    assert app.post("/api/work_orders/79/cancel", {"reason": "x"}, user="sofia").status == 200
++
++
++def test_supervisor_keeps_only_requester_rights_at_another_site(app):
++    order_id = app.post("/api/work_orders", {"asset": 14, "title": "Draught", "priority": "p3"}, user="tomas").json["id"]
++    app.patch("/api/staff/2", {"site": "North"}, user="sofia")  # tomas now supervises North
++    path = f"/api/work_orders/{order_id}"
++    assert app.patch(path, {"title": "Cold draught"}, user="tomas").status == 200  # requester, open
++    assert app.patch(path, {"priority": "p2"}, user="tomas").status == 403  # requesters may not set priority
++    assert app.post(f"{path}/assign", {"technician": 11}, user="tomas").status == 403
++    assert app.post(f"{path}/assign", {"technician": 11}, user="sofia").status == 200
++    assert app.patch(path, {"title": "x"}, user="tomas").status == 409  # requester: only while open
++    assert app.post(f"{path}/cancel", {"reason": "x"}, user="tomas").status == 409
++    assert app.post(f"{path}/cancel", {"reason": "x"}, user="sofia").status == 200
++
++
++def test_supervisors_create_work_orders_only_at_own_site(app):
++    north = {"asset": 1, "title": "Noise", "priority": "p2"}
++    assert app.post("/api/work_orders", north, user="tomas").status == 403
++    assert app.post("/api/work_orders", {**north, "title": "", "colour": "red"}, user="tomas").status == 403
++    assert app.post("/api/work_orders", {"asset": 7}, user="tomas").status == 403  # retired, other site
++    assert app.post("/api/work_orders", {**north, "asset": 14}, user="tomas").status == 201
++    assert app.post("/api/work_orders", {**north, "asset": 25}, user="sofia").status == 201  # manager: East
++    assert app.post("/api/work_orders", {**north, "asset": 999}, user="tomas").status == 400
++
++
++# --- assets and parts -----------------------------------------------------------------
++
++def test_supervisor_creates_assets_only_at_own_site(app):
++    assert app.post("/api/assets", NEW_ASSET, user="tomas").status == 201
++    assert app.post("/api/assets", {**NEW_ASSET, "tag": "X-2", "site": "North"}, user="tomas").status == 403
++    assert app.post("/api/assets", {**NEW_ASSET, "site": "North", "tag": "", "colour": 1}, user="tomas").status == 403
++    body = {k: v for k, v in NEW_ASSET.items() if k != "site"}
++    assert app.post("/api/assets", {**body, "tag": "X-3"}, user="tomas").status == 400  # no site: just a 400
++    assert app.post("/api/assets", {**NEW_ASSET, "tag": "X-4", "site": "East"}, user="sofia").status == 201
++    assert app.post("/api/assets", {**NEW_ASSET, "tag": "X-5"}, user="ruth").status == 403
++
++
++def test_supervisor_changes_assets_only_at_own_site(app):
++    assert app.patch("/api/assets/14", {"name": "AHU South"}, user="tomas").status == 200
++    assert app.patch("/api/assets/14", {"site": "South", "criticality": "medium"}, user="tomas").status == 200
++    assert app.patch("/api/assets/14", {"site": "North"}, user="tomas").status == 403  # moving away
++    assert app.patch("/api/assets/14", {"site": "North", "tag": ""}, user="tomas").status == 403  # beats 400
++    assert app.patch("/api/assets/16", {"site": "North", "retired": True}, user="tomas").status == 403  # beats 409
++    assert app.patch("/api/assets/16", {"retired": True}, user="tomas").status == 409  # own site: open orders
++    assert app.patch("/api/assets/1", {"name": "x"}, user="tomas").status == 403
++    assert app.patch("/api/assets/1", {"retired": True, "colour": 1}, user="tomas").status == 403  # beats 409/400
++    assert app.delete("/api/assets/31", user="tomas").status == 403  # East
++    assert app.delete("/api/assets/7", user="tomas").status == 403  # North, 409 otherwise
++    assert app.delete("/api/assets/24", user="tomas").status == 204  # South, no orders
++    assert app.delete("/api/assets/31", user="yara").status == 204
++    assert app.get("/api/assets/14", user="ruth").json["site"] == "South"
++    assert app.patch("/api/assets/14", {"site": "East"}, user="sofia").json["site"] == "East"  # manager
++    assert app.patch("/api/assets/14", {"name": "x"}, user="tomas").status == 403  # no longer his site
++
++
++def test_supervisor_manages_parts_only_at_own_site(app):
++    r = app.post("/api/parts", NEW_PART, user="tomas")
++    assert r.status == 201 and r.json["id"] == 9
++    assert app.post("/api/parts", {**NEW_PART, "sku": "X", "site": "North"}, user="tomas").status == 403
++    assert app.post("/api/parts", {**NEW_PART, "site": "East", "quantity": -1}, user="tomas").status == 403
++    body = {k: v for k, v in NEW_PART.items() if k != "site"}
++    assert app.post("/api/parts", {**body, "sku": "Y"}, user="tomas").status == 400
++    assert app.patch("/api/parts/4", {"quantity": 9}, user="tomas").json["quantity"] == 9  # South
++    assert app.patch("/api/parts/4", {"site": "East"}, user="tomas").status == 403
++    assert app.patch("/api/parts/1", {"quantity": 9}, user="tomas").status == 403  # North
++    assert app.patch("/api/parts/1", {"quantity": -9}, user="tomas").status == 403  # 403 beats 400
++    assert app.delete("/api/parts/7", user="tomas").status == 403  # East
++    assert app.delete("/api/parts/9", user="tomas").status == 204
++    assert app.delete("/api/parts/7", user="yara").status == 204
++    assert app.patch("/api/parts/1", {"site": "South"}, user="sofia").json["site"] == "South"  # manager
++    assert app.get("/api/parts/1", user="ruth").json["quantity"] == 12  # unchanged by the refused PATCHes
++
++
++def test_everyone_still_reads_all_staff_assets_and_parts(app):
++    for user in ("tomas", "yara", "ruth"):
++        assert len(_ids(app, "/api/staff", user)) == 16
++        assert len(_ids(app, "/api/assets", user)) == 31
++        assert len(_ids(app, "/api/parts", user)) == 8
++
++
++# --- UI -------------------------------------------------------------------------------
++
++def _actions(app, order_id, user):
++    return parse_ui(app.get(f"/ui/work_orders/{order_id}", user=user).text).actions
++
++
++def test_ui_create_forms_follow_the_roles(app):
++    assert parse_ui(app.get("/ui/staff/new", user="sofia").text).creates == ["staff"]
++    for user in ("tomas", "yara", "ruth", "nils"):
++        assert app.get("/ui/staff/new", user=user).status == 403
++    for path, collection in (("/ui/assets/new", "assets"), ("/ui/parts/new", "parts")):
++        for user in ("sofia", "tomas", "yara"):
++            assert parse_ui(app.get(path, user=user).text).creates == [collection], (path, user)
++        for user in ("ruth", "nils"):
++            assert app.get(path, user=user).status == 403
++    assert 'value="South"' in app.get("/ui/assets/new", user="tomas").text  # site preset to his own
++    assert 'value="South"' in app.get("/ui/parts/new", user="tomas").text
++
++
++def test_ui_work_orders_follow_the_site_rules(app):
++    assert parse_ui(app.get("/ui/work_orders", user="tomas").text).rows == _ids(app, "/api/work_orders", "tomas")
++    assert app.get("/ui/work_orders/74", user="tomas").status == 403
++    assert _actions(app, 76, "tomas") == ["assign", "cancel"]
++    assert _actions(app, 61, "tomas") == ["cancel"]
++    assert _actions(app, 76, "sofia") == ["assign", "cancel"]
++    assert _actions(app, 79, "sofia") == ["cancel"]
++    new_form = app.get("/ui/work_orders/new", user="tomas").text
++    assert 'value="14"' in new_form and 'value="1"' not in new_form  # South assets only
++
++
++def test_ui_create_posts_follow_the_site_rules(app):
++    from test_maintenance_ui import _post_form
++
++    form = {"tag": "N-X-1", "name": "X", "site": "North", "criticality": "low", "retired": "false"}
++    assert _post_form(app, "/ui/assets", form, "tomas")[0] == 403
++    assert _post_form(app, "/ui/assets", {**form, "site": "South"}, "tomas")[0] == 303
++    assert _post_form(app, "/ui/staff", {**NEW_STAFF, "active": "true"}, "tomas")[0] == 403
++
++
++# --- migration 0007 -------------------------------------------------------------------
++
++def test_migration_0007_on_a_pre_0007_database(tmp_path):
++    """Apply 0001-0006, add staff and references to them, then apply 0007."""
++    sys.path.insert(0, APP_DIR)
++    try:
++        from maintenance_app import db
++    finally:
++        sys.path.remove(APP_DIR)
++    old_migrations = tmp_path / "migrations"
++    old_migrations.mkdir()
++    for name in os.listdir(db.MIGRATIONS_DIR):
++        if name.endswith(".sql") and int(name[:4]) <= 6:
++            shutil.copy(os.path.join(db.MIGRATIONS_DIR, name), old_migrations / name)
++    path = str(tmp_path / "data.db")
++    db.migrate(path, str(old_migrations))
++
++    conn = sqlite3.connect(path)
++    conn.executescript("""
++        INSERT INTO staff (id, username, name, role, site, active) VALUES
++            (1, 'sofia', 'Sofia', 'supervisor', 'North', 1), (2, 'tomas', 'Tomas', 'supervisor', 'South', 1),
++            (3, 'tech', 'Tech', 'technician', 'South', 0), (7, 'req', 'Req', 'requester', 'East', 1);
++        DELETE FROM staff WHERE id = 7;
++        INSERT INTO assets (id, tag, name, site, criticality, retired) VALUES (1, 'A-1', 'Pump', 'South', 'low', 0);
++        INSERT INTO work_orders (id, asset_id, title, priority, status, requested_by_id, created_at, assignee_id)
++            VALUES (1, 1, 'Leak', 'p3', 'assigned', 2, '2026-01-01T08:00:00', 3);
++    """)
++    before = [tuple(row) for row in conn.execute("SELECT * FROM staff ORDER BY id")]
++    conn.close()
++
++    assert db.migrate(path) == ["0007_manager_role.sql"]
++
++    conn = sqlite3.connect(path)
++    try:
++        after = [tuple(row) for row in conn.execute("SELECT * FROM staff ORDER BY id")]
++        assert after == [(1, "sofia", "Sofia", "manager", "North", 1)] + before[1:]
++        assert conn.execute("SELECT requested_by_id, assignee_id FROM work_orders").fetchall() == [(2, 3)]
++        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
++        conn.execute("INSERT INTO staff (username, name, role, site) VALUES ('new', 'New', 'manager', 'East')")
++        assert conn.execute("SELECT MAX(id) FROM staff").fetchone()[0] == 8  # the id counter was kept
++    finally:
++        conn.close()
+--- a/tests/test_maintenance_staff_assets.py
++++ b/tests/test_maintenance_staff_assets.py
+@@ -1,4 +1,5 @@
+-"""Staff and assets: supervisor-only writes, validation, uniqueness, delete and retire rules."""
++"""Staff and assets: manager-only staff writes, site-scoped asset writes, validation, uniqueness,
++delete and retire rules."""
+ 
+ NEW_STAFF = {"username": "ada", "name": "Ada Byrne", "role": "technician", "site": "East"}
+ NEW_ASSET = {"tag": "E-CMP-01", "name": "Compressor East", "site": "East", "criticality": "medium"}
+@@ -15,17 +16,17 @@
+ 
+ 
+ def test_create_staff(app):
+-    r = app.post("/api/staff", NEW_STAFF, user="yara")
++    r = app.post("/api/staff", NEW_STAFF, user="sofia")
+     assert r.status == 201
+     assert r.json == {"id": 17, **NEW_STAFF, "active": True}
+     # New staff are valid identities immediately.
+     assert app.get("/api/staff/17", user="ada").status == 200
+-    inactive = app.post("/api/staff", {**NEW_STAFF, "username": "bea", "active": False}, user="yara")
++    inactive = app.post("/api/staff", {**NEW_STAFF, "username": "bea", "active": False}, user="sofia")
+     assert inactive.status == 201 and inactive.json["active"] is False
+ 
+ 
+-def test_only_supervisors_manage_staff(app):
+-    for user in ("ruth", "nils"):
++def test_only_managers_manage_staff(app):
++    for user in ("ruth", "nils", "tomas", "yara"):
+         assert app.post("/api/staff", NEW_STAFF, user=user).status == 403
+         assert app.post("/api/staff", {"bogus": 1}, user=user).status == 403  # 403 beats 400
+         assert app.patch("/api/staff/3", {"name": "R"}, user=user).status == 403
+@@ -39,7 +40,7 @@
+     assert create(username="ruth").status == 400  # duplicate
+     assert create(username="   ").status == 400
+     assert create(name=None).status == 400
+-    assert create(role="manager").status == 400
++    assert create(role="boss").status == 400
+     assert create(active="yes").status == 400
+     assert create(active=None).status == 400
+     assert create(id=99).status == 400
+@@ -52,12 +53,12 @@
+ 
+ 
+ def test_update_staff(app):
+-    r = app.patch("/api/staff/7", {"site": "North", "active": False}, user="tomas")
++    r = app.patch("/api/staff/7", {"site": "North", "active": False}, user="sofia")
+     assert r.status == 200 and (r.json["site"], r.json["active"]) == ("North", False)
+-    assert app.patch("/api/staff/7", {"username": "mei"}, user="tomas").status == 200  # own name is fine
+-    assert app.patch("/api/staff/7", {"username": "ruth"}, user="tomas").status == 400
+-    assert app.patch("/api/staff/7", {"role": "boss"}, user="tomas").status == 400
+-    assert app.patch("/api/staff/7", {"id": 7}, user="tomas").status == 400
++    assert app.patch("/api/staff/7", {"username": "mei"}, user="sofia").status == 200  # own name is fine
++    assert app.patch("/api/staff/7", {"username": "ruth"}, user="sofia").status == 400
++    assert app.patch("/api/staff/7", {"role": "boss"}, user="sofia").status == 400
++    assert app.patch("/api/staff/7", {"id": 7}, user="sofia").status == 400
+ 
+ 
+ def test_delete_staff(app):
+--- a/tests/test_maintenance_time_entries.py
++++ b/tests/test_maintenance_time_entries.py
+@@ -140,8 +140,10 @@
+     _log(app, 79, {"minutes": 10})  # North order requested by sofia: entry 40
+     _log(app, 80, {"minutes": 20}, user="wade")  # South order requested by lina: entry 41
+     new = [MIGRATED + 1, MIGRATED + 2]
+-    assert [e["id"] for e in _entries(app, user="tomas")][-2:] == new  # supervisors read everything
+-    assert len(_entries(app, user="tomas")) == MIGRATED + 2
++    assert [e["id"] for e in _entries(app, user="sofia")][-2:] == new  # the manager reads everything
++    assert len(_entries(app, user="sofia")) == MIGRATED + 2
++    assert [e["id"] for e in _entries(app, "?note=null", user="tomas")] == [MIGRATED + 2]  # South only
++    assert app.get(f"/api/time_entries/{MIGRATED + 1}", user="tomas").status == 403
+     assert [e["id"] for e in _entries(app, "?note=null", user="nils")] == [MIGRATED + 1]
+     assert [e["id"] for e in _entries(app, "?note=null", user="lina")] == [MIGRATED + 2]
+     assert _entries(app, "?note=null", user="ruth") == []
+--- a/tests/test_maintenance_ui.py
++++ b/tests/test_maintenance_ui.py
+@@ -87,11 +87,13 @@
+         assert sorted(page.inputs) == ["asset", "description", "priority", "title"]
+     staff = parse_ui(app.get("/ui/staff/new", user="sofia").text)
+     assert staff.creates == ["staff"] and sorted(staff.inputs) == ["active", "name", "role", "site", "username"]
+-    assets = parse_ui(app.get("/ui/assets/new", user="yara").text)
+-    assert assets.creates == ["assets"]
+-    assert sorted(assets.inputs) == ["criticality", "name", "retired", "site", "tag"]
++    for user in ("sofia", "yara"):
++        assets = parse_ui(app.get("/ui/assets/new", user=user).text)
++        assert assets.creates == ["assets"]
++        assert sorted(assets.inputs) == ["criticality", "name", "retired", "site", "tag"]
++    for user in ("ruth", "nils", "yara"):  # only the manager creates staff
++        assert app.get("/ui/staff/new", user=user).status == 403
+     for user in ("ruth", "nils"):
+-        assert app.get("/ui/staff/new", user=user).status == 403
+         assert app.get("/ui/assets/new", user=user).status == 403
+     assert app.get("/ui/work_orders/new").status == 401
+ 
+@@ -115,7 +117,7 @@
+     assert _post_form(app, "/ui/work_orders/74/cancel", {"reason": ""}, "ruth")[0] == 400
+     assert _post_form(app, "/ui/work_orders/74/cancel", {"reason": "Gone"}, "ruth")[0] == 303
+     status, _, _ = _post_form(app, "/ui/staff", {"username": "ann", "name": "Ann", "role": "technician",
+-                                                 "site": "East", "active": "false"}, "yara")
++                                                 "site": "East", "active": "false"}, "sofia")
+     assert status == 303 and app.get("/api/staff/17", user="ann").json["active"] is False
+     status, _, _ = _post_form(app, "/ui/assets", {"tag": "E-X-1", "name": "X", "site": "East",
+                                                   "criticality": "low", "retired": "false"}, "yara")
+--- a/tests/test_maintenance_work_orders.py
++++ b/tests/test_maintenance_work_orders.py
+@@ -6,29 +6,32 @@
+ 
+ 
+ def _readable_ids(seed, username):
+-    """Expected readable work orders, computed from the seed with the spec's rule."""
++    """Expected readable work orders, computed from the seed with the spec's rule (sofia, id 1, is
++    the manager since migration 0007; supervisors and technicians read their own site's orders)."""
+     user = next(s for s in seed["staff"] if s["username"] == username)
++    role = "manager" if user["id"] == 1 else user["role"]
+     asset_site = {a["id"]: a["site"] for a in seed["assets"]}
+     return [
+         o["id"] for o in seed["work_orders"]
+-        if user["role"] == "supervisor" or user["id"] in (o["requested_by"], o["assignee"])
+-        or (user["role"] == "technician" and asset_site[o["asset"]] == user["site"])
++        if role == "manager" or user["id"] in (o["requested_by"], o["assignee"])
++        or (role in ("supervisor", "technician") and asset_site[o["asset"]] == user["site"])
+     ]
+ 
+ 
+ # --- reading --------------------------------------------------------------------------
+ 
+ def test_list_shows_only_readable_orders(app, seed):
+-    for user in ("sofia", "ruth", "mei", "nils", "tess", "umar", "ravi"):
++    for user in ("sofia", "tomas", "yara", "ruth", "mei", "nils", "tess", "umar", "ravi"):
+         ids = [o["id"] for o in app.get("/api/work_orders", user=user).json["items"]]
+         assert ids == _readable_ids(seed, user), user
+-    assert len(app.get("/api/work_orders", user="yara").json["items"]) == len(seed["work_orders"])
++    assert len(app.get("/api/work_orders", user="sofia").json["items"]) == len(seed["work_orders"])
+ 
+ 
+ def test_direct_access_to_unreadable_order_is_403(app):
+     assert app.get("/api/work_orders/74", user="ruth").status == 200  # requester
+     assert app.get("/api/work_orders/74", user="olga").status == 200  # technician at the asset's site
+-    assert app.get("/api/work_orders/74", user="tomas").status == 200  # any supervisor
++    assert app.get("/api/work_orders/74", user="sofia").status == 200  # the manager
++    assert app.get("/api/work_orders/74", user="tomas").status == 403  # supervisor of another site
+     r = app.get("/api/work_orders/74", user="kofi")  # requester, not theirs
+     assert r.status == 403 and r.json["error"] == "forbidden"
+     assert app.get("/api/work_orders/74", user="ravi").status == 403  # technician elsewhere
+@@ -100,7 +103,8 @@
+     assert app.post("/api/work_orders", south, user="nils").status == 403
+     assert app.post("/api/work_orders", {**south, "title": "", "status": "x"}, user="ruth").status == 403
+     assert app.post("/api/work_orders", {"asset": 24}, user="ruth").status == 403  # retired, other site
+-    assert app.post("/api/work_orders", south, user="sofia").status == 201  # supervisors anywhere
++    assert app.post("/api/work_orders", south, user="yara").status == 403  # supervisors too
++    assert app.post("/api/work_orders", south, user="sofia").status == 201  # the manager anywhere
+ 
+ 
+ def test_create_validation(app):
+@@ -128,7 +132,7 @@
+ # --- editing --------------------------------------------------------------------------
+ 
+ def test_supervisor_edits_unfinished_orders(app):
+-    r = app.patch("/api/work_orders/79", {"title": "Zone 3", "description": None, "priority": "p3"}, user="tomas")
++    r = app.patch("/api/work_orders/79", {"title": "Zone 3", "description": None, "priority": "p3"}, user="sofia")
+     assert r.status == 200 and (r.json["title"], r.json["priority"]) == ("Zone 3", "p3")
+     assert app.patch("/api/work_orders/2", {"title": "x"}, user="sofia").status == 409  # completed
+     assert app.patch("/api/work_orders/1", {"title": "x"}, user="sofia").status == 409  # cancelled
+--- a/tests/test_maintenance_workload.py
++++ b/tests/test_maintenance_workload.py
+@@ -242,7 +242,8 @@
+     before = {row["id"]: dict(row) for row in conn.execute("SELECT * FROM work_orders ORDER BY id")}
+     conn.close()
+ 
+-    assert db.migrate(path) == ["0006_withdraw_self_dispatch.sql"]
++    shutil.copy(os.path.join(db.MIGRATIONS_DIR, "0006_withdraw_self_dispatch.sql"), old_migrations)
++    assert db.migrate(path, str(old_migrations)) == ["0006_withdraw_self_dispatch.sql"]
+ 
+     conn = sqlite3.connect(path)
+     conn.row_factory = sqlite3.Row

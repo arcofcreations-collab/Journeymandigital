@@ -1,0 +1,1175 @@
+--- a/README.md
++++ b/README.md
+@@ -5,7 +5,8 @@
+ (up to a workload cap per technician) at their own site while one manager has the supervisor
+ rights on every site and alone manages staff, technicians start and complete them, recording the spare parts they use (stock is kept per
+ site; part usages are read-only history) and logging their working time (time entries, also
+-read-only history; an order's `labor_minutes` is their sum). Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External
++read-only history; an order's `labor_minutes` is their sum). Recurring preventive maintenance is
++described by schedules, whose `generate` action raises the next work order. Flask 3 + SQLite (stdlib `sqlite3`) + Jinja2. External
+ behaviour follows `spec/CONTRACT.md` and `spec/apps/maintenance.md`.
+ 
+ ## Layout
+@@ -13,7 +14,7 @@
+ ```
+ app_entry.py              create_app() -> WSGI app bound to ./data.db (the contract's entry point)
+ data.db                   committed database: fully migrated + seed data, nothing else
+-seed.py                   rebuilds data.db from scratch (migrations + seed_data.json)
++seed.py                   rebuilds data.db from scratch (migrations up to 0007, seed_data.json, later migrations)
+ seed_data.json            starting records (ids are preserved)
+ maintenance_app/
+   __init__.py             app factory: config, migrations, blueprints, error handlers
+@@ -96,9 +97,27 @@
+ | fields clients may set / never set | `validation.WORK_ORDER_CREATABLE/EDITABLE/READ_ONLY`, `STAFF_WRITABLE`, `ASSET_WRITABLE` |
+ | actions shown on the detail page | `services.work_order_actions` (runs the same `_authorize_<action>` checks) |
+ 
+-To add an action: write `_authorize_<name>` and `<name>_work_order` in `services.py`, add it to
++To add a work order action: write `_authorize_<name>` and `<name>_work_order` in `services.py`, add it to
+ `services.WORK_ORDER_ACTIONS`, add an API route and a UI route, and a `data-action` form in
+ `templates/work_orders/detail.html`.
++
++### Preventive maintenance schedules
++
++A schedule (`asset`, `title`, `priority`, `interval_days`, `next_due`, `active`) belongs to an asset;
++its site is the asset's current site. `POST /api/schedules/{id}/generate` raises an ordinary `open`
++work order (`description` `"Preventive maintenance"`, the schedule's title and priority, requested by
++the caller, `schedule` = the schedule's id), advances `next_due` by `interval_days` and emits
++`preventive_generated`. Generated orders then follow the work order workflow above.
++
++| Rule | Location |
++|---|---|
++| who may create / PATCH / DELETE / generate (managers; supervisors of the asset's site) | `permissions.can_create_schedules`, `can_manage_schedules_for`; `services._ensure_manages_schedules_for` |
++| fields, `next_due` date check, `interval_days` 1-365 | `validation.clean_schedule`, `SCHEDULE_CREATABLE/EDITABLE`, `iso_date` |
++| no p4 on high-criticality assets, unknown/retired asset on create | `services.create_schedule`, `update_schedule` (`_ensure_priority_allowed`) |
++| generate: 403, then 409 (inactive, retired asset, unfinished generated order, before `next_due` - 7 days), then 400 | `services._authorize_generate` (`GENERATE_LEAD_DAYS`), `generate_from_schedule` |
++| the `generate` form on the detail page | `services.schedule_actions` (runs `_authorize_generate`) |
++| delete refused once it generated an order; asset delete refused while it has schedules | `services.delete_schedule`, `delete_asset` |
++| retiring an asset deactivates its schedules (un-retiring does not reactivate) | `services.update_asset` (`repository.deactivate_asset_schedules`) |
+ 
+ ## Running the tests
+ 
+@@ -216,4 +235,16 @@
+   a value one entry (assignee, `minutes` = the value, `logged_at` = `completed_at`, note `"migrated"`,
+   ids 1-39 in work order order); `seed.py` builds the same entries (`seed_time_entries`) because the
+   seed still stores `labor_minutes`. Deleting staff who logged time is a 409 like other referenced staff.
++* Schedules (E07, migration `0008_maintenance_schedules.sql`, which created schedules 1-5 and the
++  nullable `work_orders.schedule_id`; every existing order has `schedule` null). Create precedence:
++  403 for roles other than manager/supervisor, then 403 when `asset` is the integer id of an existing
++  asset (retired or not) at a site the supervisor does not run, then 400 (unknown or retired asset,
++  field errors, p4 on a high-criticality asset). PATCH/DELETE/generate use the asset's current site.
++  `next_due` must be exactly `YYYY-MM-DD` and a real date. Re-activating a schedule of a retired asset
++  by PATCH is allowed (generate then answers 409). `generate` copies the schedule's priority as it is,
++  even if the asset has become high-criticality since the schedule got `p4` (the p4 rule refuses
++  *setting* p4, as with migrated orders). Its body must be `{}` (unknown keys -> 400, after 403/409).
++  The UI generate form posts and redirects back to the schedule. Because the starting schedules
++  reference seed assets, `seed.py` loads the seed at schema version 7 (`SEED_SCHEMA_VERSION`) and then
++  applies the later migrations (`db.migrate(..., up_to=...)`), exactly as they ran on the real data.
+ * Invalid `X-Now` → 400. Routing errors map to `not_found` (404) or `method_not_allowed` (405).
+--- a/maintenance_app/db.py
++++ b/maintenance_app/db.py
+@@ -78,8 +78,10 @@
+     return {row[0] for row in conn.execute("SELECT version FROM schema_version")}
+ 
+ 
+-def migrate(database_path, migrations_dir=MIGRATIONS_DIR):
++def migrate(database_path, migrations_dir=MIGRATIONS_DIR, up_to=None):
+     """Apply every pending migration in order, each in its own transaction.
++
++    ``up_to`` (a version number) stops after that version; by default every migration is applied.
+ 
+     Migrations run with foreign key enforcement off, so a table that other tables reference
+     can be rebuilt (create-copy-drop-rename, the only way to change a CHECK constraint in
+@@ -95,6 +97,8 @@
+         for version, name, path in available_migrations(migrations_dir):
+             if version in done:
+                 continue
++            if up_to is not None and version > up_to:
++                break
+             with open(path, encoding="utf-8") as fh:
+                 sql = fh.read()
+             applied_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+--- a/maintenance_app/migrations/0008_maintenance_schedules.sql
++++ b/maintenance_app/migrations/0008_maintenance_schedules.sql
+@@ -0,0 +1,32 @@
++-- Preventive maintenance schedules: recurring maintenance generates work orders from a schedule
++-- (the `generate` action) instead of being typed in by hand.
++--
++-- work_orders.schedule_id references the schedule that generated the order; every existing order
++-- has none (NULL). Nothing else changes.
++--
++-- Data: the five starting schedules with fixed ids (new schedules continue after 5). Schedule 3
++-- belongs to the retired asset 30 and is inactive.
++
++CREATE TABLE schedules (
++    id            INTEGER PRIMARY KEY AUTOINCREMENT,
++    asset_id      INTEGER NOT NULL REFERENCES assets (id),
++    title         TEXT    NOT NULL,
++    priority      TEXT    NOT NULL CHECK (priority IN ('p1', 'p2', 'p3', 'p4')),
++    interval_days INTEGER NOT NULL CHECK (interval_days BETWEEN 1 AND 365),
++    next_due      TEXT    NOT NULL,  -- YYYY-MM-DD
++    active        INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
++);
++
++CREATE INDEX schedules_asset_id ON schedules (asset_id);
++
++-- (A column added with ALTER TABLE may reference another table as long as its default is NULL.)
++ALTER TABLE work_orders ADD COLUMN schedule_id INTEGER REFERENCES schedules (id);
++
++CREATE INDEX work_orders_schedule_id ON work_orders (schedule_id);
++
++INSERT INTO schedules (id, asset_id, title, priority, interval_days, next_due, active) VALUES
++    (1,  3, 'Boiler annual service',    'p2', 365, '2026-03-05', 1),
++    (2, 16, 'Conveyor belt inspection', 'p3',  30, '2026-03-20', 1),
++    (3, 30, 'Generator load test',      'p3',  90, '2026-02-01', 0),
++    (4, 25, 'Filter replacement',       'p4',  60, '2026-02-15', 1),
++    (5, 21, 'Generator monthly run',    'p2',  30, '2026-03-03', 1);
+--- a/maintenance_app/permissions.py
++++ b/maintenance_app/permissions.py
+@@ -168,3 +168,20 @@
+ def can_write_time_entries(user):
+     """Time entries are created only by ``log_time``, never through the API, and never changed."""
+     return False
++
++
++# --- preventive maintenance schedules -------------------------------------------------
++# The relevant site of a schedule is the current site of its asset.
++
++def can_read_schedule(user, schedule):
++    return True
++
++
++def can_create_schedules(user):
++    """May create schedules at all (``can_manage_schedules_for`` decides for which assets)."""
++    return supervises_some_site(user)
++
++
++def can_manage_schedules_for(user, asset):
++    """Create, update, delete and ``generate`` schedules of ``asset``: whoever supervises its site."""
++    return supervises_site(user, asset["site"])
+--- a/maintenance_app/repository.py
++++ b/maintenance_app/repository.py
+@@ -137,12 +137,16 @@
+     return get_db().execute("SELECT 1 FROM work_orders WHERE asset_id = ? LIMIT 1", (asset_id,)).fetchone() is not None
+ 
+ 
++def asset_has_schedules(asset_id):
++    return get_db().execute("SELECT 1 FROM schedules WHERE asset_id = ? LIMIT 1", (asset_id,)).fetchone() is not None
++
++
+ # --- work orders ----------------------------------------------------------------------
+ 
+ _WORK_ORDER_SELECT = """
+     SELECT w.id, w.asset_id, w.title, w.description, w.priority, w.status, w.requested_by_id,
+            w.created_at, w.assignee_id, w.started_at, w.completed_at, w.resolution,
+-           w.cancel_reason,
++           w.cancel_reason, w.schedule_id,
+            (SELECT COALESCE(SUM(u.quantity * u.unit_cost), 0) FROM part_usages u
+              WHERE u.work_order_id = w.id) AS parts_cost,
+            -- NULL (not 0) when the order has no time entries
+@@ -170,6 +174,7 @@
+         "labor_minutes": row["labor_minutes"],
+         "cancel_reason": row["cancel_reason"],
+         "parts_cost": round(row["parts_cost"], 2),
++        "schedule": row["schedule_id"],
+     }
+ 
+ 
+@@ -181,12 +186,13 @@
+     return _work_order(get_db().execute(f"{_WORK_ORDER_SELECT} WHERE w.id = ?", (work_order_id,)).fetchone())
+ 
+ 
+-def insert_work_order(values, requested_by, created_at):
+-    """Insert a new work order in ``open`` status."""
+-    cur = get_db().execute(
+-        "INSERT INTO work_orders (asset_id, title, description, priority, status, requested_by_id, created_at)"
+-        " VALUES (?, ?, ?, ?, 'open', ?, ?)",
+-        (values["asset"], values["title"], values["description"], values["priority"], requested_by, created_at),
++def insert_work_order(values, requested_by, created_at, schedule=None):
++    """Insert a new work order in ``open`` status (``schedule``: the schedule generating it)."""
++    cur = get_db().execute(
++        "INSERT INTO work_orders (asset_id, title, description, priority, status, requested_by_id, created_at,"
++        " schedule_id) VALUES (?, ?, ?, ?, 'open', ?, ?, ?)",
++        (values["asset"], values["title"], values["description"], values["priority"], requested_by, created_at,
++         schedule),
+     )
+     return cur.lastrowid
+ 
+@@ -367,6 +373,65 @@
+     return cur.lastrowid
+ 
+ 
++# --- schedules ------------------------------------------------------------------------
++
++_SCHEDULE_SELECT = "SELECT id, asset_id, title, priority, interval_days, next_due, active FROM schedules"
++
++
++def _schedule(row):
++    if row is None:
++        return None
++    return {
++        "id": row["id"],
++        "asset": row["asset_id"],
++        "title": row["title"],
++        "priority": row["priority"],
++        "interval_days": row["interval_days"],
++        "next_due": row["next_due"],
++        "active": bool(row["active"]),
++    }
++
++
++def list_schedules():
++    return [_schedule(row) for row in get_db().execute(f"{_SCHEDULE_SELECT} ORDER BY id")]
++
++
++def get_schedule(schedule_id):
++    return _schedule(get_db().execute(f"{_SCHEDULE_SELECT} WHERE id = ?", (schedule_id,)).fetchone())
++
++
++def insert_schedule(values):
++    cur = get_db().execute(
++        "INSERT INTO schedules (asset_id, title, priority, interval_days, next_due, active) VALUES (?, ?, ?, ?, ?, ?)",
++        (values["asset"], values["title"], values["priority"], values["interval_days"], values["next_due"],
++         int(values["active"])),
++    )
++    return cur.lastrowid
++
++
++def update_schedule(schedule_id, values):
++    columns = {name: name for name in ("title", "priority", "interval_days", "next_due", "active")}
++    _update("schedules", columns, schedule_id, values)
++
++
++def delete_schedule(schedule_id):
++    get_db().execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
++
++
++def deactivate_asset_schedules(asset_id):
++    get_db().execute("UPDATE schedules SET active = 0 WHERE asset_id = ?", (asset_id,))
++
++
++def schedule_has_work_orders(schedule_id, statuses=None):
++    """True if ``schedule_id`` generated any work order (in ``statuses``, when given)."""
++    sql = "SELECT 1 FROM work_orders WHERE schedule_id = ?"
++    params = [schedule_id]
++    if statuses is not None:
++        sql += f" AND status IN ({', '.join('?' for _ in statuses)})"
++        params.extend(statuses)
++    return get_db().execute(sql + " LIMIT 1", params).fetchone() is not None
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def add_outbox_message(channel, payload, created_at):
+--- a/maintenance_app/routes_api.py
++++ b/maintenance_app/routes_api.py
+@@ -215,6 +215,39 @@
+     services.ensure_can_write_time_entries(current_context(), entry_id)
+ 
+ 
++# --- preventive maintenance schedules -------------------------------------------------
++
++@bp.get("/schedules")
++def list_schedules():
++    return _items(services.list_schedules(current_context(), _filters()))
++
++
++@bp.post("/schedules")
++def create_schedule():
++    return services.create_schedule(current_context(), _body()), 201
++
++
++@bp.get("/schedules/<int:schedule_id>")
++def get_schedule(schedule_id):
++    return services.get_schedule(current_context(), schedule_id)
++
++
++@bp.patch("/schedules/<int:schedule_id>")
++def update_schedule(schedule_id):
++    return services.update_schedule(current_context(), schedule_id, _body())
++
++
++@bp.delete("/schedules/<int:schedule_id>")
++def delete_schedule(schedule_id):
++    services.delete_schedule(current_context(), schedule_id)
++    return "", 204
++
++
++@bp.post("/schedules/<int:schedule_id>/generate")
++def generate_from_schedule(schedule_id):
++    return services.generate_from_schedule(current_context(), schedule_id, _body())
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ @bp.get("/_outbox")
+--- a/maintenance_app/routes_ui.py
++++ b/maintenance_app/routes_ui.py
+@@ -264,3 +264,46 @@
+ def show_time_entry(entry_id):
+     entry = services.get_time_entry(current_context(), entry_id)
+     return render_template("time_entries/detail.html", entry=entry)
++
++
++# --- preventive maintenance schedules -------------------------------------------------
++
++@bp.get("/schedules")
++def list_schedules():
++    ctx = current_context()
++    schedules = services.list_schedules(ctx, request.args.to_dict())
++    return render_template("schedules/list.html", schedules=schedules,
++                           can_create=permissions.can_create_schedules(ctx.user))
++
++
++@bp.get("/schedules/new")
++def new_schedule():
++    ctx = current_context()
++    services.ensure_can_create_schedule(ctx)
++    assets = [
++        a for a in services.list_assets(ctx, {"retired": "false"})
++        if permissions.can_manage_schedules_for(ctx.user, a)
++    ]
++    return render_template("schedules/new.html", assets=assets, priorities=validation.WORK_ORDER_PRIORITIES)
++
++
++@bp.post("/schedules")
++def create_schedule():
++    data = _form_values({"asset": _integer, "title": _text, "priority": _text, "interval_days": _integer,
++                         "next_due": _text, "active": _boolean})
++    schedule = services.create_schedule(current_context(), data)
++    return redirect(url_for("ui.show_schedule", schedule_id=schedule["id"]), 303)
++
++
++@bp.get("/schedules/<int:schedule_id>")
++def show_schedule(schedule_id):
++    ctx = current_context()
++    schedule = services.get_schedule(ctx, schedule_id)
++    return render_template("schedules/detail.html", schedule=schedule,
++                           actions=services.schedule_actions(ctx, schedule))
++
++
++@bp.post("/schedules/<int:schedule_id>/generate")
++def generate_from_schedule(schedule_id):
++    services.generate_from_schedule(current_context(), schedule_id, {})
++    return redirect(url_for("ui.show_schedule", schedule_id=schedule_id), 303)
+--- a/maintenance_app/services.py
++++ b/maintenance_app/services.py
+@@ -15,6 +15,10 @@
+     in_progress --log_time---> in_progress                       (records a time entry)
+ 
+ ``complete`` needs at least one time entry; ``labor_minutes`` is the sum of the entries.
++
++Preventive maintenance: a schedule's ``generate`` action raises an ordinary ``open`` work order
++for the schedule's asset (``schedule`` = the schedule) and moves ``next_due`` on by
++``interval_days``. Retiring an asset deactivates its schedules.
+ """
+ from datetime import date, timedelta
+ 
+@@ -45,14 +49,20 @@
+ # receive another one by ``assign``. Existing overloads are kept as they are.
+ WORKLOAD_CAP = 3
+ 
++# ``generate`` is allowed from this many days before a schedule's ``next_due`` on.
++GENERATE_LEAD_DAYS = 7
++# ``description`` of every work order a schedule generates.
++PREVENTIVE_DESCRIPTION = "Preventive maintenance"
++
+ STAFF_FIELDS = ("id", "username", "name", "role", "site", "active")
+ ASSET_FIELDS = ("id", "tag", "name", "site", "criticality", "retired", "open_orders")
+ WORK_ORDER_FIELDS = ("id", "asset", "title", "description", "priority", "status", "requested_by",
+                      "created_at", "assignee", "started_at", "completed_at", "resolution",
+-                     "labor_minutes", "cancel_reason", "parts_cost", "due_date", "overdue")
++                     "labor_minutes", "cancel_reason", "parts_cost", "schedule", "due_date", "overdue")
+ PART_FIELDS = ("id", "sku", "name", "site", "unit_cost", "quantity", "reorder_level", "low_stock")
+ PART_USAGE_FIELDS = ("id", "work_order", "part", "quantity", "unit_cost", "used_by", "used_at")
+ TIME_ENTRY_FIELDS = ("id", "work_order", "technician", "minutes", "logged_at", "note")
++SCHEDULE_FIELDS = ("id", "asset", "title", "priority", "interval_days", "next_due", "active")
+ OUTBOX_FIELDS = ("id", "channel", "created_at")
+ 
+ 
+@@ -159,6 +169,9 @@
+         if "tag" in values:
+             _ensure_tag_free(values["tag"], exclude_id=asset_id)
+         repository.update_asset(asset_id, values)
++        if values.get("retired") is True:
++            # A retired asset needs no preventive maintenance; un-retiring does not reactivate.
++            repository.deactivate_asset_schedules(asset_id)
+     return repository.get_asset(asset_id)
+ 
+ 
+@@ -168,6 +181,8 @@
+         _ensure_manages_site(ctx.user, asset["site"], permissions.can_manage_assets_at, "assets")
+         if repository.asset_has_work_orders(asset_id):
+             raise Conflict("An asset with work orders cannot be deleted.")
++        if repository.asset_has_schedules(asset_id):
++            raise Conflict("An asset with maintenance schedules cannot be deleted.")
+         repository.delete_asset(asset_id)
+ 
+ 
+@@ -676,6 +691,122 @@
+     return entry
+ 
+ 
++# --- preventive maintenance schedules -------------------------------------------------
++
++def list_schedules(ctx, filters=None):
++    schedules = [s for s in repository.list_schedules() if permissions.can_read_schedule(ctx.user, s)]
++    return apply_filters(schedules, filters or {}, SCHEDULE_FIELDS)
++
++
++def get_schedule(ctx, schedule_id):
++    schedule = _load_schedule(schedule_id)
++    if not permissions.can_read_schedule(ctx.user, schedule):
++        raise Forbidden()
++    return schedule
++
++
++def ensure_can_create_schedule(ctx):
++    if not permissions.can_create_schedules(ctx.user):
++        raise Forbidden("Only managers and supervisors can create maintenance schedules.")
++
++
++def create_schedule(ctx, data):
++    ensure_can_create_schedule(ctx)
++    with transaction():
++        # The site rule is a 403 and so wins over any 400 in the same body.
++        asset = _existing_asset_in(data)
++        if asset is not None:
++            _ensure_manages_schedules_for(ctx.user, asset)
++        values = validation.clean_schedule(data, partial=False)
++        asset = repository.get_asset(values["asset"])
++        if asset is None:
++            raise ValidationError("No such asset.", {"asset": "no such asset"})
++        if asset["retired"]:
++            raise ValidationError("The asset is retired.", {"asset": "asset is retired"})
++        _ensure_priority_allowed(values["priority"], asset)
++        schedule_id = repository.insert_schedule(values)
++    return repository.get_schedule(schedule_id)
++
++
++def update_schedule(ctx, schedule_id, data):
++    with transaction():
++        schedule = _load_schedule(schedule_id)
++        asset = repository.get_asset(schedule["asset"])
++        _ensure_manages_schedules_for(ctx.user, asset)
++        values = validation.clean_schedule(data, partial=True)
++        if "priority" in values:
++            # As for work orders: also when the schedule already has that priority.
++            _ensure_priority_allowed(values["priority"], asset)
++        repository.update_schedule(schedule_id, values)
++    return repository.get_schedule(schedule_id)
++
++
++def delete_schedule(ctx, schedule_id):
++    with transaction():
++        schedule = _load_schedule(schedule_id)
++        _ensure_manages_schedules_for(ctx.user, repository.get_asset(schedule["asset"]))
++        if repository.schedule_has_work_orders(schedule_id):
++            raise Conflict("A schedule that has generated work orders cannot be deleted.")
++        repository.delete_schedule(schedule_id)
++
++
++def _authorize_generate(ctx, schedule, asset):
++    """Raise Forbidden (403) or Conflict (409) unless the caller may ``generate`` now."""
++    _ensure_manages_schedules_for(ctx.user, asset)
++    if not schedule["active"]:
++        raise Conflict("The schedule is not active.")
++    if asset["retired"]:
++        raise Conflict("The schedule's asset is retired.")
++    if repository.schedule_has_work_orders(schedule["id"], UNFINISHED_STATUSES):
++        raise Conflict("A work order generated by this schedule is still unfinished.")
++    if ctx.today < date.fromisoformat(schedule["next_due"]) - timedelta(days=GENERATE_LEAD_DAYS):
++        raise Conflict(f"Work orders can be generated from {GENERATE_LEAD_DAYS} days before the due date on.")
++
++
++def schedule_actions(ctx, schedule):
++    """Names of the actions the caller may run on ``schedule`` right now (permission and state)."""
++    try:
++        _authorize_generate(ctx, schedule, repository.get_asset(schedule["asset"]))
++    except (Forbidden, Conflict):
++        return []
++    return ["generate"]
++
++
++def generate_from_schedule(ctx, schedule_id, params):
++    """Raise the schedule's next preventive work order (requested by the caller) and move
++    ``next_due`` on by exactly ``interval_days`` (once per call, however late it is)."""
++    with transaction():
++        schedule = _load_schedule(schedule_id)
++        asset = repository.get_asset(schedule["asset"])
++        _authorize_generate(ctx, schedule, asset)
++        validation.clean_no_params(params)
++        # The priority was checked against the asset's criticality when the schedule got it.
++        order = {"asset": schedule["asset"], "title": schedule["title"], "description": PREVENTIVE_DESCRIPTION,
++                 "priority": schedule["priority"]}
++        work_order_id = repository.insert_work_order(
++            order, requested_by=ctx.user["id"], created_at=ctx.now_text, schedule=schedule_id
++        )
++        next_due = (date.fromisoformat(schedule["next_due"]) + timedelta(days=schedule["interval_days"])).isoformat()
++        repository.update_schedule(schedule_id, {"next_due": next_due})
++        repository.add_outbox_message(
++            "preventive_generated", {"schedule": schedule_id, "work_order": work_order_id, "next_due": next_due},
++            ctx.now_text,
++        )
++    return repository.get_schedule(schedule_id)
++
++
++def _load_schedule(schedule_id):
++    schedule = repository.get_schedule(schedule_id)
++    if schedule is None:
++        raise NotFound("No such schedule.")
++    return schedule
++
++
++def _ensure_manages_schedules_for(user, asset):
++    if not permissions.can_manage_schedules_for(user, asset):
++        raise Forbidden("Only the manager or the supervisor of the asset's site can manage its schedules.")
++
++
+ # --- outbox ---------------------------------------------------------------------------
+ 
+ def list_outbox(ctx, filters=None):
+--- a/maintenance_app/templates/base.html
++++ b/maintenance_app/templates/base.html
+@@ -23,6 +23,7 @@
+     <a href="{{ url_for('ui.list_parts') }}">Parts</a>
+     <a href="{{ url_for('ui.list_part_usages') }}">Part usages</a>
+     <a href="{{ url_for('ui.list_time_entries') }}">Time entries</a>
++    <a href="{{ url_for('ui.list_schedules') }}">Schedules</a>
+     {% if ctx %}<span>Signed in as {{ ctx.user.username }} ({{ ctx.user.role }}, {{ ctx.user.site }})</span>{% endif %}
+   </nav>
+   <main>
+--- a/maintenance_app/templates/schedules/detail.html
++++ b/maintenance_app/templates/schedules/detail.html
+@@ -0,0 +1,21 @@
++{% extends "base.html" %}
++{% from "_macros.html" import field %}
++{% block title %}Schedule #{{ schedule.id }}{% endblock %}
++{% block content %}
++<h1>Schedule #{{ schedule.id }}</h1>
++<dl>
++  {{ field("asset", schedule.asset, href=url_for('ui.show_asset', asset_id=schedule.asset)) }}
++  {{ field("title", schedule.title) }}
++  {{ field("priority", schedule.priority) }}
++  {{ field("interval_days", schedule.interval_days, label="Interval (days)") }}
++  {{ field("next_due", schedule.next_due) }}
++  {{ field("active", schedule.active) }}
++</dl>
++<p><a href="{{ url_for('ui.list_work_orders', schedule=schedule.id) }}">Work orders generated by this schedule</a></p>
++
++{% if "generate" in actions %}
++<form data-action="generate" method="post" action="{{ url_for('ui.generate_from_schedule', schedule_id=schedule.id) }}">
++  <button type="submit">Generate work order</button>
++</form>
++{% endif %}
++{% endblock %}
+--- a/maintenance_app/templates/schedules/list.html
++++ b/maintenance_app/templates/schedules/list.html
+@@ -0,0 +1,22 @@
++{% extends "base.html" %}
++{% block title %}Maintenance schedules{% endblock %}
++{% block content %}
++<h1>Maintenance schedules</h1>
++{% if can_create %}<p><a href="{{ url_for('ui.new_schedule') }}">New schedule</a></p>{% endif %}
++<table>
++  <thead><tr><th>Schedule</th><th>Asset</th><th>Title</th><th>Priority</th><th>Every (days)</th><th>Next due</th><th>Active</th></tr></thead>
++  <tbody>
++  {% for schedule in schedules %}
++    <tr data-id="{{ schedule.id }}">
++      <td><a href="{{ url_for('ui.show_schedule', schedule_id=schedule.id) }}">#{{ schedule.id }}</a></td>
++      <td>{{ schedule.asset }}</td>
++      <td>{{ schedule.title }}</td>
++      <td>{{ schedule.priority }}</td>
++      <td>{{ schedule.interval_days }}</td>
++      <td>{{ schedule.next_due }}</td>
++      <td>{{ schedule.active|display }}</td>
++    </tr>
++  {% endfor %}
++  </tbody>
++</table>
++{% endblock %}
+--- a/maintenance_app/templates/schedules/new.html
++++ b/maintenance_app/templates/schedules/new.html
+@@ -0,0 +1,27 @@
++{% extends "base.html" %}
++{% block title %}New schedule{% endblock %}
++{% block content %}
++<h1>New maintenance schedule</h1>
++<form data-create="schedules" method="post" action="{{ url_for('ui.create_schedule') }}">
++  <label>Asset
++    <select name="asset" required>
++      {% for asset in assets %}<option value="{{ asset.id }}">{{ asset.tag }} · {{ asset.name }} ({{ asset.site }})</option>{% endfor %}
++    </select>
++  </label>
++  <label>Title <input name="title" required></label>
++  <label>Priority
++    <select name="priority">
++      {% for priority in priorities %}<option value="{{ priority }}"{% if priority == "p3" %} selected{% endif %}>{{ priority }}</option>{% endfor %}
++    </select>
++  </label>
++  <label>Interval (days) <input name="interval_days" type="number" min="1" max="365" step="1" required></label>
++  <label>Next due <input name="next_due" type="date" required></label>
++  <label>Active
++    <select name="active">
++      <option value="true" selected>yes</option>
++      <option value="false">no</option>
++    </select>
++  </label>
++  <button type="submit">Create</button>
++</form>
++{% endblock %}
+--- a/maintenance_app/templates/work_orders/detail.html
++++ b/maintenance_app/templates/work_orders/detail.html
+@@ -18,6 +18,7 @@
+   {{ field("labor_minutes", order.labor_minutes, href=url_for('ui.list_time_entries', work_order=order.id)) }}
+   {{ field("cancel_reason", order.cancel_reason) }}
+   {{ field("parts_cost", order.parts_cost, href=url_for('ui.list_part_usages', work_order=order.id)) }}
++  {{ field("schedule", order.schedule, href=order.schedule and url_for('ui.show_schedule', schedule_id=order.schedule)) }}
+   {{ field("due_date", order.due_date) }}
+   {{ field("overdue", order.overdue) }}
+ </dl>
+--- a/maintenance_app/validation.py
++++ b/maintenance_app/validation.py
+@@ -7,7 +7,9 @@
+ Field checkers raise ``FieldInvalid``; ``collect`` records that message against a field.
+ """
+ import math
++import re
+ from contextlib import contextmanager
++from datetime import date
+ 
+ from .errors import ValidationError
+ 
+@@ -24,6 +26,11 @@
+ # Minutes a single ``log_time`` call may record (inclusive).
+ LOG_TIME_MIN_MINUTES = 1
+ LOG_TIME_MAX_MINUTES = 600
++# Days between two work orders generated from a schedule (inclusive bounds).
++SCHEDULE_MIN_INTERVAL_DAYS = 1
++SCHEDULE_MAX_INTERVAL_DAYS = 365
++
++_DATE_FORMAT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+ 
+ 
+ class FieldInvalid(Exception):
+@@ -122,6 +129,19 @@
+     return value
+ 
+ 
++def iso_date(value):
++    """A real calendar date written ``YYYY-MM-DD``; returned as that text."""
++    if value is None:
++        raise FieldInvalid("required")
++    if not isinstance(value, str) or not _DATE_FORMAT.fullmatch(value):
++        raise FieldInvalid("must be a date YYYY-MM-DD")
++    try:
++        date.fromisoformat(value)
++    except ValueError:
++        raise FieldInvalid("must be a real date")
++    return value
++
++
+ def non_negative_number(value):
+     """A JSON number (integer or decimal, not a boolean or string) >= 0."""
+     if value is None:
+@@ -148,9 +168,13 @@
+ WORK_ORDER_CREATABLE = ("asset", "title", "description", "priority")
+ WORK_ORDER_EDITABLE = ("title", "description", "priority")
+ # Maintained by the system and the workflow actions (``labor_minutes`` is derived from the time
+-# entries); clients sending them get a 400.
++# entries, ``schedule`` is set by a schedule's ``generate``); clients sending them get a 400.
+ WORK_ORDER_READ_ONLY = ("id", "status", "requested_by", "created_at", "assignee", "started_at",
+-                        "completed_at", "resolution", "labor_minutes", "cancel_reason", "due_date", "overdue", "parts_cost")
++                        "completed_at", "resolution", "labor_minutes", "cancel_reason", "due_date", "overdue",
++                        "parts_cost", "schedule")
++
++SCHEDULE_CREATABLE = ("asset", "title", "priority", "interval_days", "next_due", "active")
++SCHEDULE_EDITABLE = ("title", "priority", "interval_days", "next_due", "active")
+ 
+ PART_WRITABLE = ("sku", "name", "site", "unit_cost", "quantity", "reorder_level")
+ PART_READ_ONLY = ("id", "low_stock")
+@@ -221,6 +245,32 @@
+         if name in data or not partial:
+             with collect(errors, name):
+                 values[name] = check(data.get(name))
++    raise_if_errors(errors)
++    return values
++
++
++def clean_schedule(data, *, partial):
++    """Create (``partial=False``) or PATCH (``partial=True``) body; ``asset`` only on create."""
++    data = require_object(data)
++    allowed = SCHEDULE_EDITABLE if partial else SCHEDULE_CREATABLE
++    read_only = ("id", "asset") if partial else ("id",)
++    errors = unknown_field_errors(data, allowed, read_only=read_only)
++    values = {}
++    if not partial:
++        with collect(errors, "asset"):
++            values["asset"] = record_id(data.get("asset"))
++    checks = (
++        ("title", required_text),
++        ("priority", lambda value: choice(value, WORK_ORDER_PRIORITIES)),
++        ("interval_days",
++         lambda value: integer_between(value, SCHEDULE_MIN_INTERVAL_DAYS, SCHEDULE_MAX_INTERVAL_DAYS)),
++        ("next_due", iso_date),
++    )
++    for name, check in checks:
++        if name in data or not partial:
++            with collect(errors, name):
++                values[name] = check(data.get(name))
++    _clean_boolean_with_default(data, values, errors, "active", True, partial)
+     raise_if_errors(errors)
+     return values
+ 
+--- a/seed.py
++++ b/seed.py
+@@ -16,6 +16,10 @@
+ gave the existing orders (see ``seed_time_entries``).
+ The seed predates the ``manager`` role: sofia (id 1) becomes the manager exactly as migration
+ ``0007_manager_role.sql`` promoted her (see ``seed_role``).
++
++Migrations after ``SEED_SCHEMA_VERSION`` are applied after the seed is loaded, exactly as they were
++applied to the existing data (``0008_maintenance_schedules.sql`` creates the starting schedules,
++which reference seed assets).
+ """
+ import json
+ import os
+@@ -28,6 +32,8 @@
+ 
+ DATABASE_PATH = os.path.join(HERE, "data.db")
+ SEED_PATH = os.path.join(HERE, "seed_data.json")
++# The schema version the seed is loaded into (``load_seed`` writes these tables and columns).
++SEED_SCHEMA_VERSION = 7
+ 
+ 
+ def seed_role(member):
+@@ -98,7 +104,7 @@
+ def main():
+     if os.path.exists(DATABASE_PATH):
+         os.remove(DATABASE_PATH)
+-    db.migrate(DATABASE_PATH)
++    db.migrate(DATABASE_PATH, up_to=SEED_SCHEMA_VERSION)
+     with open(SEED_PATH, encoding="utf-8") as fh:
+         seed = json.load(fh)
+     conn = db.connect(DATABASE_PATH)
+@@ -108,6 +114,7 @@
+         conn.execute("COMMIT")
+     finally:
+         conn.close()
++    db.migrate(DATABASE_PATH)
+     print(f"seeded {DATABASE_PATH}: " + ", ".join(f"{len(v)} {k}" for k, v in seed.items()))
+ 
+ 
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -53,11 +53,11 @@
+ 
+ @pytest.fixture(scope="session")
+ def migrated_work_orders(seed, migrated_priorities):
+-    """The seed work orders as every migration left them: priorities mapped by 0004, and
++    """The seed work orders as every migration left them: priorities mapped by 0004,
+     self-dispatched orders (assignee = requested_by, as decided by 0003) that were still
+-    `assigned` returned to the pool by 0006 (`open`, no assignee)."""
++    `assigned` returned to the pool by 0006 (`open`, no assignee), and no generating schedule (0008)."""
+     def migrated(order):
+-        order = {**order, "priority": migrated_priorities[order["id"]]}
++        order = {**order, "priority": migrated_priorities[order["id"]], "schedule": None}
+         if order["status"] == "assigned" and order["assignee"] is not None and order["assignee"] == order["requested_by"]:
+             order.update(status="open", assignee=None)
+         return order
+--- a/tests/test_maintenance_priority.py
++++ b/tests/test_maintenance_priority.py
+@@ -135,7 +135,8 @@
+         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+         indexes = {row[0] for row in conn.execute(
+             "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'work_orders' AND sql IS NOT NULL")}
+-        assert indexes == {"work_orders_asset_id", "work_orders_requested_by_id", "work_orders_assignee_id"}
++        assert indexes == {"work_orders_asset_id", "work_orders_requested_by_id", "work_orders_assignee_id",
++                           "work_orders_schedule_id"}  # (the last one added by migration 0008)
+         try:
+             conn.execute("UPDATE work_orders SET priority = 'urgent' WHERE id = 1")
+         except sqlite3.IntegrityError:
+--- a/tests/test_maintenance_schedules.py
++++ b/tests/test_maintenance_schedules.py
+@@ -0,0 +1,349 @@
++"""Preventive maintenance schedules and the `generate` action (migration 0008).
++
++Starting schedules (today is 2026-03-01): 1 asset 3 (North, high) next_due 03-05; 2 asset 16 (South)
++next_due 03-20 (not yet generable); 3 asset 30 (East, retired) inactive; 4 asset 25 (East, medium) p4,
++next_due 02-15 (late); 5 asset 21 (South, high) next_due 03-03. sofia is the manager (North), tomas
++supervises South, yara East.
++"""
++import os
++import shutil
++import sqlite3
++import sys
++
++from accept_client import parse_ui
++
++APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++STARTING = [
++    {"id": 1, "asset": 3, "title": "Boiler annual service", "priority": "p2", "interval_days": 365,
++     "next_due": "2026-03-05", "active": True},
++    {"id": 2, "asset": 16, "title": "Conveyor belt inspection", "priority": "p3", "interval_days": 30,
++     "next_due": "2026-03-20", "active": True},
++    {"id": 3, "asset": 30, "title": "Generator load test", "priority": "p3", "interval_days": 90,
++     "next_due": "2026-02-01", "active": False},
++    {"id": 4, "asset": 25, "title": "Filter replacement", "priority": "p4", "interval_days": 60,
++     "next_due": "2026-02-15", "active": True},
++    {"id": 5, "asset": 21, "title": "Generator monthly run", "priority": "p2", "interval_days": 30,
++     "next_due": "2026-03-03", "active": True},
++]
++NEW = {"asset": 31, "title": "Valve check", "priority": "p2", "interval_days": 14, "next_due": "2026-03-10"}
++
++
++def _outbox(app):
++    return app.get("/api/_outbox", user="ruth").json["items"]
++
++
++# --- data -----------------------------------------------------------------------------
++
++def test_starting_schedules(app):
++    for user in ("ruth", "nils", "tomas", "sofia"):
++        assert app.get("/api/schedules", user=user).json["items"] == STARTING
++    assert app.get("/api/schedules/4", user="mei").json == STARTING[3]
++    assert app.get("/api/schedules/99", user="mei").status == 404
++    assert [s["id"] for s in app.get("/api/schedules?active=false", user="mei").json["items"]] == [3]
++    assert [s["id"] for s in app.get("/api/schedules?asset=16", user="mei").json["items"]] == [2]
++    assert app.get("/api/schedules?site=North", user="mei").status == 400
++
++
++def test_existing_work_orders_have_no_schedule(app):
++    orders = app.get("/api/work_orders", user="sofia").json["items"]
++    assert len(orders) == 82 and all(o["schedule"] is None for o in orders)
++    assert len(app.get("/api/work_orders?schedule=null", user="sofia").json["items"]) == 82
++
++
++def test_migration_0008_on_a_pre_0008_database(tmp_path):
++    sys.path.insert(0, APP_DIR)
++    try:
++        from maintenance_app import db
++    finally:
++        sys.path.remove(APP_DIR)
++    old_migrations = tmp_path / "migrations"
++    old_migrations.mkdir()
++    for name in os.listdir(db.MIGRATIONS_DIR):
++        if name.endswith(".sql") and int(name[:4]) <= 7:
++            shutil.copy(os.path.join(db.MIGRATIONS_DIR, name), old_migrations / name)
++    path = str(tmp_path / "data.db")
++    db.migrate(path, str(old_migrations))
++    conn = sqlite3.connect(path)
++    conn.executescript("""
++        INSERT INTO staff (id, username, name, role, site) VALUES (1, 'sofia', 'Sofia', 'manager', 'North');
++        INSERT INTO assets (id, tag, name, site, criticality, retired) VALUES
++            (3, 'A3', 'A3', 'North', 'high', 0), (16, 'A16', 'A16', 'South', 'high', 0),
++            (21, 'A21', 'A21', 'South', 'high', 0), (25, 'A25', 'A25', 'East', 'medium', 0),
++            (30, 'A30', 'A30', 'East', 'medium', 1);
++        INSERT INTO work_orders (id, asset_id, title, priority, status, requested_by_id, created_at)
++            VALUES (1, 3, 'Leak', 'p3', 'open', 1, '2026-01-01T08:00:00');
++    """)
++    before = conn.execute("SELECT * FROM work_orders").fetchall()
++    conn.close()
++
++    assert db.migrate(path) == ["0008_maintenance_schedules.sql"]
++
++    conn = sqlite3.connect(path)
++    try:
++        rows = conn.execute("SELECT * FROM schedules ORDER BY id").fetchall()
++        assert rows == [(s["id"], s["asset"], s["title"], s["priority"], s["interval_days"], s["next_due"],
++                         int(s["active"])) for s in STARTING]
++        assert conn.execute("SELECT * FROM work_orders").fetchall() == [before[0] + (None,)]
++        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
++        conn.execute("INSERT INTO schedules (asset_id, title, priority, interval_days, next_due)"
++                     " VALUES (3, 'x', 'p1', 1, '2026-01-01')")
++        assert conn.execute("SELECT MAX(id) FROM schedules").fetchone()[0] == 6
++    finally:
++        conn.close()
++
++
++# --- create, PATCH, DELETE ------------------------------------------------------------
++
++def test_create(app):
++    r = app.post("/api/schedules", NEW, user="yara")
++    assert r.status == 201 and r.json == {"id": 6, **NEW, "active": True}
++    assert app.get("/api/schedules/6", user="ruth").json == r.json
++    r = app.post("/api/schedules", {**NEW, "active": False}, user="sofia")  # the manager anywhere
++    assert r.status == 201 and r.json["id"] == 7 and r.json["active"] is False
++    assert app.post("/api/schedules", {**NEW, "asset": 14}, user="tomas").status == 201
++    assert _outbox(app) == []
++
++
++def test_create_permissions(app):
++    for user in ("ruth", "nils", "tess"):
++        assert app.post("/api/schedules", NEW, user=user).status == 403
++        assert app.post("/api/schedules", {"bogus": 1}, user=user).status == 403
++    assert app.post("/api/schedules", NEW, user="tomas").status == 403  # East asset
++    assert app.post("/api/schedules", {"asset": 31, "title": ""}, user="tomas").status == 403  # 403 beats 400
++    assert app.post("/api/schedules", {"asset": 30}, user="tomas").status == 403  # retired, other site
++    assert app.post("/api/schedules", {**NEW, "asset": 999}, user="tomas").status == 400  # unknown asset
++
++
++def test_create_validation(app):
++    bad = [
++        {k: v for k, v in NEW.items() if k != "asset"}, {**NEW, "asset": None}, {**NEW, "asset": "31"},
++        {**NEW, "asset": 999}, {**NEW, "asset": 30},  # retired
++        {**NEW, "title": ""}, {**NEW, "title": "  "}, {k: v for k, v in NEW.items() if k != "title"},
++        {**NEW, "priority": "P2"}, {**NEW, "priority": "urgent"}, {**NEW, "priority": "p4"},  # high criticality
++        {**NEW, "interval_days": 0}, {**NEW, "interval_days": 366}, {**NEW, "interval_days": 7.0},
++        {**NEW, "interval_days": "7"}, {**NEW, "interval_days": True}, {k: v for k, v in NEW.items() if k != "interval_days"},
++        {**NEW, "next_due": "2026-02-30"}, {**NEW, "next_due": "2026-3-10"}, {**NEW, "next_due": "2026-03-10T00:00:00"},
++        {**NEW, "next_due": 20260310}, {**NEW, "next_due": None}, {**NEW, "next_due": "20260310"},
++        {**NEW, "active": None}, {**NEW, "active": "true"},
++        {**NEW, "id": 50}, {**NEW, "bogus": 1}, [NEW],
++    ]
++    for body in bad:
++        r = app.post("/api/schedules", body, user="sofia")
++        assert r.status == 400 and r.json["error"] == "validation", body
++    assert app.post("/api/schedules", {**NEW, "asset": 25, "priority": "p4"}, user="yara").status == 201
++    assert app.post("/api/schedules", {**NEW, "interval_days": 365, "next_due": "2028-02-29"}, user="sofia").status == 201
++    assert len(app.get("/api/schedules", user="ruth").json["items"]) == 7
++
++
++def test_patch(app):
++    r = app.patch("/api/schedules/4", {"title": "Filters", "priority": "p3", "interval_days": 90,
++                                       "next_due": "2026-04-01", "active": False}, user="yara")
++    assert r.status == 200 and r.json == {"id": 4, "asset": 25, "title": "Filters", "priority": "p3",
++                                          "interval_days": 90, "next_due": "2026-04-01", "active": False}
++    assert app.patch("/api/schedules/2", {"active": False}, user="tomas").json["active"] is False
++    assert app.patch("/api/schedules/1", {"title": "Boiler"}, user="sofia").json["title"] == "Boiler"
++    assert app.patch("/api/schedules/3", {"active": True}, user="sofia").json["active"] is True  # not refused
++
++
++def test_patch_permissions_and_validation(app):
++    for user in ("ruth", "tess", "tomas"):
++        assert app.patch("/api/schedules/4", {"title": "x"}, user=user).status == 403
++        assert app.patch("/api/schedules/4", {"asset": 1}, user=user).status == 403  # 403 beats 400
++    assert app.patch("/api/schedules/99", {"title": "x"}, user="ruth").status == 404
++    for body in ({"asset": 25}, {"asset": 31}, {"id": 4}, {"bogus": 1}, {"title": ""}, {"interval_days": 0},
++                 {"next_due": "2026-13-01"}, {"active": None}, {"priority": "p5"}):
++        assert app.patch("/api/schedules/4", body, user="yara").status == 400, body
++    # p4 is refused on a high-criticality asset, even unchanged; a medium one may keep it
++    assert app.patch("/api/schedules/1", {"priority": "p4"}, user="sofia").status == 400
++    assert app.patch("/api/schedules/4", {"priority": "p4"}, user="yara").status == 200
++    app.patch("/api/assets/25", {"criticality": "high"}, user="yara")
++    assert app.patch("/api/schedules/4", {"priority": "p4"}, user="yara").status == 400
++    assert app.patch("/api/schedules/4", {"title": "Still editable"}, user="yara").status == 200
++    assert app.get("/api/schedules/1", user="ruth").json == STARTING[0]
++
++
++def test_delete(app):
++    for user in ("ruth", "tess", "tomas"):
++        assert app.delete("/api/schedules/4", user=user).status == 403
++    assert app.delete("/api/schedules/99", user="sofia").status == 404
++    assert app.delete("/api/schedules/4", user="yara").status == 204
++    assert app.get("/api/schedules/4", user="yara").status == 404
++    assert app.delete("/api/schedules/2", user="tomas").status == 204
++    app.post("/api/schedules/5/generate", {}, user="tomas")
++    assert app.delete("/api/schedules/5", user="tomas").status == 409  # has generated an order
++    assert app.delete("/api/schedules/5", user="yara").status == 403  # 403 beats 409
++
++
++def test_asset_with_schedules_cannot_be_deleted(app):
++    assert app.post("/api/schedules", NEW, user="yara").status == 201
++    assert app.delete("/api/assets/31", user="yara").status == 409
++    assert app.delete("/api/assets/31", user="tomas").status == 403
++    assert app.delete("/api/schedules/6", user="yara").status == 204
++    assert app.delete("/api/assets/31", user="yara").status == 204
++
++
++# --- retiring an asset ----------------------------------------------------------------
++
++def test_retiring_an_asset_deactivates_its_schedules(app):
++    app.post("/api/schedules", NEW, user="yara")
++    app.post("/api/schedules", {**NEW, "title": "Second"}, user="yara")
++    assert app.patch("/api/assets/31", {"retired": True}, user="yara").status == 200
++    assert [s["active"] for s in app.get("/api/schedules?asset=31", user="ruth").json["items"]] == [False, False]
++    assert app.patch("/api/assets/31", {"retired": False}, user="yara").status == 200
++    assert [s["active"] for s in app.get("/api/schedules?asset=31", user="ruth").json["items"]] == [False, False]
++    assert app.get("/api/schedules/4", user="ruth").json["active"] is True  # other assets untouched
++
++
++def test_refused_retirement_keeps_schedules_active(app):
++    assert app.patch("/api/assets/25", {"retired": True}, user="yara").status == 409  # one unfinished order
++    assert app.patch("/api/assets/25", {"retired": True}, user="tomas").status == 403
++    assert app.get("/api/schedules/4", user="ruth").json["active"] is True
++    assert app.patch("/api/assets/25", {"name": "AHU East"}, user="yara").status == 200
++    assert app.get("/api/schedules/4", user="ruth").json["active"] is True
++
++
++# --- generate -------------------------------------------------------------------------
++
++def test_generate(app):
++    r = app.post("/api/schedules/1/generate", {}, user="sofia", now="2026-03-01T09:30:00")
++    assert r.status == 200 and r.json == {**STARTING[0], "next_due": "2027-03-05"}
++    order = app.get("/api/work_orders/83", user="sofia").json
++    assert order == {
++        "id": 83, "asset": 3, "title": "Boiler annual service", "description": "Preventive maintenance",
++        "priority": "p2", "status": "open", "requested_by": 1, "created_at": "2026-03-01T09:30:00",
++        "assignee": None, "started_at": None, "completed_at": None, "resolution": None, "labor_minutes": None,
++        "cancel_reason": None, "parts_cost": 0, "schedule": 1, "due_date": "2026-03-04", "overdue": False,
++    }
++    assert _outbox(app) == [{"id": 1, "channel": "preventive_generated", "created_at": "2026-03-01T09:30:00",
++                             "payload": {"schedule": 1, "work_order": 83, "next_due": "2027-03-05"}}]
++    assert app.get("/api/work_orders?schedule=1", user="sofia").json["items"] == [order]
++    assert app.get("/api/assets/3", user="ruth").json["open_orders"] == 2
++
++
++def test_generate_advances_once_however_late(app):
++    r = app.post("/api/schedules/4/generate", {}, user="yara", now="2026-06-01T08:00:00")
++    assert r.json["next_due"] == "2026-04-16"  # 2026-02-15 + 60 days, still in the past
++    order = app.get("/api/work_orders/83", user="yara").json
++    assert (order["priority"], order["requested_by"], order["due_date"]) == ("p4", 16, "2026-07-01")
++
++
++def test_generate_permissions(app):
++    for user in ("ruth", "nils", "tess", "mei", "yara"):
++        assert app.post("/api/schedules/5/generate", {}, user=user).status == 403
++    assert app.post("/api/schedules/2/generate", {"x": 1}, user="yara").status == 403  # 403 beats 409/400
++    assert app.post("/api/schedules/99/generate", {}, user="ruth").status == 404
++    assert app.post("/api/schedules/5/fly", {}, user="sofia").status == 404
++    assert app.post("/api/schedules/5/generate", {}, user="tomas").status == 200
++    assert app.post("/api/schedules/4/generate", {}, user="sofia").status == 200
++
++
++def test_generate_conflicts(app):
++    assert app.post("/api/schedules/3/generate", {}, user="sofia").status == 409  # inactive
++    # not before next_due minus 7 days (2026-03-13 for schedule 2)
++    assert app.post("/api/schedules/2/generate", {}, user="tomas", now="2026-03-12T23:59:59").status == 409
++    assert app.post("/api/schedules/2/generate", {"x": 1}, user="tomas", now="2026-03-12T10:00:00").status == 409
++    # an unfinished generated order blocks the next one, a finished one does not
++    assert app.post("/api/schedules/2/generate", {}, user="tomas", now="2026-03-13T00:00:00").status == 200
++    assert app.post("/api/schedules/2/generate", {}, user="tomas", now="2026-05-01T00:00:00").status == 409
++    order_id = app.get("/api/work_orders?schedule=2", user="tomas").json["items"][0]["id"]
++    app.post(f"/api/work_orders/{order_id}/cancel", {"reason": "Done otherwise"}, user="tomas")
++    assert app.post("/api/schedules/2/generate", {}, user="tomas", now="2026-05-01T00:00:00").status == 200
++    # an active schedule of a retired asset (reactivated after the retirement)
++    app.post("/api/schedules", NEW, user="yara")
++    app.patch("/api/assets/31", {"retired": True}, user="yara")
++    app.patch("/api/schedules/6", {"active": True}, user="yara")
++    assert app.post("/api/schedules/6/generate", {}, user="yara").status == 409
++    assert len(_outbox(app)) == 2
++
++
++def test_failed_generate_changes_nothing(app):
++    before = app.get("/api/schedules", user="ruth").json["items"]
++    assert app.post("/api/schedules/1/generate", {"bogus": True}, user="sofia").status == 400
++    assert app.post("/api/schedules/1/generate", [], user="sofia").status == 400
++    assert app.post("/api/schedules/2/generate", {}, user="sofia").status == 409
++    assert app.post("/api/schedules/1/generate", {}, user="tomas").status == 403
++    assert app.get("/api/schedules", user="ruth").json["items"] == before
++    assert len(app.get("/api/work_orders", user="sofia").json["items"]) == 82
++    assert _outbox(app) == []
++
++
++def test_schedule_field_is_read_only_on_work_orders(app):
++    order = {"asset": 1, "title": "x", "priority": "p3"}
++    assert app.post("/api/work_orders", {**order, "schedule": None}, user="ruth").status == 400
++    assert app.post("/api/work_orders", {**order, "schedule": 1}, user="ruth").status == 400
++    assert app.patch("/api/work_orders/74", {"schedule": 1}, user="sofia").status == 400
++    assert app.post("/api/work_orders", order, user="ruth").json["schedule"] is None
++
++
++def test_generated_orders_follow_the_normal_workflow(app):
++    app.post("/api/schedules/4/generate", {}, user="yara")  # order 83 on asset 25 (East)
++    assert app.get("/api/work_orders/83", user="tess").status == 200  # technician at the site
++    assert app.get("/api/work_orders/83", user="mei").status == 403  # East requester, not hers
++    assert app.get("/api/work_orders/83", user="tomas").status == 403
++    assert app.patch("/api/work_orders/83", {"priority": "p3"}, user="yara").json["due_date"] == "2026-03-08"
++    assert app.post("/api/work_orders/83/assign", {"technician": 12}, user="yara").status == 200
++    assert app.post("/api/work_orders/83/start", {}, user="tess").status == 200
++    assert app.post("/api/work_orders/83/use_parts", {"items": [{"part": 7, "quantity": 2}]}, user="tess").status == 200
++    assert app.post("/api/work_orders/83/log_time", {"minutes": 45}, user="tess").status == 200
++    r = app.post("/api/work_orders/83/complete", {"resolution": "Replaced"}, user="tess")
++    assert r.status == 200 and r.json["status"] == "completed" and r.json["schedule"] == 4
++    assert [m["channel"] for m in _outbox(app)] == ["preventive_generated", "assignment", "work_completed"]
++    assert _outbox(app)[-1]["payload"] == {"work_order": 83, "asset": 25, "technician": 12, "labor_minutes": 45,
++                                           "parts_cost": 14.8}
++    # the workload cap applies to generated orders too (nils, North, already has 3)
++    app.post("/api/schedules/1/generate", {}, user="sofia")
++    assert app.post("/api/work_orders/84/assign", {"technician": 8}, user="sofia").status == 409
++
++
++# --- UI -------------------------------------------------------------------------------
++
++def _page(app, path, user, now="2026-03-01T12:00:00"):
++    return parse_ui(app.get(path, user=user, now=now).text)
++
++
++def test_ui_list_and_detail(app):
++    for user in ("ruth", "tess", "sofia"):
++        assert _page(app, "/ui/schedules", user).rows == [1, 2, 3, 4, 5]
++    assert _page(app, "/ui/schedules?active=false", "ruth").rows == [3]
++    assert _page(app, "/ui/schedules/4", "mei").fields == {
++        "asset": "25", "title": "Filter replacement", "priority": "p4", "interval_days": "60",
++        "next_due": "2026-02-15", "active": "true"}
++    assert app.get("/ui/schedules/99", user="mei").status == 404
++    assert app.get("/ui/schedules").status == 401
++
++
++def test_ui_generate_form_shown_exactly_when_generate_would_succeed(app):
++    assert _page(app, "/ui/schedules/1", "sofia").actions == ["generate"]
++    assert _page(app, "/ui/schedules/1", "tomas").actions == []  # other site
++    assert _page(app, "/ui/schedules/1", "ruth").actions == []
++    assert _page(app, "/ui/schedules/5", "tomas").actions == ["generate"]
++    assert _page(app, "/ui/schedules/3", "sofia").actions == []  # inactive
++    assert _page(app, "/ui/schedules/2", "tomas").actions == []  # too early
++    assert _page(app, "/ui/schedules/2", "tomas", now="2026-03-13T00:00:00").actions == ["generate"]
++    from test_maintenance_ui import _post_form
++
++    status, headers, _ = _post_form(app, "/ui/schedules/1/generate", {}, "sofia")
++    assert status == 303 and headers["Location"].endswith("/ui/schedules/1")
++    assert _page(app, "/ui/schedules/1", "sofia").actions == []  # its order is unfinished
++    assert _page(app, "/ui/work_orders/83", "sofia").fields["schedule"] == "1"
++    assert _post_form(app, "/ui/schedules/1/generate", {}, "sofia")[0] == 409
++
++
++def test_ui_create_form(app):
++    for user in ("sofia", "tomas", "yara"):
++        page = _page(app, "/ui/schedules/new", user)
++        assert page.creates == ["schedules"]
++        assert sorted(page.inputs) == ["active", "asset", "interval_days", "next_due", "priority", "title"]
++    for user in ("ruth", "nils", "tess"):
++        assert app.get("/ui/schedules/new", user=user).status == 403
++    south = app.get("/ui/schedules/new", user="tomas").text
++    assert 'value="14"' in south and 'value="1"' not in south and 'value="24"' not in south  # own, not retired
++    from test_maintenance_ui import _post_form
++
++    form = {"asset": "31", "title": "Valve", "priority": "p2", "interval_days": "14", "next_due": "2026-03-10",
++            "active": "true"}
++    assert _post_form(app, "/ui/schedules", form, "tomas")[0] == 403
++    assert _post_form(app, "/ui/schedules", {**form, "interval_days": "x"}, "yara")[0] == 400
++    status, headers, _ = _post_form(app, "/ui/schedules", form, "yara")
++    assert status == 303 and headers["Location"].endswith("/ui/schedules/6")
++    assert app.get("/api/schedules/6", user="ruth").json == {"id": 6, **NEW, "title": "Valve", "active": True}
+--- a/tests/test_maintenance_sites.py
++++ b/tests/test_maintenance_sites.py
+@@ -259,7 +259,7 @@
+     before = [tuple(row) for row in conn.execute("SELECT * FROM staff ORDER BY id")]
+     conn.close()
+ 
+-    assert db.migrate(path) == ["0007_manager_role.sql"]
++    assert db.migrate(path, up_to=7) == ["0007_manager_role.sql"]
+ 
+     conn = sqlite3.connect(path)
+     try:
+--- a/tests/test_maintenance_ui.py
++++ b/tests/test_maintenance_ui.py
+@@ -46,7 +46,7 @@
+         "asset": "13", "title": "Zone 3 fault", "description": "", "priority": "p1", "status": "in_progress",
+         "requested_by": "1", "created_at": "2026-02-28T15:00:00", "assignee": "9",
+         "started_at": "2026-02-28T16:00:00", "completed_at": "", "resolution": "", "labor_minutes": "",
+-        "cancel_reason": "", "parts_cost": "0", "due_date": "2026-03-01",
++        "cancel_reason": "", "parts_cost": "0", "schedule": "", "due_date": "2026-03-01",
+         "overdue": "false",
+     }
+     assert page.actions == ["log_time", "use_parts"]  # complete only once time has been logged
+--- a/tests/test_maintenance_work_orders.py
++++ b/tests/test_maintenance_work_orders.py
+@@ -86,7 +86,7 @@
+         "id": 83, "asset": 1, "title": "Rattling fan", "description": None, "priority": "p2",
+         "status": "open", "requested_by": 3, "created_at": "2026-03-03T08:15:00", "assignee": None,
+         "started_at": None, "completed_at": None, "resolution": None, "labor_minutes": None,
+-        "cancel_reason": None, "due_date": "2026-03-06", "overdue": False, "parts_cost": 0,
++        "cancel_reason": None, "due_date": "2026-03-06", "overdue": False, "parts_cost": 0, "schedule": None,
+     }
+     assert app.get("/api/work_orders/83", user="ruth").json == r.json
+     assert app.get("/api/_outbox", user="ruth").json["items"] == []

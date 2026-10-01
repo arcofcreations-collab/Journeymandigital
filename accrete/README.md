@@ -27,8 +27,16 @@ This directory has everything needed to inspect, run and reproduce the experimen
 - the experiment harness;
 - every raw result.
 
-**Headline (details and caveats in [`docs/RESULTS.md`](docs/RESULTS.md)):** see the results
-document. The pre-declared target is in [`docs/TARGET.md`](docs/TARGET.md).
+**Headline.** On 14 fresh evaluation challenges implemented by the same AI assistant on both
+systems, accrete changes:
+- took a median of **2.0 minutes vs 4.9** for a clean Flask codebase (**2.4x faster**, faster in
+  every challenge);
+- were about 5x smaller;
+- used about 1.6x fewer tokens.
+
+**But the pre-declared target (≥5x, every task correct) was missed.** accrete solved 12/14 tasks
+against the baseline's 14/14, and both misses were engine gaps. Details, failures and caveats are
+in [`docs/RESULTS.md`](docs/RESULTS.md); the target is in [`docs/TARGET.md`](docs/TARGET.md).
 
 ## Quick start
 

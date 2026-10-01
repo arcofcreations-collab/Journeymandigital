@@ -1,0 +1,70 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/eval/E07/baseline/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/eval/E07/test_E07.py",
+ "passed": 12,
+ "total": 12,
+ "seconds": 1.27,
+ "results": [
+  {
+   "test": "challenges.eval.E07.test_E07::test_schedules_seeded_and_readable_by_everyone",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_generate_creates_order_and_advances_schedule",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_late_schedule_advances_once_from_previous_due_date",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_generate_conflicts",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_generate_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_failed_generate_leaves_no_trace",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_generated_order_lifecycle_and_next_cycle",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_schedule_create_permissions_and_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_schedule_patch_and_delete_rules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_retiring_asset_deactivates_its_schedules",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_schedule_field_is_read_only",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.eval.E07.test_E07::test_ui_schedules",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

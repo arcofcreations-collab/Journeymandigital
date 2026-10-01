@@ -1,5 +1,11 @@
 # dmguard: is `03/04/2021` the 3rd of April or March 4th? Ask the calendar, not the locale.
 
+> **Also in this repository: [`accrete/`](accrete/)**, a second invention from a later capability test.
+> It is an experimental form of programming in which an application is a ledger of verified,
+> invertible changes. With the same AI assistant, it made changes 2.4x faster than a
+> conventional codebase. It missed its own pre-declared 5x target; see
+> [`accrete/docs/RESULTS.md`](accrete/docs/RESULTS.md).
+
 [![tests](https://github.com/arcofcreations-collab/Journeymandigital/actions/workflows/tests.yml/badge.svg)](https://github.com/arcofcreations-collab/Journeymandigital/actions/workflows/tests.yml) ![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue) ![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen) ![license MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 `dmguard` is a small command-line tool and Python library. It decides whether a column of numeric dates is **day-first or month-first** when the values alone cannot tell, and it **refuses to guess** when the data doesn't support a decision.
