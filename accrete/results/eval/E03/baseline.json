@@ -1,0 +1,32 @@
+{
+ "id": "E03",
+ "system": "baseline",
+ "app": "maintenance",
+ "categories": [
+  "rule_change",
+  "data_migration",
+  "cross_cutting",
+  "interaction",
+  "sequence"
+ ],
+ "expect_rejection": false,
+ "base_failing_before": [
+  "test_assignee_completes_order_and_emits",
+  "test_full_lifecycle",
+  "test_outbox_readable_by_any_user"
+ ],
+ "hidden_passed": 8,
+ "hidden_total": 8,
+ "hidden_failures": [],
+ "base_checked": 33,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": "aed336c",
+ "t_start": 1790823230.8637893,
+ "t_end": 1790823605.9018712,
+ "self_timed_s": 375.0,
+ "duration_ms": 390984,
+ "tool_uses": 38,
+ "tokens": 153950
+}
