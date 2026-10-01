@@ -1,0 +1,16 @@
+{
+ "id": "E13",
+ "set": "eval",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "expenses",
+ "categories": [
+  "rule_change",
+  "new_concept",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "version": "65b9a9b",
+ "attempts": [],
+ "extra": []
+}

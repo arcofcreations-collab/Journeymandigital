@@ -1,0 +1,1692 @@
+{
+"absence|Client 00|Can I have on Friday off?|2026-02-10T03:42": {
+"context": "work",
+"evidence": [
+"Can I have on Friday off?",
+"No worries"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-13",
+"2026-02-13"
+]
+},
+"absence|Client 00|I might need today off|2026-02-06T18:06": {
+"context": "work",
+"evidence": [
+"I might need today off",
+"Not possible this time"
+],
+"kind": "tentative",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "proposed",
+"work": [
+"2026-02-06",
+"2026-02-06"
+]
+},
+"absence|Client 00|Not going to make it this Thursday, really sorry|2026-02-12T06:34": {
+"context": "work",
+"evidence": [
+"Not going to make it this Thursday, really sorry",
+"Noted, thanks for letting me know"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-12",
+"2026-02-12"
+]
+},
+"absence|Client 02|I won't be able to work 12/3|2026-02-17T19:07": {
+"context": "work",
+"evidence": [
+"I won't be able to work 12/3",
+"Sorry, we need you in"
+],
+"kind": "statement",
+"notes": [
+"numeric date read as day/month; the other order is possible"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "declined",
+"work": [
+"2026-03-12",
+"2026-03-12"
+]
+},
+"absence|Client 02|Sorry I can't come in on Friday|2026-02-19T18:27": {
+"context": "work",
+"evidence": [
+"Sorry I can't come in on Friday"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "stated",
+"work": [
+"2026-02-20",
+"2026-02-20"
+]
+},
+"absence|Client 03|Is it ok if I don't come in March 20?|2026-02-10T15:26": {
+"context": "work",
+"evidence": [
+"Is it ok if I don't come in March 20?"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Scratch that, I can make it"
+],
+"status": "cancelled",
+"work": [
+"2026-03-20",
+"2026-03-20"
+]
+},
+"absence|Client 03|Would it be possible to have on the 14th off?|2026-02-12T18:32": {
+"context": "work",
+"evidence": [
+"Would it be possible to have on the 14th off?",
+"Ok no problem"
+],
+"kind": "request",
+"notes": [
+"day of month resolved to its next occurrence"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-14",
+"2026-02-14"
+]
+},
+"absence|Client 04|I can't do the shift 12/3|2026-02-22T17:54": {
+"context": "work",
+"evidence": [
+"I can't do the shift 12/3",
+"Get well soon"
+],
+"kind": "statement",
+"notes": [
+"numeric date read as day/month; the other order is possible"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-03-12",
+"2026-03-12"
+]
+},
+"absence|Client 06|I might need March 20 off|2026-02-14T22:12": {
+"context": "work",
+"evidence": [
+"I might need March 20 off",
+"Get well soon"
+],
+"kind": "tentative",
+"notes": [
+"the other party replied positively, but your message was tentative"
+],
+"rescheduled_to": null,
+"revisions": [
+"Could I swap to the 20th?"
+],
+"status": "proposed",
+"work": [
+"2026-03-20",
+"2026-03-20"
+]
+},
+"absence|Client 06|I might need on Friday off|2026-02-19T11:58": {
+"context": "work",
+"evidence": [
+"I might need on Friday off",
+"Ok no problem"
+],
+"kind": "tentative",
+"notes": [
+"the other party replied positively, but your message was tentative"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "proposed",
+"work": [
+"2026-02-20",
+"2026-02-20"
+]
+},
+"absence|Client 06|I might need tomorrow off|2026-02-17T05:42": {
+"context": "work",
+"evidence": [
+"I might need tomorrow off",
+"No, we really need you"
+],
+"kind": "tentative",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "proposed",
+"work": [
+"2026-02-18",
+"2026-02-18"
+]
+},
+"absence|Client 06|Possibly can't come in Monday, will confirm|2026-02-15T22:49": {
+"context": "work",
+"evidence": [
+"Possibly can't come in Monday, will confirm"
+],
+"kind": "tentative",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "proposed",
+"work": [
+"2026-02-16",
+"2026-02-16"
+]
+},
+"absence|Client 06|We don't need you on Friday, the place is closed|2026-02-22T23:28": {
+"context": "work",
+"evidence": [
+"We don't need you on Friday, the place is closed"
+],
+"kind": "their_cancellation",
+"notes": [],
+"rescheduled_to": [
+"2026-03-20",
+"2026-03-20"
+],
+"revisions": [
+"Could I swap to the 20th?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-27",
+"2026-02-27"
+]
+},
+"absence|Client 07|Would it be possible to have next week off?|2026-02-03T00:35": {
+"context": "work",
+"evidence": [
+"Would it be possible to have next week off?",
+"Ok no problem"
+],
+"kind": "request",
+"notes": [
+"'next week' taken as Monday-Friday"
+],
+"rescheduled_to": null,
+"revisions": [
+"Never mind, I'll be there"
+],
+"status": "cancelled",
+"work": [
+"2026-02-09",
+"2026-02-13"
+]
+},
+"absence|Client 09|Can I have off?|2026-02-22T08:47": {
+"context": "work",
+"evidence": [
+"Can I have off?",
+"Sure that's fine"
+],
+"kind": "request",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": [
+"2026-03-20",
+"2026-03-20"
+],
+"revisions": [
+"Can we move it to the 20th instead?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-22",
+"2026-02-22"
+]
+},
+"absence|Client 09|I can't do the shift 12/3|2026-02-18T15:53": {
+"context": "work",
+"evidence": [
+"I can't do the shift 12/3",
+"Sure that's fine"
+],
+"kind": "statement",
+"notes": [
+"numeric date read as day/month; the other order is possible"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-03-12",
+"2026-03-12"
+]
+},
+"absence|Client 09|I'm unable to work|2026-02-20T18:52": {
+"context": "work",
+"evidence": [
+"I'm unable to work",
+"Sure that's fine"
+],
+"kind": "statement",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-20",
+"2026-02-20"
+]
+},
+"absence|Client 09|Possibly can't come in March 20, will confirm|2026-02-22T01:49": {
+"context": "work",
+"evidence": [
+"Possibly can't come in March 20, will confirm",
+"Ok no problem"
+],
+"kind": "tentative",
+"notes": [
+"the other party replied positively, but your message was tentative"
+],
+"rescheduled_to": null,
+"revisions": [
+"Can we move it to the 20th instead?"
+],
+"status": "proposed",
+"work": [
+"2026-03-20",
+"2026-03-20"
+]
+},
+"absence|Client 09|Would it be possible to have off?|2026-02-21T19:28": {
+"context": "work",
+"evidence": [
+"Would it be possible to have off?",
+"Get well soon"
+],
+"kind": "request",
+"notes": [
+"work date taken from the preceding message"
+],
+"rescheduled_to": [
+"2026-03-20",
+"2026-03-20"
+],
+"revisions": [
+"Can we move it to the 20th instead?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-23",
+"2026-02-27"
+]
+},
+"absence|Client 11|Could I take next Tuesday off please|2026-02-13T17:11": {
+"context": "work",
+"evidence": [
+"Could I take next Tuesday off please",
+"Sure that's fine"
+],
+"kind": "request",
+"notes": [
+"'next tuesday' read as 2026-02-17; it may mean 2026-02-24"
+],
+"rescheduled_to": [
+"2026-02-20",
+"2026-02-20"
+],
+"revisions": [
+"Could I swap to the 20th?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-17",
+"2026-02-17"
+]
+},
+"absence|Client 11|Could I take off please|2026-02-17T19:57": {
+"context": "work",
+"evidence": [
+"Could I take off please",
+"Sure that's fine"
+],
+"kind": "request",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-17",
+"2026-02-17"
+]
+},
+"absence|Client 11|I can't do the shift on Friday|2026-02-18T07:41": {
+"context": "work",
+"evidence": [
+"I can't do the shift on Friday",
+"Ok no problem"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-20",
+"2026-02-20"
+]
+},
+"absence|Client 11|I'm sick, can't make it 12/3|2026-02-18T04:14": {
+"context": "work",
+"evidence": [
+"I'm sick, can't make it 12/3",
+"Sorry, we need you in"
+],
+"kind": "statement",
+"notes": [
+"numeric date read as day/month; the other order is possible"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "declined",
+"work": [
+"2026-03-12",
+"2026-03-12"
+]
+},
+"absence|Client 12|Is it ok if I don't come in tomorrow?|2026-02-11T05:37": {
+"context": "work",
+"evidence": [
+"Is it ok if I don't come in tomorrow?",
+"No worries"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Never mind, I'll be there"
+],
+"status": "cancelled",
+"work": [
+"2026-02-12",
+"2026-02-12"
+]
+},
+"absence|Client 12|Not going to make it on Friday, really sorry|2026-02-13T09:46": {
+"context": "work",
+"evidence": [
+"Not going to make it on Friday, really sorry",
+"Not possible this time"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Can we move it to Friday instead?"
+],
+"status": "declined",
+"work": [
+"2026-02-20",
+"2026-02-20"
+]
+},
+"absence|Client 13|I might need Monday off|2026-02-05T01:49": {
+"context": "work",
+"evidence": [
+"I might need Monday off"
+],
+"kind": "tentative",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "proposed",
+"work": [
+"2026-02-09",
+"2026-02-09"
+]
+},
+"absence|Client 13|I might need next Tuesday off|2026-02-11T11:27": {
+"context": "work",
+"evidence": [
+"I might need next Tuesday off",
+"No, we really need you"
+],
+"kind": "tentative",
+"notes": [
+"'next tuesday' read as 2026-02-17; it may mean 2026-02-24"
+],
+"rescheduled_to": [
+"2026-02-14",
+"2026-02-14"
+],
+"revisions": [
+"Could I swap to Saturday?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-17",
+"2026-02-17"
+]
+},
+"absence|Client 13|I'm sick, can't make it on Friday|2026-02-09T08:14": {
+"context": "work",
+"evidence": [
+"I'm sick, can't make it on Friday",
+"Get well soon"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-13",
+"2026-02-13"
+]
+},
+"absence|Client 13|Is it ok if I don't come in next Tuesday?|2026-02-06T09:48": {
+"context": "work",
+"evidence": [
+"Is it ok if I don't come in next Tuesday?",
+"Noted, thanks for letting me know"
+],
+"kind": "request",
+"notes": [
+"'next tuesday' read as 2026-02-10; it may mean 2026-02-17"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-10",
+"2026-02-10"
+]
+},
+"absence|Client 13|Is it ok if I don't come in this weekend?|2026-02-07T20:38": {
+"context": "work",
+"evidence": [
+"Is it ok if I don't come in this weekend?",
+"Get well soon"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-07",
+"2026-02-08"
+]
+},
+"absence|Client 16|Could I take this Thursday off please|2026-02-20T06:26": {
+"context": "work",
+"evidence": [
+"Could I take this Thursday off please",
+"Noted, thanks for letting me know"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Never mind, I'll be there"
+],
+"status": "cancelled",
+"work": [
+"2026-02-26",
+"2026-02-26"
+]
+},
+"absence|Client 16|I can't do the shift this weekend|2026-02-20T12:36": {
+"context": "work",
+"evidence": [
+"I can't do the shift this weekend",
+"Sorry, we need you in"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Never mind, I'll be there"
+],
+"status": "cancelled",
+"work": [
+"2026-02-21",
+"2026-02-22"
+]
+},
+"absence|Client 16|I'm sick, can't make it March 20|2026-02-21T13:44": {
+"context": "work",
+"evidence": [
+"I'm sick, can't make it March 20",
+"No worries"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Never mind, I'll be there"
+],
+"status": "cancelled",
+"work": [
+"2026-03-20",
+"2026-03-20"
+]
+},
+"absence|Client 17|Can I have today off?|2026-02-18T06:50": {
+"context": "work",
+"evidence": [
+"Can I have today off?"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "requested",
+"work": [
+"2026-02-18",
+"2026-02-18"
+]
+},
+"absence|Client 19|I can't do the shift this weekend|2026-02-11T06:35": {
+"context": "work",
+"evidence": [
+"I can't do the shift this weekend",
+"Ok no problem"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": [
+"2026-02-13",
+"2026-02-13"
+],
+"revisions": [
+"Can we move it to Friday instead?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-14",
+"2026-02-15"
+]
+},
+"absence|Client 19|I'm sick, can't make it|2026-02-09T00:49": {
+"context": "work",
+"evidence": [
+"I'm sick, can't make it",
+"Sure that's fine"
+],
+"kind": "statement",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-09",
+"2026-02-09"
+]
+},
+"absence|Client 21|I can't do the shift Monday|2026-02-16T02:28": {
+"context": "work",
+"evidence": [
+"I can't do the shift Monday"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Scratch that, I can make it"
+],
+"status": "cancelled",
+"work": [
+"2026-02-23",
+"2026-02-23"
+]
+},
+"absence|Client 21|I'm sick, can't make it next week|2026-02-15T15:12": {
+"context": "work",
+"evidence": [
+"I'm sick, can't make it next week",
+"Get well soon"
+],
+"kind": "statement",
+"notes": [
+"'next week' taken as Monday-Friday"
+],
+"rescheduled_to": null,
+"revisions": [
+"Scratch that, I can make it",
+"Scratch that, I can make it"
+],
+"status": "cancelled",
+"work": [
+"2026-02-16",
+"2026-02-20"
+]
+},
+"absence|Client 21|Sorry I can't come in 12/3|2026-02-16T23:20": {
+"context": "work",
+"evidence": [
+"Sorry I can't come in 12/3",
+"Get well soon"
+],
+"kind": "statement",
+"notes": [
+"numeric date read as day/month; the other order is possible"
+],
+"rescheduled_to": null,
+"revisions": [
+"Scratch that, I can make it"
+],
+"status": "cancelled",
+"work": [
+"2026-03-12",
+"2026-03-12"
+]
+},
+"absence|Client 21|Would it be possible to have on the 14th off?|2026-02-13T20:40": {
+"context": "work",
+"evidence": [
+"Would it be possible to have on the 14th off?",
+"Ok no problem"
+],
+"kind": "request",
+"notes": [
+"day of month resolved to its next occurrence"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-14",
+"2026-02-14"
+]
+},
+"absence|Client 23|I might need on Friday off|2026-02-08T07:25": {
+"context": "work",
+"evidence": [
+"I might need on Friday off",
+"Get well soon"
+],
+"kind": "tentative",
+"notes": [
+"the other party replied positively, but your message was tentative"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "proposed",
+"work": [
+"2026-02-13",
+"2026-02-13"
+]
+},
+"absence|Client 23|I won't be able to work this Thursday|2026-02-09T18:17": {
+"context": "work",
+"evidence": [
+"I won't be able to work this Thursday"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "stated",
+"work": [
+"2026-02-12",
+"2026-02-12"
+]
+},
+"absence|Client 23|Is it ok if I don't come in tomorrow?|2026-02-08T21:34": {
+"context": "work",
+"evidence": [
+"Is it ok if I don't come in tomorrow?"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "requested",
+"work": [
+"2026-02-09",
+"2026-02-09"
+]
+},
+"absence|Client 23|Sorry I can't come in this Thursday|2026-02-06T23:50": {
+"context": "work",
+"evidence": [
+"Sorry I can't come in this Thursday",
+"Sorry, we need you in"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "declined",
+"work": [
+"2026-02-12",
+"2026-02-12"
+]
+},
+"absence|Client 23|Would it be possible to have March 20 off?|2026-02-04T17:32": {
+"context": "work",
+"evidence": [
+"Would it be possible to have March 20 off?",
+"No, we really need you"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "declined",
+"work": [
+"2026-03-20",
+"2026-03-20"
+]
+},
+"absence|Client 25|I'm sick, can't make it|2026-02-25T09:32": {
+"context": "work",
+"evidence": [
+"I'm sick, can't make it"
+],
+"kind": "statement",
+"notes": [
+"work date taken from the preceding message"
+],
+"rescheduled_to": null,
+"revisions": [
+"Never mind, I'll be there"
+],
+"status": "cancelled",
+"work": [
+"2026-03-02",
+"2026-03-02"
+]
+},
+"absence|Client 25|We don't need you on Friday, the place is closed|2026-02-26T22:44": {
+"context": "work",
+"evidence": [
+"We don't need you on Friday, the place is closed"
+],
+"kind": "their_cancellation",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Never mind, I'll be there"
+],
+"status": "cancelled",
+"work": [
+"2026-02-27",
+"2026-02-27"
+]
+},
+"absence|Client 26|Would it be possible to have tomorrow off?|2026-02-20T05:51": {
+"context": "work",
+"evidence": [
+"Would it be possible to have tomorrow off?",
+"No, we really need you"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "declined",
+"work": [
+"2026-02-21",
+"2026-02-21"
+]
+},
+"absence|Client 27|Can I have next week off?|2026-02-23T21:24": {
+"context": "work",
+"evidence": [
+"Can I have next week off?",
+"Noted, thanks for letting me know"
+],
+"kind": "request",
+"notes": [
+"'next week' taken as Monday-Friday"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-03-02",
+"2026-03-06"
+]
+},
+"absence|Client 27|I won't be able to work|2026-02-25T04:01": {
+"context": "work",
+"evidence": [
+"I won't be able to work"
+],
+"kind": "statement",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "uncertain",
+"work": [
+"2026-02-25",
+"2026-02-25"
+]
+},
+"absence|Client 27|I'm sick, can't make it next Tuesday|2026-02-26T10:49": {
+"context": "work",
+"evidence": [
+"I'm sick, can't make it next Tuesday",
+"Get well soon"
+],
+"kind": "statement",
+"notes": [
+"'next tuesday' read as 2026-03-03; it may mean 2026-03-10"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-03-03",
+"2026-03-03"
+]
+},
+"absence|Client 27|Not going to make it , really sorry|2026-02-24T18:05": {
+"context": "work",
+"evidence": [
+"Not going to make it , really sorry",
+"Noted, thanks for letting me know"
+],
+"kind": "statement",
+"notes": [
+"work date taken from the preceding message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-03-02",
+"2026-03-06"
+]
+},
+"absence|Client 27|Sorry I can't come in today|2026-02-23T19:20": {
+"context": "work",
+"evidence": [
+"Sorry I can't come in today",
+"Sure that's fine"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-23",
+"2026-02-23"
+]
+},
+"absence|Client 27|Would it be possible to have 12/3 off?|2026-02-22T23:14": {
+"context": "work",
+"evidence": [
+"Would it be possible to have 12/3 off?"
+],
+"kind": "request",
+"notes": [
+"numeric date read as day/month; the other order is possible"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "requested",
+"work": [
+"2026-03-12",
+"2026-03-12"
+]
+},
+"absence|Client 27|Would it be possible to have off?|2026-02-19T21:42": {
+"context": "work",
+"evidence": [
+"Would it be possible to have off?"
+],
+"kind": "request",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "uncertain",
+"work": [
+"2026-02-19",
+"2026-02-19"
+]
+},
+"absence|Client 27|Would it be possible to have on the 14th off?|2026-02-20T07:23": {
+"context": "work",
+"evidence": [
+"Would it be possible to have on the 14th off?",
+"Ok no problem"
+],
+"kind": "request",
+"notes": [
+"day of month resolved to its next occurrence"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-03-14",
+"2026-03-14"
+]
+},
+"absence|Client 28|Can I have off?|2026-02-12T20:01": {
+"context": "work",
+"evidence": [
+"Can I have off?"
+],
+"kind": "request",
+"notes": [
+"work date taken from the preceding message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "requested",
+"work": [
+"2026-02-14",
+"2026-02-14"
+]
+},
+"absence|Client 30|I can't do the shift Monday to Wednesday|2026-02-20T17:19": {
+"context": "work",
+"evidence": [
+"I can't do the shift Monday to Wednesday",
+"Noted, thanks for letting me know"
+],
+"kind": "statement",
+"notes": [
+"weekday range resolved to the next occurrence"
+],
+"rescheduled_to": [
+"2026-02-20",
+"2026-02-20"
+],
+"revisions": [
+"Could I swap to the 20th?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-23",
+"2026-02-25"
+]
+},
+"absence|Client 30|I'm sick, can't make it this weekend|2026-02-20T19:03": {
+"context": "work",
+"evidence": [
+"I'm sick, can't make it this weekend",
+"Sure that's fine"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": [
+"2026-02-20",
+"2026-02-20"
+],
+"revisions": [
+"Could I swap to the 20th?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-21",
+"2026-02-22"
+]
+},
+"absence|Client 30|I'm unable to work|2026-02-23T14:10": {
+"context": "work",
+"evidence": [
+"I'm unable to work",
+"No worries"
+],
+"kind": "statement",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-23",
+"2026-02-23"
+]
+},
+"absence|Client 31|I'm unable to work March 20|2026-02-23T04:45": {
+"context": "work",
+"evidence": [
+"I'm unable to work March 20",
+"Ok no problem"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-03-20",
+"2026-03-20"
+]
+},
+"absence|Client 31|I'm unable to work this weekend|2026-02-24T23:19": {
+"context": "work",
+"evidence": [
+"I'm unable to work this weekend"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "stated",
+"work": [
+"2026-02-28",
+"2026-03-01"
+]
+},
+"absence|Client 31|Is it ok if I don't come in on Friday?|2026-02-27T21:20": {
+"context": "work",
+"evidence": [
+"Is it ok if I don't come in on Friday?"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "requested",
+"work": [
+"2026-03-06",
+"2026-03-06"
+]
+},
+"absence|Client 31|Would it be possible to have on the 14th off?|2026-02-28T06:32": {
+"context": "work",
+"evidence": [
+"Would it be possible to have on the 14th off?"
+],
+"kind": "request",
+"notes": [
+"day of month resolved to its next occurrence"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "requested",
+"work": [
+"2026-03-14",
+"2026-03-14"
+]
+},
+"absence|Client 31|Would it be possible to have tomorrow off?|2026-02-25T09:04": {
+"context": "work",
+"evidence": [
+"Would it be possible to have tomorrow off?"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "requested",
+"work": [
+"2026-02-26",
+"2026-02-26"
+]
+},
+"absence|Client 32|Can I have on Friday off?|2026-02-03T15:59": {
+"context": "work",
+"evidence": [
+"Can I have on Friday off?",
+"Ok no problem"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Scratch that, I can make it",
+"Never mind, I'll be there"
+],
+"status": "cancelled",
+"work": [
+"2026-02-06",
+"2026-02-06"
+]
+},
+"absence|Client 33|I'm sick, can't make it next Tuesday|2026-02-11T04:36": {
+"context": "work",
+"evidence": [
+"I'm sick, can't make it next Tuesday",
+"Ok no problem"
+],
+"kind": "statement",
+"notes": [
+"'next tuesday' read as 2026-02-17; it may mean 2026-02-24"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-17",
+"2026-02-17"
+]
+},
+"absence|Client 33|I'm unable to work 12/3|2026-02-10T14:20": {
+"context": "work",
+"evidence": [
+"I'm unable to work 12/3",
+"Ok no problem"
+],
+"kind": "statement",
+"notes": [
+"numeric date read as day/month; the other order is possible"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-03-12",
+"2026-03-12"
+]
+},
+"absence|Client 33|We don't need you , the place is closed|2026-02-08T12:02": {
+"context": "work",
+"evidence": [
+"We don't need you , the place is closed"
+],
+"kind": "their_cancellation",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "cancelled",
+"work": [
+"2026-02-08",
+"2026-02-08"
+]
+},
+"absence|Client 36|Sorry I can't come in next Tuesday|2026-02-08T06:51": {
+"context": "work",
+"evidence": [
+"Sorry I can't come in next Tuesday",
+"Ok no problem"
+],
+"kind": "statement",
+"notes": [
+"'next tuesday' read as 2026-02-10; it may mean 2026-02-17"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-10",
+"2026-02-10"
+]
+},
+"absence|Client 37|I might need today off|2026-02-13T03:14": {
+"context": "work",
+"evidence": [
+"I might need today off",
+"Sure that's fine"
+],
+"kind": "tentative",
+"notes": [
+"the other party replied positively, but your message was tentative"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "proposed",
+"work": [
+"2026-02-13",
+"2026-02-13"
+]
+},
+"absence|Client 37|Possibly can't come in on the 14th, will confirm|2026-02-14T22:28": {
+"context": "work",
+"evidence": [
+"Possibly can't come in on the 14th, will confirm",
+"Sorry, we need you in"
+],
+"kind": "tentative",
+"notes": [
+"day of month resolved to its next occurrence"
+],
+"rescheduled_to": [
+"2026-02-20",
+"2026-02-20"
+],
+"revisions": [
+"Can we move it to the 20th instead?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-14",
+"2026-02-14"
+]
+},
+"absence|Client 37|Would it be possible to have 12/3 off?|2026-02-18T00:53": {
+"context": "work",
+"evidence": [
+"Would it be possible to have 12/3 off?"
+],
+"kind": "request",
+"notes": [
+"numeric date read as day/month; the other order is possible"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "requested",
+"work": [
+"2026-03-12",
+"2026-03-12"
+]
+},
+"absence|Client 38|Can I have next Tuesday off?|2026-02-21T14:16": {
+"context": "work",
+"evidence": [
+"Can I have next Tuesday off?"
+],
+"kind": "request",
+"notes": [
+"'next tuesday' read as 2026-02-24; it may mean 2026-03-03"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "requested",
+"work": [
+"2026-02-24",
+"2026-02-24"
+]
+},
+"absence|Client 38|I won't be able to work|2026-02-25T02:22": {
+"context": "work",
+"evidence": [
+"I won't be able to work",
+"No, we really need you"
+],
+"kind": "statement",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": [
+"2026-02-28",
+"2026-02-28"
+],
+"revisions": [
+"Could I swap to Saturday?"
+],
+"status": "rescheduled",
+"work": [
+"2026-02-25",
+"2026-02-25"
+]
+},
+"absence|Client 38|Is it ok if I don't come in this weekend?|2026-02-23T17:00": {
+"context": "work",
+"evidence": [
+"Is it ok if I don't come in this weekend?",
+"No, we really need you"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [
+"Could I swap to Saturday?"
+],
+"status": "declined",
+"work": [
+"2026-02-28",
+"2026-03-01"
+]
+},
+"absence|Client 38|Would it be possible to have next week off?|2026-02-26T01:49": {
+"context": "work",
+"evidence": [
+"Would it be possible to have next week off?",
+"Sorry, we need you in"
+],
+"kind": "request",
+"notes": [
+"'next week' taken as Monday-Friday"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "declined",
+"work": [
+"2026-03-02",
+"2026-03-06"
+]
+},
+"absence|Client 38|Would it be possible to have this weekend off?|2026-02-26T11:09": {
+"context": "work",
+"evidence": [
+"Would it be possible to have this weekend off?",
+"Get well soon"
+],
+"kind": "request",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "confirmed",
+"work": [
+"2026-02-28",
+"2026-03-01"
+]
+},
+"absence|Friend 10|can't make it to the gym on Friday|2026-02-15T08:30": {
+"context": "personal",
+"evidence": [
+"can't make it to the gym on Friday"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "stated",
+"work": [
+"2026-02-20",
+"2026-02-20"
+]
+},
+"absence|Friend 10|can't make it to the gym|2026-02-14T12:56": {
+"context": "personal",
+"evidence": [
+"can't make it to the gym"
+],
+"kind": "statement",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "uncertain",
+"work": [
+"2026-02-14",
+"2026-02-14"
+]
+},
+"absence|Friend 18|can't make it to the gym on the 14th|2026-02-09T11:53": {
+"context": "personal",
+"evidence": [
+"can't make it to the gym on the 14th"
+],
+"kind": "statement",
+"notes": [
+"day of month resolved to its next occurrence"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "stated",
+"work": [
+"2026-02-14",
+"2026-02-14"
+]
+},
+"absence|Friend 18|can't make it to the gym|2026-02-04T17:00": {
+"context": "personal",
+"evidence": [
+"can't make it to the gym"
+],
+"kind": "statement",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "uncertain",
+"work": [
+"2026-02-04",
+"2026-02-04"
+]
+},
+"absence|Friend 22|can't make it to the gym tomorrow|2026-02-07T12:41": {
+"context": "personal",
+"evidence": [
+"can't make it to the gym tomorrow"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "stated",
+"work": [
+"2026-02-08",
+"2026-02-08"
+]
+},
+"absence|Friend 34|can't make it to the gym on Friday|2026-02-05T09:17": {
+"context": "personal",
+"evidence": [
+"can't make it to the gym on Friday"
+],
+"kind": "statement",
+"notes": [],
+"rescheduled_to": null,
+"revisions": [],
+"status": "stated",
+"work": [
+"2026-02-06",
+"2026-02-06"
+]
+},
+"absence|Friend 34|can't make it to the gym|2026-02-07T11:52": {
+"context": "personal",
+"evidence": [
+"can't make it to the gym"
+],
+"kind": "statement",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "uncertain",
+"work": [
+"2026-02-07",
+"2026-02-07"
+]
+},
+"absence|Friend 39|can't make it to the gym|2026-02-13T02:22": {
+"context": "personal",
+"evidence": [
+"can't make it to the gym"
+],
+"kind": "statement",
+"notes": [
+"work date not stated in the message"
+],
+"rescheduled_to": null,
+"revisions": [],
+"status": "uncertain",
+"work": [
+"2026-02-13",
+"2026-02-13"
+]
+},
+"export_md_lines": 520,
+"import": {
+"added": 278,
+"duplicates": 0,
+"errors": 0,
+"mms": 0,
+"parsed": 278,
+"sms": 278
+},
+"reimport": {
+"added": 0,
+"duplicates": 278
+},
+"search|{\"contact\": \"Client 03\"}": [
+"Is it ok if I don't come in March 20?",
+"Ok no problem",
+"Scratch that, I can make it",
+"Would it be possible to have on the 14th off?"
+],
+"search|{\"direction\": \"sent\", \"text\": \"sick\"}": [
+"I'm sick, can't make it",
+"I'm sick, can't make it",
+"I'm sick, can't make it 12/3",
+"I'm sick, can't make it March 20",
+"I'm sick, can't make it next Tuesday",
+"I'm sick, can't make it next Tuesday",
+"I'm sick, can't make it next week",
+"I'm sick, can't make it on Friday",
+"I'm sick, can't make it this weekend"
+],
+"search|{\"end\": \"2026-02-14\", \"start\": \"2026-02-10\"}": [
+"Can I have off?",
+"Can I have on Friday off?",
+"Can we move it to Friday instead?",
+"Can we move it to Friday instead?",
+"Can you send the address?",
+"Can you send the address?",
+"Can you send the address?",
+"Could I swap to Saturday?",
+"Could I swap to the 20th?",
+"Could I take next Tuesday off please",
+"Did you get my invoice?",
+"Get well soon",
+"I can't do the shift this weekend",
+"I might need March 20 off",
+"I might need next Tuesday off",
+"I might need today off",
+"I'm sick, can't make it next Tuesday",
+"I'm unable to work 12/3",
+"I'm unable to work Monday",
+"I'm unable to work on the 14th",
+"Is it ok if I don't come in March 20?",
+"Is it ok if I don't come in tomorrow?",
+"Never mind, I'll be there",
+"No worries",
+"No worries",
+"No worries",
+"No, we really need you",
+"Not going to make it on Friday, really sorry",
+"Not going to make it this Thursday, really sorry",
+"Not possible this time",
+"Not sure if I can make it",
+"Noted, thanks for letting me know",
+"Noted, thanks for letting me know",
+"Ok no problem",
+"Ok no problem",
+"Ok no problem",
+"Ok no problem",
+"Possibly can't come in on the 14th, will confirm",
+"Scratch that, I can make it",
+"See you soon",
+"See you soon",
+"Sorry, we need you in",
+"Sorry, we need you in",
+"Sure that's fine",
+"Sure that's fine",
+"Sure that's fine",
+"Thanks!",
+"Thanks!",
+"What time do I start?",
+"Would it be possible to have on the 14th off?",
+"Would it be possible to have on the 14th off?",
+"Your shift Monday to Wednesday is cancelled",
+"can't do dinner 12/3 sorry",
+"can't do dinner 12/3 sorry",
+"can't do dinner Monday to Wednesday sorry",
+"can't do dinner next week sorry",
+"can't do dinner next week sorry",
+"can't do dinner on Friday sorry",
+"can't do dinner on Friday sorry",
+"can't do dinner this Thursday sorry",
+"can't make it to the gym",
+"can't make it to the gym",
+"won't make the party 12/3",
+"won't make the party next Tuesday",
+"won't make the party on Friday",
+"won't make the party today",
+"won't make the party today",
+"won't make the party tomorrow"
+],
+"search|{\"job\": \"work\", \"text\": \"can't\"}": [
+"I can't do the shift 12/3",
+"I can't do the shift 12/3",
+"I can't do the shift Monday",
+"I can't do the shift Monday to Wednesday",
+"I can't do the shift on Friday",
+"I can't do the shift this weekend",
+"I can't do the shift this weekend",
+"I'm sick, can't make it",
+"I'm sick, can't make it",
+"I'm sick, can't make it 12/3",
+"I'm sick, can't make it March 20",
+"I'm sick, can't make it next Tuesday",
+"I'm sick, can't make it next Tuesday",
+"I'm sick, can't make it next week",
+"I'm sick, can't make it on Friday",
+"I'm sick, can't make it this weekend",
+"Possibly can't come in March 20, will confirm",
+"Possibly can't come in Monday, will confirm",
+"Possibly can't come in on the 14th, will confirm",
+"Sorry I can't come in 12/3",
+"Sorry I can't come in next Tuesday",
+"Sorry I can't come in on Friday",
+"Sorry I can't come in this Thursday",
+"Sorry I can't come in this weekend",
+"Sorry I can't come in today"
+],
+"search|{\"text\": \"off\"}": [
+"Can I have 12/3 off?",
+"Can I have next Tuesday off?",
+"Can I have next week off?",
+"Can I have off?",
+"Can I have off?",
+"Can I have on Friday off?",
+"Can I have on Friday off?",
+"Can I have today off?",
+"Could I take next Tuesday off please",
+"Could I take off please",
+"Could I take this Thursday off please",
+"I might need March 20 off",
+"I might need Monday off",
+"I might need next Tuesday off",
+"I might need off",
+"I might need on Friday off",
+"I might need on Friday off",
+"I might need this weekend off",
+"I might need today off",
+"I might need today off",
+"I might need tomorrow off",
+"Would it be possible to have 12/3 off?",
+"Would it be possible to have 12/3 off?",
+"Would it be possible to have March 20 off?",
+"Would it be possible to have next week off?",
+"Would it be possible to have next week off?",
+"Would it be possible to have off?",
+"Would it be possible to have off?",
+"Would it be possible to have on the 14th off?",
+"Would it be possible to have on the 14th off?",
+"Would it be possible to have on the 14th off?",
+"Would it be possible to have on the 14th off?",
+"Would it be possible to have this weekend off?",
+"Would it be possible to have tomorrow off?",
+"Would it be possible to have tomorrow off?"
+]
+}

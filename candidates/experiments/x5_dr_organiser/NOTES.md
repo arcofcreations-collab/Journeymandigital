@@ -1,0 +1,1 @@
+- hidden_check.py corrected before any agent run: the preceding-message case used 'Sorry I can't', which the baseline never classifies as an absence (invalid check); now 'Sorry I can't make it'.
