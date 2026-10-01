@@ -1,0 +1,45 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs/dev/D14/baseline/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D14/test_D14.py",
+ "passed": 7,
+ "total": 7,
+ "seconds": 0.64,
+ "results": [
+  {
+   "test": "challenges.dev.D14.test_D14::test_clarification_file_written",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D14.test_D14::test_approve_does_not_pay",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D14.test_D14::test_finance_pay_still_required_and_emits_payment",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D14.test_D14::test_approved_claims_still_wait_for_finance",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D14.test_D14::test_pay_rules_unchanged",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D14.test_D14::test_ui_actions_unchanged",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D14.test_D14::test_full_lifecycle_unchanged",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

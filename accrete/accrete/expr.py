@@ -185,12 +185,24 @@ class Analysis:
         self.collections = set()  # entity names iterated as collections
         self.errors = []          # unresolved names
         self.unknown_attrs = set()  # attribute names read on values of unknown type
+        self.type = None            # inferred type of the whole expression
+
+
+def field_type(f):
+    """Static type of a value of field/param spec f (refs and lists of refs carry their entity)."""
+    if not f:
+        return None
+    if f.get("type") == "ref":
+        return ("entity", f.get("ref"))
+    if f.get("type") == "list" and f.get("of") == "ref":
+        return ("list", f.get("ref"))
+    return None
 
 
 def analyse(src: str, tenv: TypeEnv) -> Analysis:
     tree = parse(src)
     a = Analysis()
-    _infer(tree.body, tenv, dict(tenv.variables), a)
+    a.type = _infer(tree.body, tenv, dict(tenv.variables), a)
     return a
 
 
@@ -219,15 +231,12 @@ def _infer(node, tenv, scope, a):
                 a.errors.append(f"{base[1]} has no field {node.attr!r}")
                 return None
             a.reads.add((base[1], node.attr))
-            if f.get("type") == "ref":
-                return ("entity", f.get("ref"))
-            return None
+            return field_type(f)
         if base and base[0] == "params":
             if node.attr not in tenv.params:
                 a.errors.append(f"action has no parameter {node.attr!r}")
                 return None
-            p = tenv.params[node.attr]
-            return ("entity", p.get("ref")) if p.get("type") == "ref" else None
+            return field_type(tenv.params[node.attr])
         if base and base[0] == "list":
             a.errors.append(f"cannot read .{node.attr} of the collection {base[1]}")
             return None
@@ -312,12 +321,9 @@ class _Renamer(ast.NodeTransformer):
             if base and base[0] == "entity":
                 ent = self.tenv.entities.get(base[1])
                 if ent:
-                    f = ent["fields"].get(node.attr)
-                    if f and f.get("type") == "ref":
-                        return ("entity", f.get("ref"))
+                    return field_type(ent["fields"].get(node.attr))
             if base and base[0] == "params":
-                p = self.tenv.params.get(node.attr, {})
-                return ("entity", p.get("ref")) if p.get("type") == "ref" else None
+                return field_type(self.tenv.params.get(node.attr, {}))
             return None
         if isinstance(node, (ast.ListComp, ast.GeneratorExp, ast.SetComp)):
             inner = dict(scope)

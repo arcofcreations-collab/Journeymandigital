@@ -1,0 +1,24 @@
+{
+ "id": "D14",
+ "system": "baseline",
+ "app": "expenses",
+ "categories": [
+  "should_reject",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": true,
+ "hidden_passed": 7,
+ "hidden_total": 7,
+ "hidden_failures": [],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": true,
+ "success": true,
+ "accrete_version": null,
+ "t_start": 1790819154.8354993,
+ "t_end": 1790819166.7741764,
+ "self_timed_s": 11.9,
+ "duration_ms": 17257,
+ "tool_uses": 5,
+ "tokens": 48612
+}

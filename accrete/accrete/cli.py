@@ -123,11 +123,13 @@ def cmd_show(a):
         if a.entity and e["name"] != a.entity:
             continue
         n = len(R.records(world, e["id"]))
-        print(f"\n{e['name']}  ({n} records)")
+        disp = e["fields"].get(e.get("display") or "", {}).get("name")
+        print(f"\n{e['name']}  ({n} records)" + (f"  shown by {disp} where referenced" if disp else ""))
         for f in M.ordered_fields(e):
-            bits = [f["type"] + (f" {model['entities'][f['ref']]['name']}" if f["type"] == "ref" and f.get('ref') in model['entities'] else "")
-                    + (f" {'|'.join(f['values'])}" if f["type"] == "enum" else "")]
-            for k in ("required", "unique", "system"):
+            kind = f["type"] + (f" {f.get('of')}" if f["type"] == "list" else "")
+            bits = [kind + (f" {model['entities'][f['ref']]['name']}" if M.refers_to(f) and f.get('ref') in model['entities'] else "")
+                    + (f" {'|'.join(f['values'])}" if "enum" in kind else "")]
+            for k in ("required", "unique", "system", "distinct"):
                 if f.get(k):
                     bits.append(k)
             for k in ("default", "computed", "read_if", "write_if"):

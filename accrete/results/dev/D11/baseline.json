@@ -1,0 +1,27 @@
+{
+ "id": "D11",
+ "system": "baseline",
+ "app": "expenses",
+ "categories": [
+  "failure_atomicity",
+  "new_concept",
+  "new_relationship",
+  "interaction",
+  "sequence"
+ ],
+ "expect_rejection": false,
+ "hidden_passed": 11,
+ "hidden_total": 11,
+ "hidden_failures": [],
+ "base_checked": 47,
+ "regressions": [],
+ "clarification_written": false,
+ "success": true,
+ "accrete_version": null,
+ "t_start": 1790818933.8314097,
+ "t_end": 1790819173.0354412,
+ "self_timed_s": 239.2,
+ "duration_ms": 254751,
+ "tool_uses": 24,
+ "tokens": 112064
+}

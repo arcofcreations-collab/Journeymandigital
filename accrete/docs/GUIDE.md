@@ -39,6 +39,8 @@ consequences: [books.action:borrow]                    # only if the report asks
 `expect` entries: `as` (username), `do` ("METHOD /path?query"), optional `body`, `now`
 (ISO datetime, default: now), and checks `status`, `json` (subset match) and `count` (number of
 list items). Use `steps` for sequences; each expectation starts from the unchanged data.
+Expectations run through the same runtime that serves the application, so together with the
+replay they are the verification of a change; `accrete call` answers ad hoc questions.
 
 ## What the pipeline checks
 
@@ -63,10 +65,16 @@ list items). Use `steps` for sequences; each expectation starts from the unchang
 
 - Collections are entities, at `/api/<entity>`; records have an integer `id`.
 - **Rules** (expressions; default `True`): `read` (hidden from lists, 403 on direct access),
-  `create`, `update`, `delete` (403), `update_guard`, `delete_guard` (409). `record` is the
-  record (for `create`: the candidate with defaults applied) and `user` is the caller.
+  `create`, `update`, `delete` (403), `create_guard`, `update_guard`, `delete_guard` (409).
+  `record` is the record (for `create`/`create_guard`: the candidate with defaults applied) and
+  `user` is the caller. Order on create: `create` (403), `create_guard` (409), then input errors
+  and constraints (400); a list input with some invalid items still reaches `create_guard` with
+  its valid items, so "409 wins over 400" holds.
 - **Fields**:
-  - `type`: text | int | number | bool | date | datetime | enum (`values`) | ref (`ref`: entity).
+  - `type`: text | int | number | bool | date | datetime | enum (`values`) | ref (`ref`: entity)
+    | list (`of`: any of those element types; `ref`/`values` for its elements; `distinct: true`
+    rejects duplicates with 400; `required` means non-empty). A list of refs is a JSON array of
+    ids in the API and a list of records in expressions; `?field=id` filters by membership.
   - Flags:
     - `required` (400 if missing), `unique` (400);
     - `default` (expression, applied on create);
@@ -74,7 +82,10 @@ list items). Use `steps` for sequences; each expectation starts from the unchang
     - `system` (clients may not set it: 400; only defaults and actions set it);
     - `read_if` (field hidden from users when false);
     - `write_if` (setting it when false: 403).
-  - Shorthand: `"text required unique"`, `"ref members"`, `"enum a|b|c required"`.
+  - Shorthand: `"text required unique"`, `"ref members"`, `"enum a|b|c required"`,
+    `"list ref claims required distinct"`, `"list int"`.
+- **Display**: `display: <field>` on an entity (or `set_display`) shows that field instead of the
+  id wherever a record of it is referenced in the HTML UI (API values stay ids).
 - **Constraints**: expressions every record must satisfy (400 on create/update; 409 when an
   action would break them). With `existing: exempt`, current violators are exempt.
 - **Actions**: `POST /api/<entity>/<id>/<name>`. Checks run in this order:
@@ -92,8 +103,11 @@ list items). Use `steps` for sequences; each expectation starts from the unchang
   - `{delete: <records expr>}`;
   - `{emit: channel, payload: {k: expr}}` (outbox, `/api/_outbox`);
   - `{fail: "'message'", status: 409, when: expr}`;
-  - `{if: expr, then: [...], else: [...]}`.
+  - `{if: expr, then: [...], else: [...]}`;
+  - `{for: var, in: <records or list expr>, do: [...]}` runs the effects once per item, in order.
+- Action `params` take the same specs as fields, including lists: `params: {books: list ref books required distinct}`.
 - Deleting a record still referenced by another record gives 409 automatically.
+- `GET /api/_outbox?channel=x` filters messages like any list.
 - Error precedence: 401, 404, 403, 409, 400. Unknown or missing `X-User`: 401.
 
 ## Expression language (safe Python subset)
@@ -117,17 +131,18 @@ Text constants need quotes inside YAML strings: `"'draft'"`.
 ## Operator reference
 
 Entities:
-- `add_entity: {name, fields: {f: spec}, rules: {...}, constraints: {name: {expr, message, field}}, actions: {...}, triggers: {...}}`
+- `add_entity: {name, fields: {f: spec}, display: f, rules: {...}, constraints: {name: {expr, message, field}}, actions: {...}, triggers: {...}}`
 - `rename_entity: {from, to}`: renames every reference.
 - `remove_entity: {name}`: its data is kept in the ledger for undo.
 - `set_users: {entity, key}`: which records are users, and the field holding `X-User`.
+- `set_display: {entity, field}`: how its records are shown where referenced in the UI (`field: null` for ids).
 
 Fields:
 - `add_field: {entity, name, type, ..., backfill: expr}`: `backfill` fills existing records; without it, `default` is used.
 - `rename_field: {entity, from, to}`: every expression and effect is rewritten; data untouched.
 - `remove_field: {entity, name}`
 - `change_field: {entity, name, <any spec keys>, convert: expr, map: {old: new}}`: `convert` uses `value` and `record`; `map` renames enum values. Turning a computed field into a stored one materialises its current values.
-- `promote_field: {entity, field, to, key: name, fields: {...}}`: turns a text field into a reference to a new entity holding its distinct values.
+- `promote_field: {entity, field, to, key: name, fields: {...}, rules: {...}}`: turns a text field into a reference to a new entity holding its distinct values (ids in order of first appearance by record id); the UI keeps showing the text (display = key).
 
 Data:
 - `update_records: {entity, where: expr, set: {f: expr}}`
@@ -154,6 +169,10 @@ Behaviour:
 # rule change with existing-data policy
 - add_constraint: {entity: claims, name: receipt_over_75, expr: "record.amount <= 75 or record.receipt is not None",
                    message: "a receipt is required above 75", field: receipt, existing: exempt}
+# several records in one atomic operation (all or nothing), with a 409 rule that wins over 400
+- add_entity: {name: batches, fields: {items: list ref claims required distinct, total: {type: number, system: true, default: "sum(c.amount for c in record.claims)"}},
+               rules: {create: "user.role == 'finance'", create_guard: "all(c.status == 'approved' for c in record.items)"},
+               triggers: {pay: {on: create, effects: [{for: c, in: record.items, do: [{update: c, set: {status: "'paid'"}}, {emit: paid, payload: {claim: c}}]}]}}}
 # enum migration
 - change_field: {entity: claims, name: category, values: [travel, food, equipment, other], map: {meals: food}}
 ```

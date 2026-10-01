@@ -37,6 +37,7 @@ def _elements(model):
     out = {}
     for e in model["entities"].values():
         out[("entity", e["id"])] = e["name"]
+        out[("display", e["id"])] = json.dumps(e.get("display"))
         for f in e["fields"].values():
             out[("field", e["id"], f["id"])] = json.dumps(f, sort_keys=True)
         for r in M.RULES:
@@ -157,7 +158,7 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
         elif kind == "rule":
             eid, rule = k[1], k[2]
             n = ename(eid)
-            D.add(f"{n}.read" if rule == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete'}.get(rule, rule)}")
+            D.add(f"{n}.read" if rule == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete', 'create_guard': 'create'}.get(rule, rule)}")
             fp.reasons.append(f"rule {n}.{rule} changed")
         elif kind == "constraint":
             n = ename(k[1])
@@ -184,6 +185,8 @@ def compute_footprint(old_model, new_model, old_world, new_world, declared=()):
                 if t:
                     D.add(f"{n}.{t['on']}")
             fp.reasons.append(f"trigger on {n} changed")
+        elif kind == "display":
+            fp.reasons.append(f"how {ename(k[1])} records are shown in the UI changed (no API effect)")
         elif kind == "users":
             D.add("*.any")
             fp.reasons.append("the user directory changed")
@@ -249,7 +252,7 @@ def _close(mdl, fp, seeds_fields, seeds_colls):
                 else:
                     C.update({f"{n}.create", f"{n}.update"})
             elif kind == "rule":
-                C.add(f"{n}.read" if loc[2] == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete'}.get(loc[2], loc[2])}")
+                C.add(f"{n}.read" if loc[2] == "read" else f"{n}.{ {'update_guard': 'update', 'delete_guard': 'delete', 'create_guard': 'create'}.get(loc[2], loc[2])}")
             elif kind == "constraint":
                 C.update({f"{n}.create", f"{n}.update"})
             elif kind == "action":
@@ -523,17 +526,27 @@ def data_violations(model, world, now, limit=8):
 
 
 # ------------------------------------------------------------------ the pipeline
+def _yaml_keys(v):
+    """YAML 1.1 reads the keys `on:` / `off:` as booleans; in a change file they are always names."""
+    if isinstance(v, dict):
+        return {({True: "on", False: "off"}.get(k, k) if isinstance(k, bool) else k): _yaml_keys(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_yaml_keys(x) for x in v]
+    return v
+
+
 def load_change(path_or_doc):
     if isinstance(path_or_doc, dict):
-        return path_or_doc, None
+        return _yaml_keys(path_or_doc), None
     import yaml
     with open(path_or_doc) as fh:
-        return yaml.safe_load(fh), os.path.dirname(os.path.abspath(path_or_doc))
+        return _yaml_keys(yaml.safe_load(fh)), os.path.dirname(os.path.abspath(path_or_doc))
 
 
 def apply_change(directory, change, dry_run=False, extra_footprint=(), kind="change", base_dir=None, now=None):
     """Run the full pipeline. Returns the report dict (also stored in the ledger)."""
     t0 = time.perf_counter()
+    change = _yaml_keys(change)
     timings = {}
     store = Store(directory)
     model0, world0 = store.load()

@@ -11,9 +11,11 @@ model = {
 Entity = {
   "id", "name",
   "fields": {fid: {"id","name","type","required","unique","values","ref","default",
-                   "computed","system","read_if","write_if","label"}},
+                   "computed","system","read_if","write_if","label",
+                   "of","distinct"}},                # type "list": element type in "of"
+  "display": fid | None,                     # field that represents a record in the UI
   "order": [fid, ...],
-  "rules": {"read","create","update","delete","update_guard","delete_guard"},   # expressions
+  "rules": {"read","create","update","delete","create_guard","update_guard","delete_guard"},
   "guard_messages": {...},
   "constraints": {cid: {"id","name","expr","message","since"}},
   "actions": {aid: {"id","name","params":{pname:{type,required,ref,values}},
@@ -28,6 +30,7 @@ Effects (lists, executed in order):
   {"emit": channel, "payload": {key: expr}}
   {"fail": message_expr, "status": 400|403|409, "when": expr}
   {"if": expr, "then": [...], "else": [...]}
+  {"for": var, "in": expr_records_or_values, "do": [...]}
 """
 from __future__ import annotations
 
@@ -35,8 +38,9 @@ import copy
 
 from . import expr as E
 
-FIELD_TYPES = {"text", "int", "number", "bool", "date", "datetime", "enum", "ref"}
-RULES = ("read", "create", "update", "delete", "update_guard", "delete_guard")
+ELEMENT_TYPES = {"text", "int", "number", "bool", "date", "datetime", "enum", "ref"}
+FIELD_TYPES = ELEMENT_TYPES | {"list"}
+RULES = ("read", "create", "update", "delete", "create_guard", "update_guard", "delete_guard")
 EVENTS = ("create", "update", "delete")
 
 
@@ -85,6 +89,22 @@ def ordered_fields(ent):
     return [ent["fields"][fid] for fid in ent["order"] if fid in ent["fields"]]
 
 
+def element(f):
+    """The element type of a list field (or a list parameter), as a field-like dict."""
+    return {"id": f.get("id"), "name": f.get("name"), "type": f.get("of") or "text", "ref": f.get("ref"),
+            "values": f.get("values")}
+
+
+def is_reference(f):
+    """True for ref fields and lists of refs."""
+    return f.get("type") == "ref" or (f.get("type") == "list" and f.get("of") == "ref")
+
+
+def refers_to(f):
+    """Entity id a field (or a list field's elements) refers to, or None."""
+    return f.get("ref") if is_reference(f) else None
+
+
 def user_entity(model):
     if not model.get("users"):
         return None
@@ -97,7 +117,8 @@ def type_schema(model):
     for e in model["entities"].values():
         fields = {}
         for f in e["fields"].values():
-            fields[f["name"]] = {"type": f["type"], "ref": model["entities"][f["ref"]]["name"] if f.get("ref") in model["entities"] else f.get("ref")}
+            fields[f["name"]] = {"type": f["type"], "of": f.get("of"),
+                                 "ref": model["entities"][f["ref"]]["name"] if f.get("ref") in model["entities"] else f.get("ref")}
         out[e["name"]] = {"fields": fields}
     return out
 
@@ -146,16 +167,16 @@ def walk_expressions(model, fn):
                     r = fn(("action", e["id"], a["id"], key), e, a[key], kw)
                     if isinstance(r, str):
                         a[key] = r
-            _walk_effects(("action", e["id"], a["id"], "effects"), e, a["effects"], kw, {}, fn)
+            _walk_effects(model, ("action", e["id"], a["id"], "effects"), e, a["effects"], kw, {}, fn)
         for t in e["triggers"].values():
             if t.get("when") not in (None, ""):
                 r = fn(("trigger", e["id"], t["id"], "when"), e, t["when"], {})
                 if isinstance(r, str):
                     t["when"] = r
-            _walk_effects(("trigger", e["id"], t["id"], "effects"), e, t["effects"], {}, {}, fn)
+            _walk_effects(model, ("trigger", e["id"], t["id"], "effects"), e, t["effects"], {}, {}, fn)
 
 
-def _walk_effects(loc, ent, effects, kw, extra, fn):
+def _walk_effects(model, loc, ent, effects, kw, extra, fn):
     extra = dict(extra)
 
     def visit(where, holder, key, local_extra):
@@ -163,11 +184,21 @@ def _walk_effects(loc, ent, effects, kw, extra, fn):
         if isinstance(r, str):
             holder[key] = r
 
+    def element_type(src, local_extra):
+        """Type of one element of a records expression (for `it` and loop variables)."""
+        try:
+            t = E.analyse(src, tenv_for(model, ent, params=kw.get("params"), extra=local_extra)).type
+        except E.ExprError:
+            return None
+        if t and t[0] == "list":
+            return ("entity", t[1])
+        return t if t and t[0] == "entity" else None
+
     for i, eff in enumerate(effects or []):
         here = loc + (i,)
         if "update" in eff:
             visit(here + ("update",), eff, "update", extra)
-            target = None
+            target = element_type(eff["update"], extra)
             for fname in list(eff.get("set", {})):
                 visit(here + ("set", fname), eff["set"], fname, dict(extra, it=target))
         elif "set" in eff:
@@ -189,8 +220,12 @@ def _walk_effects(loc, ent, effects, kw, extra, fn):
                 visit(here + ("when",), eff, "when", extra)
         if "if" in eff:
             visit(here + ("if",), eff, "if", extra)
-            _walk_effects(here + ("then",), ent, eff.get("then"), kw, extra, fn)
-            _walk_effects(here + ("else",), ent, eff.get("else"), kw, extra, fn)
+            _walk_effects(model, here + ("then",), ent, eff.get("then"), kw, extra, fn)
+            _walk_effects(model, here + ("else",), ent, eff.get("else"), kw, extra, fn)
+        if "for" in eff:
+            visit(here + ("in",), eff, "in", extra)
+            _walk_effects(model, here + ("do",), ent, eff.get("do"), kw,
+                          dict(extra, **{eff["for"]: element_type(eff["in"], extra)}), fn)
 
 
 def expressions(model):
@@ -219,10 +254,16 @@ def check(model) -> list[str]:
             fnames.add(f["name"])
             if f["type"] not in FIELD_TYPES:
                 errors.append(f"{e['name']}.{f['name']}: unknown type {f['type']!r}")
-            if f["type"] == "ref" and f.get("ref") not in model["entities"]:
+            if is_reference(f) and f.get("ref") not in model["entities"]:
                 errors.append(f"{e['name']}.{f['name']}: refers to a missing entity")
+            if f["type"] == "list" and f.get("of") not in ELEMENT_TYPES:
+                errors.append(f"{e['name']}.{f['name']}: list of unknown element type {f.get('of')!r}")
+            if f["type"] == "list" and f.get("of") == "enum" and not f.get("values"):
+                errors.append(f"{e['name']}.{f['name']}: list of enum without values")
             if f["type"] == "enum" and not f.get("values"):
                 errors.append(f"{e['name']}.{f['name']}: enum without values")
+        if e.get("display") and e["display"] not in e["fields"]:
+            errors.append(f"{e['name']}: its display field no longer exists")
         for a in e["actions"].values():
             for p, spec in a["params"].items():
                 if spec.get("type") == "ref" and spec.get("ref") not in names and spec.get("ref") not in model["entities"]:

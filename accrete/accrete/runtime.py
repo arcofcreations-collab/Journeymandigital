@@ -49,8 +49,13 @@ def to_storage(f, v):
     if v is None:
         return None
     t = f["type"]
+    if t == "list":
+        if isinstance(v, (str, bytes, dict)) or not hasattr(v, "__iter__"):
+            v = [v]
+        el = M.element(f)
+        return [to_storage(el, x) for x in v]
     if isinstance(v, Rec):
-        return v.id if t in ("ref", "int") else v.id
+        return v.id
     if t == "date":
         return E._to_date(v).isoformat()
     if t == "datetime":
@@ -71,6 +76,10 @@ def from_storage(f, v, ctx):
     if v is None:
         return None
     t = f["type"]
+    if t == "list":
+        el = M.element(f)
+        out = [from_storage(el, x, ctx) for x in (v if isinstance(v, list) else [v])]
+        return [x for x in out if x is not None] if el["type"] == "ref" else out
     if t == "ref":
         target = ctx.model["entities"].get(f["ref"])
         if target is None or v not in records(ctx.world, f["ref"]):
@@ -100,10 +109,27 @@ def to_json(v):
 
 
 def parse_input(f, v, ctx):
-    """Validate a client-provided value for field f; returns (stored_value, error)."""
+    """Validate a client-provided value for field f; returns (stored_value, error).
+
+    For lists the returned value holds the valid elements even when there is an error, so that
+    guards (409) can still be evaluated before input errors (400) are reported."""
     if v is None:
         return None, None
     t = f["type"]
+    if t == "list":
+        if not isinstance(v, list):
+            return None, "must be a list"
+        el = M.element(f)
+        out, errs = [], []
+        for i, x in enumerate(v):
+            sv, err = parse_input(el, x, ctx) if x is not None else (None, "must not be null")
+            if err:
+                errs.append(f"item {i + 1} {err}")
+            else:
+                out.append(sv)
+        if not errs and f.get("distinct") and len(set(map(json.dumps, out))) != len(out):
+            errs.append("must not contain duplicates")
+        return out, ("; ".join(errs) or None)
     try:
         if t in ("text",):
             if not isinstance(v, str):
@@ -329,10 +355,19 @@ def validate_record(ctx, ent, rid, data, is_new):
         if f.get("computed"):
             continue
         v = data.get(f["id"])
-        if v is None:
+        if v is None or (f["type"] == "list" and f.get("required") and v == []):
             if f.get("required"):
                 errors[f["name"]] = "is required"
             continue
+        if f["type"] == "list":
+            el = M.element(f)
+            vals = v if isinstance(v, list) else [v]
+            if el["type"] == "enum" and any(x not in (el.get("values") or []) for x in vals):
+                errors[f["name"]] = f"items must be one of {', '.join(map(str, el['values']))}"
+            if el["type"] == "ref" and any(x not in records(ctx.world, el["ref"]) for x in vals):
+                errors[f["name"]] = "refers to a record that does not exist"
+            if f.get("distinct") and len(set(map(json.dumps, vals))) != len(vals):
+                errors[f["name"]] = "must not contain duplicates"
         if f["type"] == "enum" and v not in f.get("values", []):
             errors[f["name"]] = f"must be one of {', '.join(map(str, f['values']))}"
         if f["type"] == "ref" and v not in records(ctx.world, f["ref"]):
@@ -364,6 +399,13 @@ def run_effects(ctx, ent, rec, effects, env_extra):
         if "if" in eff:
             branch = eff.get("then") if ctx.test(eff["if"], False, record=rec, **env_extra) else eff.get("else")
             touched += run_effects(ctx, ent, rec, branch, env_extra)
+            continue
+        if "for" in eff:
+            items = ctx.eval(eff["in"], record=rec, **env_extra)
+            if isinstance(items, Rec):
+                items = [items]
+            for item in list(items or []):
+                touched += run_effects(ctx, ent, rec, eff.get("do"), dict(env_extra, **{eff["for"]: item}))
             continue
         if "fail" in eff:
             if eff.get("when") is None or ctx.test(eff["when"], False, record=rec, **env_extra):
@@ -418,13 +460,21 @@ def run_effects(ctx, ent, rec, effects, env_extra):
     return touched
 
 
-def apply_defaults(ctx, ent, data, provided):
+def apply_defaults(ctx, ent, data, provided, errors=None):
+    """Fill defaults. With ``errors`` (a dict), a default that cannot be computed from incomplete
+    input is reported there (and left empty) instead of raising."""
     cand = Rec(ctx, ent, None, override=data)
     for f in M.ordered_fields(ent):
         if f.get("computed") or f["id"] in provided:
             continue
         if f.get("default") not in (None, ""):
-            data[f["id"]] = to_storage(f, ctx.eval(f["default"], record=cand))
+            try:
+                data[f["id"]] = to_storage(f, ctx.eval(f["default"], record=cand))
+            except (E.ExprError, TypeError, AttributeError, ValueError) as exc:
+                if errors is None:
+                    raise
+                data[f["id"]] = None
+                errors[f["name"]] = f"cannot be computed from this input ({exc})"
         else:
             data.setdefault(f["id"], None)
 
@@ -481,6 +531,11 @@ def op_list(ctx, coll, query):
                 ok = False
                 break
             iv = item[k]
+            if isinstance(iv, list):
+                if v not in [json.dumps(x) if isinstance(x, bool) else str(x) for x in iv]:
+                    ok = False
+                    break
+                continue
             sval = json.dumps(iv) if isinstance(iv, bool) else ("" if iv is None else str(iv))
             if sval != v and not (iv is None and v in ("null", "")):
                 ok = False
@@ -526,6 +581,8 @@ def _check_input_fields(ctx, ent, body, rec_for_rules, errs403, errs400, creatin
         stored, err = parse_input(f, value, ctx)
         if err:
             errs400[name] = err
+            if f["type"] == "list" and stored is not None:
+                data[f["id"]] = stored  # valid items, so guards can still be evaluated
             continue
         data[f["id"]] = stored
     return data
@@ -534,18 +591,23 @@ def _check_input_fields(ctx, ent, body, rec_for_rules, errs403, errs400, creatin
 def op_create(ctx, coll, body):
     _require_user(ctx)
     ent = _entity_or_404(ctx, coll)
-    if not isinstance(body, dict):
-        halt(400, "the request body must be a JSON object")
     errs403, errs400 = {}, {}
+    if not isinstance(body, dict):
+        errs400["_body"] = "the request body must be a JSON object"
+        body = {}
     cand_data = {}
     cand = Rec(ctx, ent, None, override=cand_data)
     data = _check_input_fields(ctx, ent, body, cand, errs403, errs400, True)
     cand_data.update(data)
-    apply_defaults(ctx, ent, cand_data, provided=set(data))
+    default_errs = {}
+    apply_defaults(ctx, ent, cand_data, provided=set(data), errors=default_errs)
     if not _safe_test(ctx, ent["rules"].get("create"), True, record=cand, input=body):
         halt(403, f"you may not create {ent['name']}")
     if errs403:
         halt(403, "you may not set some fields", errs403)
+    if not _safe_test(ctx, ent["rules"].get("create_guard"), True, record=cand, input=body):
+        halt(409, ent.get("guard_messages", {}).get("create_guard") or f"{ent['name']} cannot be created now")
+    errs400 = dict(default_errs, **errs400)  # input errors explain failed defaults best
     if errs400:
         halt(400, "invalid input", errs400)
     rid = ctx.next_id(ent)
@@ -618,18 +680,20 @@ def parse_params(ctx, action, body):
         return {}, {"_": "the request body must be a JSON object"}
     for pname, spec in action["params"].items():
         v = body.get(pname)
-        if v is None or (spec.get("type") == "text" and isinstance(v, str) and spec.get("required") and not v.strip()):
+        if v is None or (spec.get("type") == "text" and isinstance(v, str) and spec.get("required") and not v.strip()) \
+                or (spec.get("type") == "list" and v == [] and spec.get("required")):
             if spec.get("required"):
                 errs[pname] = "is required"
             values[pname] = None
             continue
-        f = {"type": spec.get("type", "text"), "values": spec.get("values"), "ref": spec.get("ref")}
-        if f["type"] == "ref":
+        f = {"type": spec.get("type", "text"), "values": spec.get("values"), "ref": spec.get("ref"),
+             "of": spec.get("of"), "distinct": spec.get("distinct")}
+        if M.is_reference(f):
             f["ref"] = M.entity(ctx.model, spec["ref"])["id"]
         stored, err = parse_input(f, v, ctx)
         if err:
             errs[pname] = err
-            values[pname] = None
+            values[pname] = from_storage(f, stored, ctx) if f["type"] == "list" and stored is not None else None
             continue
         values[pname] = from_storage(f, stored, ctx)
     for k in body:
@@ -675,9 +739,12 @@ def op_action(ctx, coll, rid, name, body):
     return 200, serialize(ctx, ent, rid)
 
 
-def op_outbox(ctx):
+def op_outbox(ctx, query=None):
     _require_user(ctx)
-    return 200, {"items": copy.deepcopy(ctx.world["outbox"])}
+    items = copy.deepcopy(ctx.world["outbox"])
+    for k, v in (query or {}).items():  # same exact-match filtering as collections (e.g. ?channel=payment)
+        items = [m for m in items if k in m and str(m[k]) == v]
+    return 200, {"items": items}
 
 
 # ------------------------------------------------------------------ dispatcher

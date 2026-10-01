@@ -35,6 +35,32 @@ def _input(name, f, value=None):
     return f'<label>{esc(name)} <input type="{kind}" name="{esc(name)}" value="{esc(value)}"></label>'
 
 
+def shown(ctx, ent, name, value):
+    """Text for a field value in the UI: references are shown by the referenced entity's display
+    field (when it has one and the caller may read that record), lists item by item."""
+    try:
+        f = M.field(ent, name)
+    except M.ModelError:
+        return value
+    target_id = M.refers_to(f)
+    if target_id is None or value is None:
+        return ", ".join(str(x) for x in value) if isinstance(value, list) else value
+    target = ctx.model["entities"].get(target_id)
+
+    def one(rid):
+        if not target or not target.get("display") or rid not in R.records(ctx.world, target_id):
+            return rid
+        if not R.can_read(ctx, target, rid):
+            return rid
+        df = target["fields"].get(target["display"])
+        v = getattr(R.Rec(ctx, target, rid), df["name"]) if df else rid
+        return R.to_json(v)
+
+    if isinstance(value, list):
+        return ", ".join(str(one(x)) for x in value)
+    return one(value)
+
+
 def ui_list(ctx, coll):
     R._require_user(ctx)
     ent = R._entity_or_404(ctx, coll)
@@ -43,7 +69,7 @@ def ui_list(ctx, coll):
     head = "".join(f"<th>{esc(n)}</th>" for n in ["id"] + names)
     rows = []
     for item in body["items"]:
-        cells = "".join(f"<td>{esc(item.get(n))}</td>" for n in names)
+        cells = "".join(f"<td>{esc(shown(ctx, ent, n, item.get(n)))}</td>" for n in names)
         rows.append(f'<tr data-id="{item["id"]}"><td><a href="/ui/{esc(coll)}/{item["id"]}">{item["id"]}</a></td>{cells}</tr>')
     new = f'<p><a href="/ui/{esc(coll)}/new">New</a></p>'
     return 200, page(coll, f"{new}<table><tr>{head}</tr>{''.join(rows)}</table>", ctx)
@@ -54,7 +80,7 @@ def ui_detail(ctx, coll, rid):
     ent = M.entity(ctx.model, coll)
     rid = item["id"]
     rec = R.Rec(ctx, ent, rid)
-    fields = "".join(f'<tr><th>{esc(k)}</th><td data-field="{esc(k)}">{esc(v)}</td></tr>'
+    fields = "".join(f'<tr><th>{esc(k)}</th><td data-field="{esc(k)}">{esc(shown(ctx, ent, k, v))}</td></tr>'
                      for k, v in item.items() if k != "id")
     forms = []
     for a in ent["actions"].values():

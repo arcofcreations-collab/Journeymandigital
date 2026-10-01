@@ -39,14 +39,19 @@ class ChangeCtx:
 # ------------------------------------------------------------------ field specs
 def parse_field_spec(model, name, spec):
     """Accept {"type": ...} dicts or shorthand strings like 'text required unique', 'ref members',
-    'enum draft|submitted'."""
+    'enum draft|submitted', 'list ref claims distinct', 'list int'."""
     if isinstance(spec, str):
         toks = spec.split()
         d = {"type": toks[0]}
         rest = toks[1:]
-        if d["type"] == "ref":
+        if d["type"] == "list":
+            d["of"] = rest.pop(0) if rest else "text"
+            kind = d["of"]
+        else:
+            kind = d["type"]
+        if kind == "ref":
             d["ref"] = rest.pop(0)
-        elif d["type"] == "enum":
+        elif kind == "enum":
             d["values"] = rest.pop(0).split("|")
         for t in rest:
             d[t] = True
@@ -57,10 +62,17 @@ def parse_field_spec(model, name, spec):
          "default": _expr_or_none(spec.pop("default", None)), "computed": _expr_or_none(spec.pop("computed", None)),
          "system": bool(spec.pop("system", False)), "read_if": _expr_or_none(spec.pop("read_if", None)),
          "write_if": _expr_or_none(spec.pop("write_if", None)), "label": spec.pop("label", None)}
+    of, distinct = spec.pop("of", None), bool(spec.pop("distinct", False))
+    if f["type"] == "list":
+        f["of"], f["distinct"] = of or "text", distinct
+        if f["of"] not in M.ELEMENT_TYPES:
+            raise OpError(f"field {name}: a list cannot hold {f['of']!r}")
+    elif of is not None or distinct:
+        raise OpError(f"field {name}: `of` and `distinct` apply only to list fields")
     ref = spec.pop("ref", None)
-    if f["type"] == "ref":
+    if M.is_reference(f):
         if ref is None:
-            raise OpError(f"field {name}: ref fields need `ref: <entity>`")
+            raise OpError(f"field {name}: reference fields need `ref: <entity>`")
         f["ref"] = ref  # entity *name* until resolved
     if f["computed"]:
         f["required"] = False
@@ -79,7 +91,7 @@ def _expr_or_none(v):
 
 
 def _resolve_ref(model, f, pending_names=()):
-    if f["type"] == "ref" and f["ref"] not in model["entities"]:
+    if M.is_reference(f) and f["ref"] not in model["entities"]:
         try:
             f["ref"] = M.entity(model, f["ref"])["id"]
         except M.ModelError:
@@ -113,10 +125,11 @@ def _norm_effects(effects):
         for key in ("if", "when", "fail", "update", "delete"):
             if key in eff and not isinstance(eff[key], (list, dict)):
                 eff[key] = _expr_or_none(eff[key])
-        if "then" in eff:
-            eff["then"] = _norm_effects(eff["then"])
-        if "else" in eff:
-            eff["else"] = _norm_effects(eff["else"])
+        if "in" in eff and not isinstance(eff["in"], (list, dict)):
+            eff["in"] = _expr_or_none(eff["in"])
+        for key in ("then", "else", "do"):
+            if key in eff:
+                eff[key] = _norm_effects(eff[key])
         out.append(eff)
     return out
 
@@ -126,6 +139,8 @@ def _params(model, params):
     for pname, spec in (params or {}).items():
         f = parse_field_spec(model, pname, spec)
         out[pname] = {"type": f["type"], "required": f["required"], "values": f["values"], "ref": f["ref"]}
+        if f["type"] == "list":
+            out[pname].update(of=f["of"], distinct=f["distinct"])
     return out
 
 
@@ -141,6 +156,8 @@ def op_add_entity(cx, a):
         ent["order"].append(f["id"])
     for f in ent["fields"].values():
         _resolve_ref(m, f)
+    if a.get("display"):
+        ent["display"] = M.field(ent, a["display"])["id"]
     for rname, src in (a.get("rules") or {}).items():
         _set_rule(ent, rname, src)
     for cname, c in (a.get("constraints") or {}).items():
@@ -325,13 +342,13 @@ def op_change_field(cx, a):
         elif k == "ref":
             f["ref"] = v
             _resolve_ref(m, f)
-        elif k in ("type", "values", "label"):
+        elif k in ("type", "values", "label", "of"):
             f[k] = v
-        elif k in ("required", "unique", "system"):
+        elif k in ("required", "unique", "system", "distinct"):
             f[k] = bool(v)
         else:
             raise OpError(f"change_field: unknown key {k!r}")
-    if f["type"] == "ref" and f.get("ref") not in m["entities"]:
+    if M.is_reference(f) and f.get("ref") not in m["entities"]:
         _resolve_ref(m, f)
     before, absent = _stored_values(cx.world, ent, f["id"])
     converted = 0
@@ -737,15 +754,30 @@ def expand_promote_field(model, a):
                        "backfill": f"first({to}, {key}=record.{fname}) if record.{fname} is not None else None"}},
         {"remove_field": {"entity": ent, "name": fname}},
         {"rename_field": {"entity": ent, "from": tmp, "to": fname}},
+        # the UI showed the text; it keeps showing it (now through the reference)
+        {"set_display": {"entity": to, "field": key}},
     ]
 
 
 def op_add_records_distinct(cx, a):
     src = M.entity(cx.model, a["source"])
     f = M.field(src, a["field"])
-    values = sorted({d.get(f["id"]) for d in R.records(cx.world, src["id"]).values() if d.get(f["id"]) is not None},
-                    key=str)
+    values = []  # distinct values in order of first appearance (ascending record id): deterministic, data order
+    for rid in sorted(R.records(cx.world, src["id"])):
+        v = R.records(cx.world, src["id"])[rid].get(f["id"])
+        if v is not None and v not in values:
+            values.append(v)
     return op_add_records(cx, {"entity": a["entity"], "records": [{a["key"]: v} for v in values]})
+
+
+def op_set_display(cx, a):
+    """Choose the field that represents this entity's records wherever they are referenced in the UI
+    (`field: null` shows ids again)."""
+    ent = M.entity(cx.model, a["entity"])
+    old = ent.get("display")
+    ent["display"] = M.field(ent, a["field"])["id"] if a.get("field") else None
+    cx.notes.append(f"{ent['name']} records are shown by {a.get('field') or 'id'} when referenced in the UI")
+    return [{"set_display": {"entity": ent["name"], "field": ent["fields"][old]["name"] if old in ent["fields"] else None}}]
 
 
 MACROS = {"promote_field": expand_promote_field}
@@ -762,6 +794,7 @@ OPERATORS = {
     "change_action": op_change_action, "add_trigger": op_add_trigger, "remove_trigger": op_remove_trigger,
     "change_trigger": op_change_trigger, "restore_element": op_restore_element,
     "replace_element": op_replace_element, "set_users": op_set_users, "restore_users": op_restore_users,
+    "set_display": op_set_display,
 }
 
 
