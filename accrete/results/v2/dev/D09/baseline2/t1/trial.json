@@ -1,0 +1,17 @@
+{
+ "id": "D09",
+ "set": "dev",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "expenses",
+ "categories": [
+  "reversal",
+  "data_migration",
+  "sequence",
+  "permissions"
+ ],
+ "expect_rejection": false,
+ "version": "70314a4",
+ "attempts": [],
+ "extra": []
+}

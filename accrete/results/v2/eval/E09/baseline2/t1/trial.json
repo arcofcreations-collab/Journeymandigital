@@ -1,0 +1,17 @@
+{
+ "id": "E09",
+ "set": "eval",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "library",
+ "categories": [
+  "permissions",
+  "new_relationship",
+  "data_migration",
+  "conflict_or_ambiguity"
+ ],
+ "expect_rejection": false,
+ "version": "70314a4",
+ "attempts": [],
+ "extra": []
+}

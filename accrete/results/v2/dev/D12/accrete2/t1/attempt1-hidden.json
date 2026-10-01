@@ -1,0 +1,75 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D12/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D12/test_D12.py",
+ "passed": 13,
+ "total": 13,
+ "seconds": 0.46,
+ "results": [
+  {
+   "test": "challenges.dev.D12.test_D12::test_each_existing_claim_has_one_line_with_same_id",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_adding_line_updates_claim_total",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_claim_total_may_not_exceed_5000",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_line_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_only_owner_edits_lines",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_lines_only_editable_on_draft_claims",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_patch_and_delete_lines",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_patching_claim_amount_single_vs_multiple_lines",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_line_read_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_creating_claim_creates_first_line",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_payment_uses_total_of_lines",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_deleting_draft_claim_deletes_its_lines",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D12.test_D12::test_ui_lines",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

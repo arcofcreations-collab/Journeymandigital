@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D11/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D11/test_D11.py",
+ "passed": 11,
+ "total": 11,
+ "seconds": 0.66,
+ "results": [
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_pays_claims_and_emits_messages_in_order",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_records_pay_events",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_with_non_approved_claim_leaves_no_trace",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_over_total_cap_leaves_no_trace",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_run_validation_leaves_no_trace",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_conflict_wins_over_validation",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_only_finance_creates_and_reads_runs",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_runs_are_immutable",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_claims_paid_by_run_cannot_be_paid_again",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_individual_pay_unchanged_and_payment_run_null",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D11.test_D11::test_payment_run_field_is_protected",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

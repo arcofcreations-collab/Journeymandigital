@@ -1,0 +1,65 @@
+{
+ "instance": "/tmp/claude-0/-home-user-Journeymandigital/d6243dbf-52d7-59df-a403-d35a058b8748/scratchpad/runs2/dev/D03/accrete2/t1/app",
+ "tests": "/home/user/Journeymandigital/accrete/challenges/dev/D03/test_D03.py",
+ "passed": 11,
+ "total": 11,
+ "seconds": 0.44,
+ "results": [
+  {
+   "test": "challenges.dev.D03.test_D03::test_member_renews_own_loan",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_renewal_counts_from_due_date_and_is_limited_to_two",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_renew_on_due_date_allowed_but_not_after",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_overdue_and_returned_loans_cannot_be_renewed",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_renew_permissions",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_waiting_hold_blocks_renewal",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_renewal_does_not_disturb_holds_queue",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_renewed_loan_overdue_follows_new_due_date",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_existing_and_new_loans_start_with_zero_renewals",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_loans_still_not_directly_writable",
+   "passed": true,
+   "message": ""
+  },
+  {
+   "test": "challenges.dev.D03.test_D03::test_ui_renew_form",
+   "passed": true,
+   "message": ""
+  }
+ ],
+ "pytest_tail": ""
+}

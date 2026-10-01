@@ -1,0 +1,17 @@
+{
+ "id": "E01",
+ "set": "eval",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "maintenance",
+ "categories": [
+  "new_concept",
+  "new_relationship",
+  "failure_atomicity",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "version": "70314a4",
+ "attempts": [],
+ "extra": []
+}

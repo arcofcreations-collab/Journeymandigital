@@ -11,6 +11,28 @@
  ],
  "expect_rejection": false,
  "version": "fe1610b+dirty",
- "attempts": [],
- "extra": []
+ "attempts": [
+  {
+   "attempt": 1,
+   "duration_ms": 160327,
+   "tool_uses": 20,
+   "tokens": 98719,
+   "hidden_passed": 11,
+   "hidden_total": 11,
+   "hidden_failures": [],
+   "regressions": [],
+   "clarification_written": false,
+   "success": true,
+   "t_start": 1790840395.17554,
+   "t_end": 1790840541.255665,
+   "verify_s": 2.5
+  }
+ ],
+ "extra": [],
+ "finished": true,
+ "correct": true,
+ "correct_at_attempt": 1,
+ "cost_s": 162.8,
+ "tokens": 98719,
+ "tool_uses": 20
 }

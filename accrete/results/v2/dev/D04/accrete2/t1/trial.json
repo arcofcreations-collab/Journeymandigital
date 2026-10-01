@@ -1,0 +1,18 @@
+{
+ "id": "D04",
+ "set": "dev",
+ "system": "accrete2",
+ "trial": 1,
+ "app": "library",
+ "categories": [
+  "rule_change",
+  "sequence",
+  "interaction",
+  "data_migration",
+  "cross_cutting"
+ ],
+ "expect_rejection": false,
+ "version": "70314a4",
+ "attempts": [],
+ "extra": []
+}

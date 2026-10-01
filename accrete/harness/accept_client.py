@@ -13,6 +13,7 @@ Defaults: user=None (no X-User header), now="2026-03-01T12:00:00".
 import importlib.util
 import io
 import json
+import atexit
 import os
 import shutil
 import sys
@@ -90,7 +91,9 @@ class App:
 def fresh_app(target=None):
     """Copy the application instance to a temporary directory and load it."""
     src = os.path.abspath(target or os.environ["ACCEPT_TARGET"])
-    work = os.path.join(tempfile.mkdtemp(prefix="accept-"), "app")
+    base = tempfile.mkdtemp(prefix="accept-")
+    atexit.register(shutil.rmtree, base, True)  # v2 hygiene: thousands of copies filled the disk
+    work = os.path.join(base, "app")
     shutil.copytree(src, work, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
     spec = importlib.util.spec_from_file_location(f"app_entry_{uuid.uuid4().hex}", os.path.join(work, "app_entry.py"))
     mod = importlib.util.module_from_spec(spec)

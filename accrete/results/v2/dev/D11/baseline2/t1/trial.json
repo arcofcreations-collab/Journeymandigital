@@ -1,0 +1,18 @@
+{
+ "id": "D11",
+ "set": "dev",
+ "system": "baseline2",
+ "trial": 1,
+ "app": "expenses",
+ "categories": [
+  "failure_atomicity",
+  "new_concept",
+  "new_relationship",
+  "interaction",
+  "sequence"
+ ],
+ "expect_rejection": false,
+ "version": "70314a4",
+ "attempts": [],
+ "extra": []
+}
